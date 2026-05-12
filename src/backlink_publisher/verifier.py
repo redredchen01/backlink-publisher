@@ -543,17 +543,55 @@ class _ArticleScopedCollector(HTMLParser):
     """Collect visible text + href set inside the article container.
 
     Always captures structural title candidates regardless of container:
-    ``<title>`` text, ``<h1>`` text, and ``<meta property="og:title">``.
-    Inside the article container (``<article>``, ``<main>``, or Medium's
-    ``<section data-field="body">``), collects visible text and every
-    ``<a href>`` value. Outside the container, anchors and visible text are
-    ignored — this is what defends against title-in-sidebar and
-    href-in-JSON-blob false positives.
+    ``<title>`` text, ``<h1>`` text (first-wins), and
+    ``<meta property="og:title">`` (first-wins). These three title-candidate
+    channels remain globally captured (not article-scoped) — an attacker
+    controlling the response body can still place a matching title there.
+    The article-scope partition only meaningfully scopes visible text and
+    anchor capture; the primary defense is the link check (every expected
+    href must appear in ``article_hrefs``).
+
+    Scope semantics (outermost-only with inner-depth counter):
+
+    * **First-enter wins.** The first container tag encountered (``<article>``,
+      ``<main>``, ``<section data-field="body">``, or ``<div class="post-body">``)
+      sets ``_outermost_container`` to its tag NAME. Subsequent container
+      opens of a DIFFERENT tag name are ignored (they are treated as normal
+      inside-scope content — anchors and visible text are captured).
+    * **Inner-depth counter (attribute-independent).** Once inside scope,
+      every open whose tag NAME equals ``_outermost_container`` increments
+      ``_inner_depth`` regardless of attributes. This is critical so a
+      generic ``<div>`` inside an outermost ``<div class="post-body">``
+      correctly increments and the inner ``</div>`` does not prematurely
+      pop the outer scope. The check is plain tag-name equality, NOT
+      ``_is_article_container`` (which only runs on the entry path).
+    * **Closed-once flag.** When the outermost close fires (and brings
+      ``_inner_depth`` to zero), ``_outermost_closed_once`` is set to True.
+      Subsequent container opens of any kind are refused — single-article
+      semantics is enforced by the parser independently of upstream URL
+      allowlists. This defends against ``<article>A</article><article>B</article>``
+      union-collection attacks.
+    * **EOF hard-reject.** If parser EOF arrives with
+      ``_outermost_container is not None`` (outermost close never fired),
+      ``close()`` sets ``_eof_fallback_fired = True`` and discards
+      ``article_hrefs`` and ``h1_text``. ``_parse_and_match_html`` reads
+      the flag and returns ``"article_container_unclosed"`` before any
+      title/href check — truncated input is a deterministic verification
+      failure, not a best-effort fallback.
+
+    Rationale: see
+    ``docs/plans/2026-05-12-006-fix-article-scoped-collector-stack-desync-plan.md``
+    for the design discussion and Choice Validation table. Do NOT change
+    this to a depth-counter without revisiting that document — depth-counter
+    is rejected on adversarial-input grounds.
     """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self._article_tag_stack: list[str] = []
+        self._outermost_container: str | None = None
+        self._inner_depth: int = 0
+        self._outermost_closed_once: bool = False
+        self._eof_fallback_fired: bool = False
         self._skip_depth = 0
         self._in_title = False
         self._in_h1 = False
@@ -567,7 +605,7 @@ class _ArticleScopedCollector(HTMLParser):
 
     @property
     def _in_article(self) -> bool:
-        return bool(self._article_tag_stack)
+        return self._outermost_container is not None
 
     @staticmethod
     def _is_article_container(tag: str, attrs_dict: dict[str, str]) -> bool:
@@ -591,9 +629,22 @@ class _ArticleScopedCollector(HTMLParser):
         if self._skip_depth > 0:
             return
 
-        if self._is_article_container(tag, attrs_dict):
-            self._article_tag_stack.append(tag)
+        # Container-scope state machine.
+        if self._outermost_container is None:
+            # Outside scope. Refuse re-entry if first article already closed.
+            if not self._outermost_closed_once:
+                if self._is_article_container(tag, attrs_dict):
+                    self._outermost_container = tag
+                    self._inner_depth = 0
+        elif tag == self._outermost_container:
+            # Inside scope; same tag-name nested open. Increment depth on
+            # tag-name equality alone (NOT _is_article_container), so generic
+            # <div> inside an outermost <div class="post-body"> counts and
+            # the inner </div> doesn't prematurely pop the outer scope.
+            self._inner_depth += 1
 
+        # Always-on title-candidate capture (intentionally global; see
+        # class docstring for the adversarial-defense framing).
         if tag == "title":
             self._in_title = True
         elif tag == "h1" and not self._h1_done:
@@ -623,8 +674,15 @@ class _ArticleScopedCollector(HTMLParser):
             self._in_h1 = False
             self._h1_done = True
 
-        if self._article_tag_stack and self._article_tag_stack[-1] == tag:
-            self._article_tag_stack.pop()
+        # Container close: match by tag name against _outermost_container.
+        # Inner-depth counter decrements until zero, then the scope closes
+        # and _outermost_closed_once is set to refuse re-entry.
+        if self._outermost_container is not None and tag == self._outermost_container:
+            if self._inner_depth > 0:
+                self._inner_depth -= 1
+            else:
+                self._outermost_container = None
+                self._outermost_closed_once = True
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth > 0:
@@ -635,6 +693,21 @@ class _ArticleScopedCollector(HTMLParser):
             self.h1_text += data
         if self._in_article:
             self.visible_text_chunks.append(data)
+
+    def close(self) -> None:
+        super().close()
+        # EOF hard-reject: if the outermost scope never closed cleanly,
+        # discard inside-scope captures. _parse_and_match_html short-circuits
+        # on _eof_fallback_fired and returns "article_container_unclosed".
+        if self._outermost_container is not None:
+            self._eof_fallback_fired = True
+            self.article_hrefs.clear()
+            self.h1_text = ""
+            # visible_text_chunks intentionally NOT cleared — it is consumed
+            # only after the _eof_fallback_fired short-circuit fires, so its
+            # state is moot. <title> and og:title captured strictly in
+            # <head> before any container open are also preserved (likewise
+            # moot post-short-circuit).
 
 
 def _parse_and_match_html(
@@ -649,7 +722,11 @@ def _parse_and_match_html(
     inside the article container.
 
     Returns ``None`` on success, or a reason string on the first failure
-    (``title_missing`` or ``target_link_missing: <url>``).
+    (``article_container_unclosed``, ``title_missing``, or
+    ``target_link_missing: <url>``). ``article_container_unclosed`` is
+    returned when the parser reached EOF with an unclosed article container,
+    indicating a truncated body — captured state is untrusted and the check
+    short-circuits before consulting title/href candidates.
     """
     collector = _ArticleScopedCollector()
     try:
@@ -659,6 +736,12 @@ def _parse_and_match_html(
         # html.parser is lenient; only catastrophic parser failures land here.
         # Treat as title/link missing rather than re-raising.
         pass
+
+    # First check: EOF hard-reject for truncated outermost scope. Runs BEFORE
+    # any title/href validation so stale captures from an unclosed scope
+    # cannot satisfy substring checks.
+    if collector._eof_fallback_fired:
+        return "article_container_unclosed"
 
     if expected_title:
         expected_lower = expected_title.lower()
