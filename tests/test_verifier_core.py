@@ -8,6 +8,8 @@ Channel-specific verifiers are stubs returning not_implemented outcomes.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from backlink_publisher.adapters.base import AdapterResult
@@ -187,26 +189,31 @@ def test_failed_status_skips_without_reason():
     assert out.verification_error is None
 
 
-def test_published_dispatches_to_html_channel_stub():
-    """published+real → channel handler fires.
+def test_published_dispatches_to_html_channel():
+    """published+real → HTML channel handler fires.
 
-    HTML channel is the only stub still in this state (Unit 2 lands later).
-    Blogger-api channel now has a real implementation post-Unit 3.
+    Patched at the dispatch boundary so this stays a pure routing test —
+    HTML-channel internals are covered in test_verifier_html_channel.py.
     """
-    out = verify_published({"links": []}, _result("published", adapter="medium-api"))
-    assert out.verified is None
-    assert out.verification_error == "not_implemented"
+    sentinel = VerificationOutcome(verified=True, verified_at="t", verification_error=None)
+    with patch("backlink_publisher.verifier._verify_html_channel", return_value=sentinel) as m:
+        out = verify_published({"links": []}, _result("published", adapter="medium-api"))
+    assert out is sentinel
+    m.assert_called_once()
 
 
 def test_dispatches_html_channel_for_medium_adapter():
-    """All medium-* adapters route to the html channel stub."""
+    """All medium-* adapters route to the html channel handler."""
+    sentinel = VerificationOutcome(verified=True, verified_at="t", verification_error=None)
     for adapter_name in ("medium-api", "medium-browser", "medium-brave"):
         result = AdapterResult(
             status="published", adapter=adapter_name, platform="medium",
             published_url="https://medium.com/@u/slug",
         )
-        out = verify_published({"links": []}, result)
-        assert out.verification_error == "not_implemented"
+        with patch("backlink_publisher.verifier._verify_html_channel", return_value=sentinel) as m:
+            out = verify_published({"links": []}, result)
+        assert out is sentinel, f"{adapter_name} did not dispatch to html channel"
+        m.assert_called_once()
 
 
 def test_unknown_adapter_raises_through_for_dispatcher_to_handle():
@@ -221,11 +228,12 @@ def test_unknown_adapter_raises_through_for_dispatcher_to_handle():
 
 def test_verify_published_signature_keyword_only_service():
     """Calling verify_published without service= must work (HTML adapters)."""
-    # Should not raise — the html stub returns not_implemented.
-    out = verify_published({"links": []}, AdapterResult(
-        status="published", adapter="medium-api", platform="medium",
-        published_url="https://medium.com/x"))
-    assert out.verification_error == "not_implemented"
+    sentinel = VerificationOutcome(verified=True, verified_at="t", verification_error=None)
+    with patch("backlink_publisher.verifier._verify_html_channel", return_value=sentinel):
+        out = verify_published({"links": []}, AdapterResult(
+            status="published", adapter="medium-api", platform="medium",
+            published_url="https://medium.com/x"))
+    assert out is sentinel
 
 
 def test_module_importable_without_side_effects():

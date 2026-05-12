@@ -17,10 +17,18 @@ Brainstorm: docs/brainstorms/2026-05-12-real-publish-verification-requirements.m
 
 from __future__ import annotations
 
+import ipaddress
+import re
+import socket
+import ssl
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from typing import Any, Callable
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from .adapters.base import AdapterResult
 
@@ -53,6 +61,35 @@ _MAX_FETCH_WALL_CLOCK_S = 15
 
 # Maximum redirect hops the HTML channel will follow.
 _MAX_REDIRECT_HOPS = 5
+
+# Per-socket timeout for HTML-channel fetches. The wall-clock budget above
+# is a separate, additive guard enforced inside the chunked-read loop.
+_HTML_REQUEST_TIMEOUT_S = 10
+
+# Read chunk size for bounded body reads.
+_READ_CHUNK_SIZE = 16_384
+
+# User-Agent header for HTML-channel fetches.
+_USER_AGENT = "backlink-publisher/0.2 verifier"
+
+# Cloud-metadata IPv4/IPv6 addresses that fall outside Python's
+# is_private/is_link_local/is_reserved detection on some platforms.
+# (169.254.169.254 IS link_local for AWS/GCP IPv4, but Azure's WireServer
+# at 168.63.129.16 is a routable address that must be explicitly rejected.)
+_PRIVATE_METADATA_IPS = frozenset({
+    "169.254.169.254",
+    "168.63.129.16",
+    "fd00:ec2::254",
+    "fe80:a9fe:a9fe::fe",
+})
+
+# Article-container detection. The HTML-channel parser scopes visible-text
+# title-matching and <a href> collection to inside these elements, defending
+# against title-in-sidebar and href-in-JSON-blob false positives.
+_ARTICLE_CONTAINER_TAGS = frozenset({"article", "main"})
+
+# Tags whose text content is never user-visible — skipped during parsing.
+_SKIP_TAGS = frozenset({"script", "style", "noscript", "template"})
 
 # Centralized per-adapter verification metadata. With only two platforms in
 # scope, scattering declarations across adapter modules is premature
@@ -194,15 +231,523 @@ def verify_published(
 # --- Channel implementations (stubs land in Unit 1; real logic in Units 2, 3) ---
 
 
+# --- HTML channel helpers (Unit 2) ---
+
+
+def _safe_for_log(s: str | None, *, max_len: int = 256) -> str:
+    """Strip control characters and cap length for safe inclusion in log strings.
+
+    Defends against log injection where adapter-supplied or response-derived
+    strings (published_url, verification_error, host names) might contain
+    CR/LF or terminal control sequences that corrupt downstream log parsing.
+    """
+    if not s:
+        return ""
+    out = "".join(c for c in s if c.isprintable() and c not in ("\r", "\n", "\t"))
+    if len(out) > max_len:
+        out = out[: max_len - 3] + "..."
+    return out
+
+
+def _strict_ssl_context() -> ssl.SSLContext:
+    """Strict TLS context with hostname + certificate verification.
+
+    Deliberately NOT inheriting linkcheck.py's lax context: the verifier's
+    whole purpose is to assert reality, so an on-path attacker satisfying a
+    permissive context would defeat the defense entirely.
+    """
+    return ssl.create_default_context()
+
+
+def _normalize_host(host: str | None) -> str | None:
+    """Lowercase, strip trailing dot, IDNA-encode-check.
+
+    Returns None for invalid hosts (empty, non-IDNA-encodable, etc.).
+    """
+    if not host:
+        return None
+    host = host.lower().rstrip(".")
+    if not host:
+        return None
+    try:
+        host.encode("idna").decode("ascii")
+    except (UnicodeError, UnicodeDecodeError):
+        return None
+    return host
+
+
+def _check_host_allowed(host: str, allowlist: tuple[str, ...]) -> bool:
+    """Match a normalized host against a wildcard allowlist.
+
+    Wildcard semantics: `*.medium.com` matches `medium.com` exactly OR any
+    subdomain (one or more non-empty labels before the base). The label-count
+    check defends against tricks like ``attacker.medium.com.evil.com`` and
+    ``evilmedium.com``.
+    """
+    for pattern in allowlist:
+        if pattern.startswith("*."):
+            base = pattern[2:]
+            if host == base:
+                return True
+            suffix = "." + base
+            if host.endswith(suffix):
+                prefix = host[: -len(suffix)]
+                if prefix and not prefix.startswith("."):
+                    return True
+        else:
+            if host == pattern:
+                return True
+    return False
+
+
+def _check_resolved_ip_safe(host: str) -> tuple[bool, str | None]:
+    """Resolve `host` to A/AAAA addresses; reject any unsafe address.
+
+    Returns ``(True, None)`` if every resolved address is a routable public
+    IP. Returns ``(False, reason)`` on the first unsafe address. The reason
+    starts with ``dns_failure:`` when name resolution itself failed (the
+    caller treats that as transient, not as a definitive private-IP rejection).
+    """
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        return False, f"dns_failure: {_safe_for_log(exc.strerror or 'unknown', max_len=64)}"
+    except OSError as exc:
+        return False, f"dns_failure: {_safe_for_log(str(exc), max_len=64)}"
+
+    for info in infos:
+        addr = info[4][0]
+        if "%" in addr:
+            addr = addr.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return False, f"host_resolved_to_private_ip: {addr}"
+        if addr in _PRIVATE_METADATA_IPS:
+            return False, f"host_resolved_to_private_ip: {addr}"
+    return True, None
+
+
+def _check_path_shape(path: str, patterns: tuple[str, ...]) -> bool:
+    """Check that `path` matches at least one of the allowed regex patterns.
+
+    Empty patterns tuple → no constraint (returns True). Used as the final-URL
+    path-shape allowlist (e.g. rejects ``medium.com/`` and ``medium.com/tag/foo``
+    after redirect to confirm we're on an article page, not a homepage).
+    """
+    if not patterns:
+        return True
+    return any(re.search(p, path) for p in patterns)
+
+
+class _RedirectRejected(Exception):
+    """Raised by the redirect handler when a redirect target is unsafe."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
+
+
+class _BodyTooLarge(Exception):
+    """Raised when the response body exceeds _MAX_BODY_BYTES."""
+
+
+class _WallClockExceeded(Exception):
+    """Raised when reading the body exceeds _MAX_FETCH_WALL_CLOCK_S."""
+
+
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    """Counts redirect hops and re-validates host allowlist + SSRF per hop.
+
+    Per-hop SSRF defense addresses DNS rebinding: an initial allowlisted host
+    may resolve to a public IP, then a 301 redirect's target host may
+    resolve to a private IP. We re-check on every hop.
+    """
+
+    def __init__(self, allowed_hosts: tuple[str, ...]) -> None:
+        super().__init__()
+        self._allowed_hosts = allowed_hosts
+        self.hop_count = 0
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        self.hop_count += 1
+        if self.hop_count > _MAX_REDIRECT_HOPS:
+            raise _RedirectRejected("redirect_cap_exceeded")
+        parsed = urlparse(newurl)
+        if parsed.scheme not in ("http", "https"):
+            raise _RedirectRejected(
+                f"host_not_allowed: <invalid_scheme:{_safe_for_log(parsed.scheme, max_len=16)}>"
+            )
+        new_host = _normalize_host(parsed.hostname)
+        if not new_host:
+            raise _RedirectRejected("host_not_allowed: <unparseable>")
+        if not _check_host_allowed(new_host, self._allowed_hosts):
+            raise _RedirectRejected(f"host_not_allowed: {_safe_for_log(new_host)}")
+        safe, ip_err = _check_resolved_ip_safe(new_host)
+        if not safe and ip_err and not ip_err.startswith("dns_failure:"):
+            raise _RedirectRejected(ip_err)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _read_body_bounded(resp: Any) -> bytes:
+    """Read a response body up to _MAX_BODY_BYTES with a wall-clock budget.
+
+    Defends against slow-drip DoS where a malicious server feeds bytes just
+    under the per-socket timeout to stall the verifier indefinitely while
+    staying under the size cap.
+    """
+    deadline = time.monotonic() + _MAX_FETCH_WALL_CLOCK_S
+    buf = bytearray()
+    while len(buf) < _MAX_BODY_BYTES:
+        if time.monotonic() > deadline:
+            raise _WallClockExceeded()
+        remaining = _MAX_BODY_BYTES - len(buf)
+        chunk = resp.read(min(_READ_CHUNK_SIZE, remaining))
+        if not chunk:
+            return bytes(buf)
+        buf.extend(chunk)
+    # Hit the cap. Probe one more byte to decide whether the body was
+    # exactly at the cap (rare) or over.
+    try:
+        extra = resp.read(1)
+    except Exception:
+        extra = b""
+    if extra:
+        raise _BodyTooLarge()
+    return bytes(buf)
+
+
+def _fetch_html_once(url: str, allowed_hosts: tuple[str, ...]) -> tuple[int, bytes, str]:
+    """Single-attempt HTML fetch.
+
+    Returns ``(status, body, final_url)``. Raises ``_RedirectRejected``,
+    ``_BodyTooLarge``, ``_WallClockExceeded``, ``HTTPError``, ``URLError``,
+    or other transport-level exceptions for the caller to map.
+    """
+    redirect = _SafeRedirectHandler(allowed_hosts)
+    https = HTTPSHandler(context=_strict_ssl_context())
+    opener = build_opener(https, redirect)
+    opener.addheaders = [("User-Agent", _USER_AGENT)]
+
+    req = Request(url, method="GET")
+    resp = opener.open(req, timeout=_HTML_REQUEST_TIMEOUT_S)
+    try:
+        status = resp.getcode() or 0
+        final_url = resp.geturl() or url
+        body = _read_body_bounded(resp)
+    finally:
+        try:
+            resp.close()
+        except Exception:
+            pass
+    return status, body, final_url
+
+
+class _ArticleScopedCollector(HTMLParser):
+    """Collect visible text + href set inside the article container.
+
+    Always captures structural title candidates regardless of container:
+    ``<title>`` text, ``<h1>`` text, and ``<meta property="og:title">``.
+    Inside the article container (``<article>``, ``<main>``, or Medium's
+    ``<section data-field="body">``), collects visible text and every
+    ``<a href>`` value. Outside the container, anchors and visible text are
+    ignored — this is what defends against title-in-sidebar and
+    href-in-JSON-blob false positives.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._article_tag_stack: list[str] = []
+        self._skip_depth = 0
+        self._in_title = False
+        self._in_h1 = False
+        self._h1_done = False
+
+        self.visible_text_chunks: list[str] = []
+        self.article_hrefs: set[str] = set()
+        self.title_text: str = ""
+        self.h1_text: str = ""
+        self.og_title: str = ""
+
+    @property
+    def _in_article(self) -> bool:
+        return bool(self._article_tag_stack)
+
+    @staticmethod
+    def _is_article_container(tag: str, attrs_dict: dict[str, str]) -> bool:
+        if tag in _ARTICLE_CONTAINER_TAGS:
+            return True
+        if tag == "section" and attrs_dict.get("data-field") == "body":
+            return True
+        if tag == "div":
+            classes = (attrs_dict.get("class") or "").split()
+            if "post-body" in classes:
+                return True
+        return False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attrs_dict = {k.lower(): (v or "") for k, v in attrs if k}
+
+        if tag in _SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if self._skip_depth > 0:
+            return
+
+        if self._is_article_container(tag, attrs_dict):
+            self._article_tag_stack.append(tag)
+
+        if tag == "title":
+            self._in_title = True
+        elif tag == "h1" and not self._h1_done:
+            self._in_h1 = True
+        elif tag == "meta":
+            prop = (attrs_dict.get("property") or attrs_dict.get("name") or "").lower()
+            if prop == "og:title" and not self.og_title:
+                self.og_title = attrs_dict.get("content") or ""
+
+        if self._in_article and tag == "a":
+            href = attrs_dict.get("href")
+            if href:
+                self.article_hrefs.add(href)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in _SKIP_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth > 0:
+            return
+
+        if tag == "title":
+            self._in_title = False
+        elif tag == "h1" and self._in_h1:
+            self._in_h1 = False
+            self._h1_done = True
+
+        if self._article_tag_stack and self._article_tag_stack[-1] == tag:
+            self._article_tag_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth > 0:
+            return
+        if self._in_title:
+            self.title_text += data
+        if self._in_h1:
+            self.h1_text += data
+        if self._in_article:
+            self.visible_text_chunks.append(data)
+
+
+def _parse_and_match_html(
+    body: str, expected_title: str, expected_hrefs: list[str]
+) -> str | None:
+    """Parse HTML body scoped to article container; return error reason or None.
+
+    Title match: case-insensitive substring against ``<title>`` / ``<h1>`` /
+    ``og:title`` / visible text inside the article container.
+
+    Link match: every expected href must appear in the ``<a href>`` set
+    inside the article container.
+
+    Returns ``None`` on success, or a reason string on the first failure
+    (``title_missing`` or ``target_link_missing: <url>``).
+    """
+    collector = _ArticleScopedCollector()
+    try:
+        collector.feed(body)
+        collector.close()
+    except Exception:
+        # html.parser is lenient; only catastrophic parser failures land here.
+        # Treat as title/link missing rather than re-raising.
+        pass
+
+    if expected_title:
+        expected_lower = expected_title.lower()
+        title_candidates = (
+            collector.title_text,
+            collector.h1_text,
+            collector.og_title,
+            "".join(collector.visible_text_chunks),
+        )
+        if not any(c and expected_lower in c.lower() for c in title_candidates):
+            return "title_missing"
+
+    if expected_hrefs:
+        for href in expected_hrefs:
+            if href not in collector.article_hrefs:
+                return f"target_link_missing: {_safe_for_log(href)}"
+
+    return None
+
+
 def _verify_html_channel(
     row: dict[str, Any],
     result: AdapterResult,
     *,
     metadata: dict[str, Any],
 ) -> VerificationOutcome:
-    """HTML channel (Medium). Real implementation in Unit 2."""
+    """HTML channel verifier (Medium platform).
+
+    Sequence:
+      1. URL shape + scheme check.
+      2. Host allowlist check (pre-flight, no HTTP yet).
+      3. SSRF defense via DNS resolution + IP allowlist.
+      4. Retry loop (4 attempts at 0/5/10/15s waits, total ≤30s).
+      5. Definitive 4xx short-circuits to verified=false.
+      6. After body fetch: re-verify final-URL host + path shape (catches
+         redirect chains landing on homepage or off-platform).
+      7. Parse + match scoped to article container.
+    """
+    raw_url = result.published_url or ""
+    allowed_hosts: tuple[str, ...] = tuple(metadata.get("allowed_hosts", ()))
+    allowed_paths: tuple[str, ...] = tuple(metadata.get("allowed_path_patterns", ()))
+
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https"):
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error=(
+                f"host_not_allowed: <invalid_scheme:"
+                f"{_safe_for_log(parsed.scheme, max_len=16)}>"
+            ),
+        )
+
+    host = _normalize_host(parsed.hostname)
+    if host is None:
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error="host_not_allowed: <unparseable>",
+        )
+    if not _check_host_allowed(host, allowed_hosts):
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error=f"host_not_allowed: {_safe_for_log(host)}",
+        )
+
+    safe, ip_err = _check_resolved_ip_safe(host)
+    if not safe and ip_err and not ip_err.startswith("dns_failure:"):
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error=ip_err,
+        )
+    # DNS failures fall through to the retry loop — they are transient.
+
+    expected_title = (row.get("title") or "").strip()
+    expected_hrefs = _verified_link_subset(row)
+
+    last_error: str | None = None
+    for attempt_idx, wait_s in enumerate(_HTML_RETRY_WAITS_S):
+        if wait_s > 0:
+            time.sleep(wait_s)
+        try:
+            status, body, final_url = _fetch_html_once(raw_url, allowed_hosts)
+        except _RedirectRejected as exc:
+            return VerificationOutcome(
+                verified=False,
+                verified_at=_now_iso(),
+                verification_error=_safe_for_log(exc.reason),
+            )
+        except _BodyTooLarge:
+            return VerificationOutcome(
+                verified=None,
+                verified_at=None,
+                verification_error="body_too_large",
+            )
+        except _WallClockExceeded:
+            last_error = "transient: wall_clock_exceeded"
+            continue
+        except HTTPError as exc:
+            code = exc.code or 0
+            if 400 <= code < 500:
+                return VerificationOutcome(
+                    verified=False,
+                    verified_at=_now_iso(),
+                    verification_error=f"http_{code}",
+                )
+            last_error = f"http_{code}"
+            continue
+        except URLError as exc:
+            reason_name = type(getattr(exc, "reason", exc)).__name__
+            last_error = f"transient: {reason_name}"
+            continue
+        except (TimeoutError, ConnectionError, OSError) as exc:
+            last_error = f"transient: {type(exc).__name__}"
+            continue
+
+        # Got a 2xx (or unexpected 3xx that escaped the handler). Re-check
+        # final URL host + path shape — defends against redirect chains
+        # landing on the homepage or off-platform.
+        final_parsed = urlparse(final_url)
+        final_host = _normalize_host(final_parsed.hostname)
+        if final_host is None or not _check_host_allowed(final_host, allowed_hosts):
+            return VerificationOutcome(
+                verified=False,
+                verified_at=_now_iso(),
+                verification_error=(
+                    f"host_not_allowed: "
+                    f"{_safe_for_log(final_host or '<unparseable>')}"
+                ),
+            )
+        if not _check_path_shape(final_parsed.path or "/", allowed_paths):
+            return VerificationOutcome(
+                verified=False,
+                verified_at=_now_iso(),
+                verification_error=f"non_article_url: {_safe_for_log(final_parsed.path or '/')}",
+            )
+
+        if not (200 <= status < 300):
+            # Unexpected non-redirect, non-error response. Treat as transient
+            # and retry (e.g., a stray 304 or 1xx). HTTPError already handled
+            # 4xx/5xx above.
+            last_error = f"http_{status}"
+            continue
+
+        if not body:
+            last_error = "empty_body"
+            continue
+
+        body_str = body.decode("utf-8", errors="replace")
+        mismatch = _parse_and_match_html(body_str, expected_title, expected_hrefs)
+        if mismatch is None:
+            return VerificationOutcome(
+                verified=True,
+                verified_at=_now_iso(),
+                verification_error=None,
+            )
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error=mismatch,
+        )
+
+    # Retries exhausted. Map to a stable verification_error.
+    n = len(_HTML_RETRY_WAITS_S)
+    if last_error and (last_error.startswith("http_5") or last_error == "empty_body"):
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error=last_error,
+        )
     return VerificationOutcome(
-        verified=None, verified_at=None, verification_error="not_implemented"
+        verified=None,
+        verified_at=None,
+        verification_error=last_error or _ERR_TRANSIENT_EXHAUSTED.format(n=n),
     )
 
 
