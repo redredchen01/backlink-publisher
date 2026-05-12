@@ -187,9 +187,13 @@ def test_failed_status_skips_without_reason():
     assert out.verification_error is None
 
 
-def test_published_dispatches_to_channel_stub():
-    """published+real → channel stub fires; Unit 1 stubs return not_implemented."""
-    out = verify_published({"links": []}, _result("published"))
+def test_published_dispatches_to_html_channel_stub():
+    """published+real → channel handler fires.
+
+    HTML channel is the only stub still in this state (Unit 2 lands later).
+    Blogger-api channel now has a real implementation post-Unit 3.
+    """
+    out = verify_published({"links": []}, _result("published", adapter="medium-api"))
     assert out.verified is None
     assert out.verification_error == "not_implemented"
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any, Callable
 
 from .adapters.base import AdapterResult
@@ -205,6 +206,93 @@ def _verify_html_channel(
     )
 
 
+def _verified_link_subset(row: dict[str, Any]) -> list[str]:
+    """Return the URLs from row['links'] that must be present on the published page.
+
+    Default subset: entries whose `kind` is `target` or `main_domain`. Other
+    kinds (supporting, extra, category, detail) are not required because the
+    project's core SEO value is the target backlinks. Empty subset means
+    only the title check applies (R6 fallthrough).
+    """
+    links = row.get("links") or []
+    subset: list[str] = []
+    for link in links:
+        if not isinstance(link, dict):
+            continue
+        if link.get("kind") in ("target", "main_domain"):
+            url = link.get("url")
+            if isinstance(url, str) and url:
+                subset.append(url)
+    return subset
+
+
+class _HrefCollector(HTMLParser):
+    """Collect every <a href="..."> attribute value from an HTML body."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.hrefs: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        for key, value in attrs:
+            if key.lower() == "href" and value:
+                self.hrefs.add(value)
+
+
+def _extract_hrefs(html_body: str) -> set[str]:
+    """Parse HTML and return the set of href values from <a> tags.
+
+    Used by both the Blogger API channel (parsing `response['content']`) and
+    the HTML channel (Unit 2). Malformed HTML does not raise — the parser
+    salvages what it can. Empty/None input returns an empty set.
+    """
+    if not html_body:
+        return set()
+    collector = _HrefCollector()
+    try:
+        collector.feed(html_body)
+        collector.close()
+    except Exception:
+        # html.parser is lenient by default but very malformed input can
+        # still raise. Treat as "no anchors found" — the caller will
+        # surface this as a verification failure if links were expected.
+        pass
+    return collector.hrefs
+
+
+def _http_status_outcome(status: int, ts: str) -> VerificationOutcome:
+    """Map an HTTP status from a verifier-side fetch to a VerificationOutcome.
+
+    Definitive client failures (404/410/451 and other 4xx) → verified=false:
+    the URL is wrong, gone, or blocked, which is evidence of fabrication or
+    silent publish failure — not lag.
+
+    Server failures (5xx) → verified=null: cannot distinguish lag from real
+    failure; warrants human re-check rather than a hard fail.
+    """
+    if 400 <= status < 500:
+        return VerificationOutcome(
+            verified=False,
+            verified_at=ts,
+            verification_error=f"http_{status}",
+        )
+    if 500 <= status < 600:
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error=f"http_{status}",
+        )
+    # Other unexpected statuses (e.g. unexpected 2xx with empty body, 1xx, 3xx
+    # not following) — treat as transient.
+    return VerificationOutcome(
+        verified=None,
+        verified_at=None,
+        verification_error=f"http_{status}",
+    )
+
+
 def _verify_blogger_api(
     row: dict[str, Any],
     result: AdapterResult,
@@ -212,7 +300,84 @@ def _verify_blogger_api(
     metadata: dict[str, Any],
     service: Any,
 ) -> VerificationOutcome:
-    """Blogger API channel. Real implementation in Unit 3."""
+    """Blogger API channel: posts.get + structured title/content match.
+
+    Reuses the existing Blogger API service (built by the dispatcher via
+    blogger_api._get_service) to fetch the just-published post by its
+    blogId/postId from the insert response. No retry budget — Blogger's
+    read-after-write on the same API surface is consistent enough that a
+    single attempt is the right policy.
+    """
+    if service is None:
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error=f"{_ERR_INTERNAL_PREFIX}service_not_provided",
+        )
+
+    # Extract structured verifier args. KeyError here means
+    # BloggerAPIAdapter failed to capture postId/blogId from posts.insert —
+    # surface as missing_provider_meta (rolled up to verified=false by the
+    # dispatcher), not as a verifier_internal_error.
+    try:
+        args = metadata["args"](row, result)
+    except KeyError:
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error="missing_provider_meta",
+        )
+
+    blog_id = args.get("blog_id", "")
+    post_id = args.get("post_id", "")
+    if not blog_id or not post_id:
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error="missing_provider_meta",
+        )
+
+    try:
+        post = service.posts().get(blogId=blog_id, postId=post_id).execute()
+    except Exception as exc:
+        # Map googleapiclient.errors.HttpError by status; other exceptions
+        # are transient transport-level failures.
+        try:
+            from googleapiclient.errors import HttpError  # type: ignore
+        except ImportError:  # pragma: no cover - googleapiclient is a project dep
+            HttpError = ()  # type: ignore[assignment]
+        if isinstance(exc, HttpError):  # type: ignore[arg-type]
+            status = getattr(getattr(exc, "resp", None), "status", 0) or 0
+            return _http_status_outcome(status, _now_iso())
+        # Transport errors (TimeoutError, ConnectionError, etc.) → null.
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error=f"transient: {type(exc).__name__}",
+        )
+
+    expected_title = (row.get("title") or "").strip()
+    actual_title = post.get("title") or ""
+    if expected_title and expected_title.lower() not in actual_title.lower():
+        return VerificationOutcome(
+            verified=False,
+            verified_at=_now_iso(),
+            verification_error="title_missing",
+        )
+
+    expected_hrefs = _verified_link_subset(row)
+    if expected_hrefs:
+        found_hrefs = _extract_hrefs(post.get("content") or "")
+        for expected in expected_hrefs:
+            if expected not in found_hrefs:
+                return VerificationOutcome(
+                    verified=False,
+                    verified_at=_now_iso(),
+                    verification_error=f"target_link_missing: {expected}",
+                )
+
     return VerificationOutcome(
-        verified=None, verified_at=None, verification_error="not_implemented"
+        verified=True,
+        verified_at=_now_iso(),
+        verification_error=None,
     )
