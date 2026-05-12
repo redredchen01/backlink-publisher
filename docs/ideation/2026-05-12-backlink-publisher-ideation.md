@@ -18,7 +18,11 @@ focus: open-ended
 
 ---
 
-## Ranked Ideas
+## Ranked Ideas (Refined — Stricter Bar, 2026-05-12 second pass)
+
+> **Refinement note:** Two adversarial reviewers (skeptical product critic + engineering pragmatist) re-attacked the original 7 survivors with a higher bar. Consensus: #6 cut, #7 cut/deferred, #3 demoted (hidden complexity), and one new idea (Real-Publish Verification) surfaced that addresses a documented historical failure (fake-publish via prior opencli adapter). Sequencing dependency now explicit: **#1 → #5 → #2** is a hard chain.
+
+**Strict Top 5 (raise-the-bar pass):**
 
 ### 1. Auto-Retry with Exponential Backoff
 **Description:** Wrap every adapter network call (Blogger API, Medium API, Playwright publish) in a `@retry_transient(max_attempts=3, backoff_base=2)` decorator in `adapters/base.py`. Catches `requests.Timeout`, `ConnectionError`, HTTP 429, and HTTP 5xx. Each retry waits `2^attempt` seconds with ±10% jitter. Only escalates to `ExternalServiceError` after all attempts fail.
@@ -30,63 +34,60 @@ focus: open-ended
 
 ---
 
-### 2. Bulk URL Batch Input (CSV / Paste / Sitemap)
-**Description:** Accept `plan-backlinks --from-csv urls.csv` or `--from-sitemap https://example.com/sitemap.xml` to process N target URLs in one invocation. Each URL becomes one JSONL payload flowing through the existing pipeline unchanged. Web UI adds a "paste multiple URLs" text area as a zero-config entry point.
-**Rationale:** Running the full plan→validate→publish flow manually for each URL is the dominant time cost for any real campaign. The CLI pipeline is already composable over JSONL streams — this is an input multiplier with no pipeline changes.
-**Downsides:** Sitemap parsing requires an XML dependency (or stdlib `xml.etree`). Large batches need the Checkpoint & Resume idea (#5) to be useful in production.
+### 2. Proactive OAuth Pre-Flight Refresh (Badge split out)
+**Description:** In `_build_credentials()` (blogger_api.py L17-63), add a pre-flight check: if token expires within 5 minutes, refresh immediately before any API call. **Defer** the webui badge/`/api/token-status` endpoint to V2 — the refresh alone resolves the documented mid-batch 401 bug. Refresh path is ~5 LOC; the badge UI was scope creep.
+**Rationale:** This is the **only** survivor with hard production evidence — the 60s `creds.expired` tolerance window has actually caused mid-batch failures. Highest ROI/effort ratio after #1.
+**Downsides:** Splitting badge out means users still discover expiry via failures *between batches* (just not *during*). Acceptable tradeoff for V1.
+**Confidence:** 92% (refresh path); badge demoted to V2 polish
+**Complexity:** Low
+**Status:** Unexplored
+
+---
+
+### 3. Real-Publish Verification (NEW — added in raise-the-bar pass)
+**Description:** After each adapter returns a `published_url`, perform a `linkcheck.py`-style HTTP GET on that URL, assert HTTP 200, and verify a stable content fingerprint (e.g., title substring + N target-link anchors present) is in the response body. Mismatch → mark the article as `published_unverified` in the result JSONL and exit-code 5; do not mark `done`.
+**Rationale:** A prior opencli-based adapter **fake-published** for an extended period — fabricated `https://medium.com/p/{sha256}` URLs while the pipeline reported green. None of the existing 7 survivors prevent regression to that state. This is the single cheapest defense against the most catastrophic failure class in the project's history. Reuses the existing `linkcheck.py` machinery.
+**Downsides:** Adds one HTTP round-trip per published article (negligible vs. 60–300s Medium throttle). Verification heuristic needs per-platform tuning (Blogger renders synchronously; Medium may have indexing lag — needs a short retry window for the verifier itself).
 **Confidence:** 90%
 **Complexity:** Low
-**Status:** Unexplored
+**Status:** Explored — brainstorm started 2026-05-12
 
 ---
 
-### 3. Named Campaign Profiles
-**Description:** Introduce named profiles that bundle platform, language, mode, tags, title, and blog_id settings under a short name (e.g., `client-acme-en-blogger`). Stored in `config.toml` under `[profiles.<name>]`. CLI: `plan-backlinks --profile client-acme`. Web UI: dropdown populates all form fields instantly. Creating a profile is a one-click "Save as profile" from any completed run.
-**Rationale:** Every repeat run for the same client requires re-entering identical settings. Agencies managing multiple clients today have to manually swap `config.toml` entries or risk cross-client publishing. Profiles eliminate that entirely.
-**Downsides:** Config schema extension required. Profiles with stale blog_ids will fail silently until validated.
-**Confidence:** 88%
-**Complexity:** Medium
-**Status:** Unexplored
+### 4. Checkpoint & Resume for Batch Pipeline (prerequisite for #5)
 
 ---
 
-### 4. Proactive OAuth Health Management
-**Description:** In `_build_credentials()` (blogger_api.py L17-63), add a pre-flight check: if token expires within 5 minutes, refresh immediately before any API call. In the webui, expose a `/api/token-status` endpoint that returns token health; nav bar displays a colored badge ("Token OK" / "Expires in 3 days" / "Expired — click to re-auth"). Clicking the badge triggers the in-page OAuth flow without leaving current context.
-**Rationale:** Current code only refreshes after `creds.expired` is True — which has a 60-second tolerance window that still causes first-call 401 failures mid-batch. Users don't discover expiry until a batch fails. Proactive visibility converts a surprise failure into a planned 30-second re-auth.
-**Downsides:** UI polling adds a lightweight background request. Requires storing token expiry separately (already in the token JSON from Google).
-**Confidence:** 88%
-**Complexity:** Low
-**Status:** Unexplored
-
----
-
-### 5. Checkpoint & Resume for Batch Pipeline
+### 4. Checkpoint & Resume for Batch Pipeline
 **Description:** `publish-backlinks` writes each payload's `id` to `~/.cache/backlink-publisher/checkpoints/<run_id>.jsonl` as `pending` before processing, then updates to `done` or `failed`. Add `publish-backlinks --resume <run_id>` to skip `done` items and retry only `failed`/`pending`, preserving throttle intervals. In the web UI, a "Resume" banner appears on page load if an unfinished run exists.
-**Rationale:** A crash or network failure mid-batch (at article 13/20) currently requires restarting from scratch — risking duplicate publishes on already-completed articles (Blogger has no dedup). Checkpoint resume makes reruns idempotent and saves hours of regeneration time for large batches.
-**Downsides:** Checkpoint files accumulate; needs a `--cleanup` flag. Browser session state (generated articles) still needs separate persistence from CLI state.
-**Confidence:** 85%
+**Rationale:** A crash or network failure mid-batch (at article 13/20) currently requires restarting from scratch — risking duplicate publishes on already-completed articles (Blogger has no dedup). **Hard prerequisite for #5 Bulk Input to be safe** — a 50-URL batch hitting an unrecoverable failure at item 13 loses 37 articles' generation cost without checkpointing.
+**Downsides:** Checkpoint files accumulate; needs a `--cleanup` flag. Browser session state (generated articles) still needs separate persistence from CLI state. #1 retry alone covers ~80% of transient failures — checkpoint is justified mainly by #5's blast radius.
+**Confidence:** 88% (upgraded — dependency role clarified)
 **Complexity:** Medium
 **Status:** Unexplored
 
 ---
 
-### 6. Config Init Wizard (First-Run Setup)
-**Description:** A `backlink-publisher config init` CLI command (and matching `/setup` webui route) walks users through each required config field: paste API keys, authorize Blogger (browser popup), paste Medium token. Immediately validates each credential before writing. If validation fails, prints the exact URL to the relevant API console page. Writes `config.toml` automatically on completion.
-**Rationale:** Manually editing TOML with no validation is the highest abandonment point. Users commonly spend an hour debugging a token typo before getting their first successful publish. `save_config()` in `config.py` already handles writing — this is purely a guided front-end.
-**Downsides:** OAuth popup in terminal context requires browser availability. Medium token validation requires a live API call.
-**Confidence:** 85%
-**Complexity:** Medium
+### 5. Bulk URL Batch Input (CSV / Paste / Sitemap) — sequenced after #1 + #4
+**Description:** Accept `plan-backlinks --from-csv urls.csv` or `--from-sitemap https://example.com/sitemap.xml` to process N target URLs in one invocation. Each URL becomes one JSONL payload flowing through the existing pipeline unchanged. Web UI adds a "paste multiple URLs" text area as a zero-config entry point.
+**Rationale:** Without this, the tool is a 1-URL-at-a-time toy — for agencies, this is *the* product. The CLI pipeline is already composable over JSONL streams. **But:** solo, without #1 retry and #4 checkpoint, it is a damage multiplier (one transient 5xx kills the whole batch). Must ship after #1 + #4.
+**Downsides:** Sitemap parsing requires `xml.etree` (stdlib). Net-negative engineering if shipped before #1+#4.
+**Confidence:** 90%
+**Complexity:** Low (mechanically) — high blast radius if mis-sequenced
 **Status:** Unexplored
 
 ---
 
-### 7. Inline Article Editor Before Publish
-**Description:** After `plan-backlinks` generates articles, render each article's `content_markdown` in an editable `<textarea>` (or lightweight CodeMirror instance) in the web UI review step. Edits are serialized back into the JSONL payload before passing to `validate-backlinks`. A "Reset to original" button restores the AI-generated content.
-**Rationale:** Users currently have no agency over generated content before it goes live. Editing opportunities exist between generation and validation — a clear dead zone in the current flow. This fills the most obvious missing capability in the web UI pipeline.
-**Downsides:** Rich editor (CodeMirror) adds ~100KB JS. Plain `<textarea>` with no preview is a simpler alternative. Round-tripping edited markdown back into JSONL requires careful escaping.
-**Confidence:** 82%
-**Complexity:** Medium
-**Status:** Unexplored
+## Demoted in Raise-the-Bar Pass
+
+### D1. Named Campaign Profiles (was #3, 88%)
+**Why demoted:** Reclassified Medium → **Medium-High**. Schema migration (`[profiles.<name>]` nested TOML), profile-vs-flag precedence rules, "save from completed run" requires webui→config writer plumbing, plus stale `blog_id` validation = second API call path. Leverage scales only with multi-client ICP — agency with 3 clients hits it 3×/week. Defer until bulk-input usage proves the pain. 80% subset (read-only profiles, no "save as" UI) cuts half the work.
+
+### D2. Inline Article Editor Before Publish (was #7, 82%)
+**Why demoted:** Speculative pain — not reported. If AI output needs hand-editing every batch, the *generator* is broken. Round-tripping markdown through JSONL is a bug farm. Defer as textarea-only V2 if user demand surfaces; cut CodeMirror entirely.
+
+### D3. Config Init Wizard (was #6, 85%)
+**Why cut:** Classic onboarding-polish trap. One-time pain; agencies configure once. Two UX surfaces (CLI + webui `/setup`), interactive OAuth popup, live validation. **Replace with `backlink-publisher config check`** — a read-only validator subcommand. Fraction of the work, captures most abandonment with clearer error messages.
 
 ---
 
@@ -118,3 +119,5 @@ focus: open-ended
 ## Session Log
 - 2026-05-12: Initial open-ended ideation — 38 raw candidates generated (5 agents), 25 unique after dedup, 7 survivors after adversarial filtering
 - 2026-05-12: Idea #1 (Auto-Retry with Exponential Backoff) selected for brainstorm
+- 2026-05-12: **Raise-the-bar refinement (Phase 3 second pass).** Two adversarial reviewers (product critic + engineering pragmatist) re-attacked the 7 survivors. Result: 7 → 5 strict survivors. Cut: #6 Config Wizard (replaced with `config check` validator). Demoted: #3 Profiles (Medium-High, multi-client ICP only), #7 Inline Editor (speculative, defer as textarea-only V2). **Added:** Real-Publish Verification (defends against documented fake-publish failure class from prior opencli adapter). Sequencing chain made explicit: **#1 Retry → #4 Checkpoint → #5 Bulk Input**; #2 OAuth Pre-flight is independent (badge split to V2); #3 Verification is independent.
+- 2026-05-12: Idea #3 (Real-Publish Verification) selected for brainstorm.

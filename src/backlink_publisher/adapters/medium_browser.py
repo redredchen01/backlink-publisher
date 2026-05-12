@@ -146,8 +146,8 @@ class MediumBrowserAdapter:
                                 tag_input.type(tag)
                                 page.keyboard.press("Enter")
                                 page.wait_for_timeout(300)
-                        except Exception:
-                            pass  # tags are optional
+                        except Exception as e:
+                            log.debug(f"tag insertion failed (optional): {e}")  # tags are optional
                         page.locator(sel.PUBLISH_BUTTON).click()
                         page.wait_for_timeout(3000)
                     else:

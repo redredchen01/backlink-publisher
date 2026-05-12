@@ -107,6 +107,7 @@ class BloggerAPIAdapter:
         try:
             from googleapiclient.discovery import build
             from googleapiclient.errors import HttpError
+            import google.auth.transport.requests as google_requests
 
             service = build("blogger", "v3", credentials=creds)
             body = {
@@ -115,12 +116,19 @@ class BloggerAPIAdapter:
                 "labels": payload.get("tags", [])[:20],
             }
             is_draft = mode == "draft"
+
+            # Wrap execute() with timeout for consistency with Medium adapter (30 seconds)
+            def execute_with_timeout():
+                import socket
+                old_timeout = socket.getdefaulttimeout()
+                try:
+                    socket.setdefaulttimeout(30)
+                    return service.posts().insert(blogId=blog_id, isDraft=is_draft, body=body).execute()
+                finally:
+                    socket.setdefaulttimeout(old_timeout)
+
             result = retry_transient_call(
-                lambda: (
-                    service.posts()
-                    .insert(blogId=blog_id, isDraft=is_draft, body=body)
-                    .execute()
-                ),
+                execute_with_timeout,
                 is_retryable=lambda exc: (
                     isinstance(exc, HttpError)
                     and exc.resp is not None

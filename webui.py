@@ -12,7 +12,7 @@ import uuid
 import random
 import threading
 from pathlib import Path
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlencode
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -24,6 +24,10 @@ from backlink_publisher.config import load_config, save_config, load_blogger_tok
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'backlink-publisher-secret-' + str(uuid.uuid4()))
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=15)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # ── APScheduler (串行，max_workers=1 防止同時多篇發布) ────────────────────────
 _scheduler = BackgroundScheduler(
@@ -3404,17 +3408,17 @@ def settings_medium_oauth_start():
     # 生成 OAuth 授权 URL
     state = secrets.token_urlsafe(32)
     session['medium_oauth_state'] = state
-    
+
     redirect_uri = _oauth_callback_uri().replace('/blogger/oauth-callback', '/medium/oauth-callback')
-    auth_url = (
-        f"https://medium.com/m/oauth/authorize?"
-        f"client_id={client_id}&"
-        f"redirect_uri={redirect_uri}&"
-        f"response_type=code&"
-        f"state={state}&"
-        f"scope=basicProfile,publishPost"
-    )
-    
+    oauth_params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'state': state,
+        'scope': 'basicProfile,publishPost'
+    }
+    auth_url = f"https://medium.com/m/oauth/authorize?{urlencode(oauth_params)}"
+
     return redirect(auth_url)
 
 
@@ -3422,10 +3426,19 @@ def settings_medium_oauth_start():
 def settings_medium_oauth_callback():
     """Medium redirects here after user approves."""
     import requests as req
-    
+
     err = request.args.get('error')
     if err:
-        return redirect(f'/settings?flash_type=danger&flash_msg=Medium 拒绝授权: {err}')
+        # Whitelist known OAuth errors and map to safe messages
+        SAFE_ERROR_MESSAGES = {
+            'access_denied': '用户拒绝了授权',
+            'invalid_scope': '请求的权限无效',
+            'invalid_request': '授权请求参数有误',
+            'server_error': 'Medium 服务器出错，请稍后重试',
+            'temporarily_unavailable': 'Medium 服务暂时不可用，请稍后重试'
+        }
+        error_msg = SAFE_ERROR_MESSAGES.get(err, '授权失败，请重试')
+        return redirect(f'/settings?flash_type=danger&flash_msg={error_msg}')
     
     state = session.get('medium_oauth_state')
     code = request.args.get('code')
@@ -3456,7 +3469,7 @@ def settings_medium_oauth_callback():
         )
         
         if token_resp.status_code != 200:
-            raise Exception(f"Medium token endpoint returned {token_resp.status_code}: {token_resp.text[:200]}")
+            raise Exception(f"Token exchange failed with status {token_resp.status_code}")
         
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
@@ -3467,10 +3480,11 @@ def settings_medium_oauth_callback():
         # 保存 token 和凭据
         from backlink_publisher.config import save_medium_token, MediumOAuthConfig, save_config
         save_medium_token(token_data)
-        
+
         cfg = load_config()
         cfg.medium_oauth = MediumOAuthConfig(client_id=client_id, client_secret=client_secret)
-        
+        save_config(cfg)
+
         # 清除 session 中的临时数据
         session.pop('medium_oauth_state', None)
         session.pop('medium_client_id', None)
@@ -3479,7 +3493,7 @@ def settings_medium_oauth_callback():
         return redirect('/settings?flash_type=success&flash_msg=Medium OAuth 授权成功！')
     
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=获取 Token 失败: {e}')
+        return redirect(f'/settings?flash_type=danger&flash_msg=获取 Token 失败，请检查凭证并重试')
 
 
 @app.route('/settings/clear-medium-oauth', methods=['POST'])
