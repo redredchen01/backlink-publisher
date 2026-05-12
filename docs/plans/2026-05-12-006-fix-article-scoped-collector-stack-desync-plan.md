@@ -1,9 +1,10 @@
 ---
 title: "fix: _ArticleScopedCollector stack desync on unbalanced inner-container tags"
 type: fix
-status: active
+status: completed
 date: 2026-05-12
 deepened: 2026-05-12
+completed: 2026-05-12
 origin: backlink-publisher/.context/compound-engineering/ce-review/2026-05-12-feat-real-publish-verification/summary.md#m1
 ---
 
