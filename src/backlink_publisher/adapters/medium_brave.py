@@ -15,6 +15,7 @@ import sys
 import time
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from ..config import Config
@@ -49,53 +50,118 @@ def _run_applescript(script: str, timeout: int = 60) -> str:
     return result.stdout.strip()
 
 
-def _get_brave_medium_tab_index() -> tuple[int, int] | None:
-    """Return (window_index, tab_index) of an existing Medium tab in Brave, or None."""
-    script = """
-tell application "Brave Browser"
-    set wIdx to 0
-    repeat with w in windows
-        set wIdx to wIdx + 1
-        set tIdx to 0
-        repeat with t in tabs of w
-            set tIdx to tIdx + 1
-            if URL of t contains "medium.com" then
-                return wIdx & "," & tIdx
-            end if
-        end repeat
-    end repeat
-    return ""
-end tell
-"""
-    try:
-        result = _run_applescript(script, timeout=10)
-        if result and "," in result:
-            parts = result.split(",")
-            return int(parts[0]), int(parts[1])
-    except Exception:
-        pass
-    return None
+_SUPPORTED_APPS = ("Brave Browser", "Google Chrome")
+
+# We can't reliably round-trip Chrome/Brave's tab id integers through
+# Python f-string → AppleScript: AppleScript's integer literal parser caps
+# at ~2^30 and silently converts larger values to real (scientific notation),
+# making `tab id 1829544078` fail to match the actual integer tab id.
+# Instead we tag the new tab with a unique URL hash marker at creation
+# time, and every subsequent operation re-locates the tab by URL match.
+# This also gives us hijacker-resilience for free: even if the user moves
+# the tab to another window or other tabs open/close around it, the
+# marker-based lookup still finds it.
+_TAB_MARKER_KEY = "__bp_marker"
 
 
-def _open_new_story_in_brave(wait_secs: int = 5) -> None:
-    """Open medium.com/new-story in Brave via AppleScript."""
+@dataclass
+class _TabRef:
+    """Stable handle to the Medium editor tab, looked up by URL marker."""
+    app: str
+    marker: str  # e.g. "abc12345" — unique per publish
+
+
+def _build_marker_url() -> tuple[str, str]:
+    """Return (url, marker) — url has the marker as a hash fragment."""
+    marker = uuid.uuid4().hex[:12]
+    # Hash fragments are not sent to the server but ARE preserved across
+    # SPA navigation within the same origin. Medium's editor (Lexical-based)
+    # doesn't navigate away from medium.com after load, so the marker
+    # survives. For OAuth redirects (which DO change origin), the marker
+    # may be dropped — in that case _find_marker_tab falls back to "any
+    # tab containing 'medium.com/new-story' or 'medium.com/p/'".
+    url = f"https://medium.com/new-story#{_TAB_MARKER_KEY}={marker}"
+    return url, marker
+
+
+def _open_new_story(app: str, wait_secs: int = 5) -> _TabRef:
+    """Open medium.com/new-story with a unique marker; return a _TabRef.
+
+    `app` must be one of `_SUPPORTED_APPS` (Brave or Chrome — both share
+    Chromium's AppleScript dictionary). The returned _TabRef carries a
+    unique URL marker; subsequent operations look the tab up by marker
+    rather than tab id (sidesteps AppleScript's 2^30 integer literal cap
+    AND survives the active-tab hijacking that motivated this fix).
+    """
+    url, marker = _build_marker_url()
     script = f"""
-tell application "Brave Browser"
+tell application "{app}"
     activate
-    set newTab to make new tab at end of tabs of front window with properties {{URL:"https://medium.com/new-story"}}
+    set newTab to make new tab at end of tabs of front window with properties {{URL:"{url}"}}
     set active tab index of front window to (count tabs of front window)
     delay {wait_secs}
 end tell
 """
     _run_applescript(script, timeout=30 + wait_secs)
+    return _TabRef(app=app, marker=marker)
 
 
-def _get_current_url_brave() -> str:
-    script = """
-tell application "Brave Browser"
-    return URL of active tab of front window
+def _find_marker_tab_position(ref: _TabRef) -> tuple[int, int]:
+    """Locate the marked tab and return (window_position, tab_position).
+
+    Positions are 1-based AppleScript indices, recomputed on every call so
+    user/extension-driven tab reordering, tab close, or window changes
+    don't desynchronise us. Raises ExternalServiceError if not found.
+    """
+    script = f'''
+tell application "{ref.app}"
+    set wPos to 0
+    repeat with w in windows
+        set wPos to wPos + 1
+        set tPos to 0
+        repeat with t in tabs of w
+            set tPos to tPos + 1
+            set u to URL of t
+            if u contains "{_TAB_MARKER_KEY}={ref.marker}" then
+                return (wPos as text) & "," & (tPos as text)
+            end if
+        end repeat
+    end repeat
+    -- Fallback: marker may have been stripped by OAuth redirect.
+    -- Find any tab that's on medium.com editor URL.
+    set wPos to 0
+    repeat with w in windows
+        set wPos to wPos + 1
+        set tPos to 0
+        repeat with t in tabs of w
+            set tPos to tPos + 1
+            set u to URL of t
+            if u contains "medium.com/new-story" or u contains "medium.com/p/" then
+                return (wPos as text) & "," & (tPos as text)
+            end if
+        end repeat
+    end repeat
+    return ""
 end tell
-"""
+'''
+    out = _run_applescript(script, timeout=10)
+    if not out or "," not in out:
+        raise ExternalServiceError(
+            f"Could not locate Medium editor tab (marker={ref.marker}). "
+            "Was the tab closed manually during publish?"
+        )
+    w_str, t_str = out.split(",", 1)
+    return int(w_str.strip()), int(t_str.strip())
+
+
+def _get_tab_url(ref: _TabRef) -> str:
+    """Read URL of the marker tab — no focus required."""
+    w, t = _find_marker_tab_position(ref)
+    script = f'''
+tell application "{ref.app}"
+    return URL of tab {t} of window {w}
+end tell
+'''
     return _run_applescript(script, timeout=10)
 
 
@@ -105,28 +171,58 @@ def _set_clipboard(text: str) -> None:
         raise ExternalServiceError("Failed to copy content to clipboard")
 
 
-def _brave_js(js: str) -> str:
-    """Execute JavaScript in the active Brave tab."""
-    # Escape the JS for AppleScript string embedding
+def _native_js_in_tab(ref: _TabRef, js: str) -> str:
+    """Execute JavaScript in the marker tab — no focus required.
+
+    Both Brave and Chrome require "Allow JavaScript from Apple Events"
+    enabled in View → Developer (Chrome enables by default; Brave defaults
+    to OFF).
+    """
+    w, t = _find_marker_tab_position(ref)
     escaped = js.replace("\\", "\\\\").replace('"', '\\"')
     script = f'''
-tell application "Brave Browser"
-    set result to execute active tab of front window javascript "{escaped}"
+tell application "{ref.app}"
+    set result to execute tab {t} of window {w} javascript "{escaped}"
     return result
 end tell
 '''
     return _run_applescript(script, timeout=30)
 
 
-def _wait_for_medium_editor(max_wait: int = 20) -> bool:
+def _focus_and_keystroke(ref: _TabRef, keystroke_payload: str) -> None:
+    """Focus the marker tab and fire a keystroke — atomic single AppleScript.
+
+    `keystroke_payload` runs inside `tell process "<app>"` (e.g.,
+    `keystroke "..."` / `key code 36` / `keystroke "v" using command down`).
+    Collapses the focus→keystroke race window so hijackers can't slip in.
+    """
+    w, t = _find_marker_tab_position(ref)
+    script = f'''
+tell application "{ref.app}"
+    set targetWindow to window {w}
+    set active tab index of targetWindow to {t}
+    set index of targetWindow to 1
+    activate
+end tell
+delay 0.1
+tell application "System Events"
+    tell process "{ref.app}"
+        {keystroke_payload}
+    end tell
+end tell
+'''
+    _run_applescript(script, timeout=20)
+
+
+def _wait_for_medium_editor(ref: _TabRef, max_wait: int = 20) -> bool:
     """Poll until Medium's editor is ready (title placeholder visible)."""
     for _ in range(max_wait):
         try:
-            url = _get_current_url_brave()
+            url = _get_tab_url(ref)
             if "medium.com/m/signin" in url or "medium.com/signin" in url:
                 return False  # Not logged in
-            # Check if editor elements exist
-            result = _brave_js(
+            result = _native_js_in_tab(
+                ref,
                 "document.querySelector('[data-testid=\"post-title\"], "
                 "[class*=\"graf--title\"], h3[class*=\"title\"]') ? 'ready' : 'wait'"
             )
@@ -138,63 +234,38 @@ def _wait_for_medium_editor(max_wait: int = 20) -> bool:
     return False
 
 
-def _click_title_and_type(title: str) -> None:
-    """Click the title field and type the title."""
-    # Click title via JS then type via keyboard
-    _brave_js(
+def _click_title_and_type(ref: _TabRef, title: str) -> None:
+    _native_js_in_tab(
+        ref,
         "var el = document.querySelector('[data-testid=\"post-title\"], "
         "[class*=\"graf--title\"], h3[class*=\"title\"]'); "
         "if(el){ el.click(); el.focus(); }"
     )
     time.sleep(0.5)
-    # Use AppleScript to type the title
     escaped_title = title.replace('"', '\\"').replace("\\", "\\\\")
-    osascript_type = f'''
-tell application "System Events"
-    tell process "Brave Browser"
-        keystroke "{escaped_title}"
-    end tell
-end tell
-'''
-    subprocess.run(["osascript", "-e", osascript_type], timeout=15)
+    _focus_and_keystroke(ref, f'keystroke "{escaped_title}"')
     time.sleep(0.3)
-    # Press Tab/Enter to move to body
-    subprocess.run(
-        ["osascript", "-e",
-         'tell application "System Events" to tell process "Brave Browser" to key code 36'],
-        timeout=5
-    )
+    _focus_and_keystroke(ref, 'key code 36')  # Return
     time.sleep(0.5)
 
 
-def _paste_body_content(html_content: str) -> None:
-    """Put HTML into clipboard and paste into Medium editor body."""
-    # Medium editor accepts pasted HTML
+def _paste_body_content(ref: _TabRef, html_content: str) -> None:
     _set_clipboard(html_content)
     time.sleep(0.3)
-
-    # Click the body area
-    _brave_js(
+    _native_js_in_tab(
+        ref,
         "var body = document.querySelector('[data-testid=\"post-body\"], "
         ".section-inner, [class*=\"graf--p\"]'); "
         "if(body){ body.click(); body.focus(); }"
     )
     time.sleep(0.5)
-
-    # Cmd+V to paste
-    subprocess.run(
-        ["osascript", "-e",
-         'tell application "System Events" to tell process "Brave Browser"'
-         ' to keystroke "v" using command down'],
-        timeout=10
-    )
+    _focus_and_keystroke(ref, 'keystroke "v" using command down')
     time.sleep(2)
 
 
-def _click_publish_menu() -> None:
-    """Click the Publish button in Medium editor."""
-    # Try clicking via JS first
-    clicked = _brave_js(
+def _click_publish_menu(ref: _TabRef) -> None:
+    clicked = _native_js_in_tab(
+        ref,
         "var btns = Array.from(document.querySelectorAll('button'));"
         "var pub = btns.find(b => b.textContent.trim() === 'Publish');"
         "if(pub){ pub.click(); return 'clicked'; } return 'notfound';"
@@ -207,9 +278,9 @@ def _click_publish_menu() -> None:
     time.sleep(2)
 
 
-def _click_publish_now() -> None:
-    """Click 'Publish now' in the publish dialog."""
-    clicked = _brave_js(
+def _click_publish_now(ref: _TabRef) -> None:
+    _native_js_in_tab(
+        ref,
         "var btns = Array.from(document.querySelectorAll('button'));"
         "var pub = btns.find(b => "
         "b.textContent.includes('Publish now') || b.textContent.includes('Publish'));"
@@ -241,59 +312,66 @@ class MediumBraveAdapter:
     ) -> AdapterResult:
         _check_macos()
 
+        app = config.medium_native_browser_app
+        if app not in _SUPPORTED_APPS:
+            raise DependencyError(
+                f"medium_native_browser_app={app!r} not in {_SUPPORTED_APPS}"
+            )
+
         article_id = payload.get("id", str(uuid.uuid4())[:8])
         title = payload.get("title", "")
         content_markdown = payload.get("content_markdown", "")
         content_html = render_to_html(content_markdown)
 
-        log.info(_json_log(adapter="medium-brave", phase="start", id=article_id))
+        log.info(_json_log(adapter="medium-brave", phase="start", id=article_id, app=app))
 
-        # Ensure Brave is running
+        # Ensure the chosen browser is running
         try:
-            _run_applescript('tell application "Brave Browser" to return name', timeout=5)
+            _run_applescript(f'tell application "{app}" to return name', timeout=5)
         except Exception:
             raise ExternalServiceError(
-                "Brave Browser is not running. Please open Brave and log in to Medium."
+                f"{app} is not running. Please open {app} and log in to Medium."
             )
 
-        # Open new story tab
+        # Open new story tab with a unique URL hash marker; every subsequent
+        # operation re-locates the tab by marker, so hijacker tab-switches,
+        # tab reorders, or window changes don't desynchronise us. Also
+        # sidesteps AppleScript's 2^30 integer literal cap on tab ids.
         log.info(_json_log(adapter="medium-brave", phase="open-new-story", id=article_id))
-        _open_new_story_in_brave(wait_secs=6)
+        ref = _open_new_story(app, wait_secs=6)
+        log.info(_json_log(
+            adapter="medium-brave", phase="tab-pinned",
+            id=article_id, marker=ref.marker, app=app,
+        ))
 
-        # Check URL — should be on editor, not sign-in
-        url = _get_current_url_brave()
+        url = _get_tab_url(ref)
         if "signin" in url or "login" in url:
             raise ExternalServiceError(
-                "Medium login required. Please log in to medium.com in Brave first, then retry."
+                f"Medium login required. Please log in to medium.com in {app} first, then retry."
             )
 
         if "medium.com/new-story" not in url and "medium.com/p/" not in url:
             raise ExternalServiceError(
-                f"Unexpected URL after opening new story: {url}. "
+                f"Unexpected URL after opening new story (marker={ref.marker}): {url}. "
                 "Medium may have changed its URL structure or is showing a CAPTCHA."
             )
 
-        # Wait for editor to load
         log.info(_json_log(adapter="medium-brave", phase="wait-editor", id=article_id))
-        ready = _wait_for_medium_editor(max_wait=15)
+        ready = _wait_for_medium_editor(ref, max_wait=15)
         if not ready:
-            # Editor may still be loading but JS check failed — give extra time
             time.sleep(5)
 
-        # Fill title
         log.info(_json_log(adapter="medium-brave", phase="fill-title", id=article_id))
-        _click_title_and_type(title)
+        _click_title_and_type(ref, title)
 
-        # Paste body
         log.info(_json_log(adapter="medium-brave", phase="paste-body", id=article_id))
-        _paste_body_content(content_html)
+        _paste_body_content(ref, content_html)
 
-        # Publish or save draft
         if mode == "publish":
             log.info(_json_log(adapter="medium-brave", phase="publish", id=article_id))
             try:
-                _click_publish_menu()
-                _click_publish_now()
+                _click_publish_menu(ref)
+                _click_publish_now(ref)
             except ExternalServiceError:
                 log.info(_json_log(
                     adapter="medium-brave", phase="publish-fallback",
@@ -303,9 +381,8 @@ class MediumBraveAdapter:
             log.info(_json_log(adapter="medium-brave", phase="save-draft", id=article_id))
             _save_draft_via_keyboard()
 
-        # Get final URL
         time.sleep(2)
-        final_url = _get_current_url_brave()
+        final_url = _get_tab_url(ref)
         log.info(_json_log(adapter="medium-brave", phase="done", id=article_id, url=final_url))
 
         if mode == "publish":

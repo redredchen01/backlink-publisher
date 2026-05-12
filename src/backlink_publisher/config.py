@@ -57,6 +57,12 @@ class Config:
     medium_oauth: MediumOAuthConfig | None = None
     medium_integration_token: str | None = None
     medium_user_data_dir: Path | None = None
+    medium_native_browser_app: str = "Brave Browser"
+    """macOS application name controlled by the medium-brave adapter via
+    AppleScript. Either ``Brave Browser`` (default) or ``Google Chrome``.
+    Chrome typically requires no manual toggle for "Allow JavaScript from
+    Apple Events" (Brave defaults this OFF). Configured under
+    ``[medium.browser] app = "Google Chrome"`` in config.toml."""
 
     @property
     def config_dir(self) -> Path:
@@ -115,6 +121,13 @@ def load_config(path: Path | None = None) -> Config:
     else:
         user_data_dir = _config_dir() / "chrome-profile-default"
 
+    native_browser_app = medium_browser_section.get("app") or "Brave Browser"
+    if native_browser_app not in ("Brave Browser", "Google Chrome"):
+        raise DependencyError(
+            f"Unsupported [medium.browser] app: {native_browser_app!r}. "
+            f"Use 'Brave Browser' or 'Google Chrome'."
+        )
+
     # blogger_section now contains only main_domain → blog_id mappings
     blog_ids = {k: str(v) for k, v in blogger_section.items() if isinstance(v, (str, int))}
 
@@ -124,6 +137,7 @@ def load_config(path: Path | None = None) -> Config:
         medium_oauth=medium_oauth,
         medium_integration_token=medium_section.get("integration_token") or None,
         medium_user_data_dir=user_data_dir,
+        medium_native_browser_app=native_browser_app,
     )
 
 
