@@ -260,6 +260,42 @@ def test_sanitize_strips_refresh_token_string():
     exc = ValueError("refresh_token=1//abc was rejected")
     sanitized = _sanitize_exception(exc)
     assert "refresh_token" not in sanitized
+    # The 1// refresh-token value itself is redacted by the regex sweep.
+    assert "1//abc" not in sanitized
+
+
+def test_sanitize_strips_google_oauth_access_token():
+    """ya29.* prefix Google OAuth access tokens — full value redacted."""
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError(
+        "googleapiclient: invalid_grant with ya29.a0AfH6SMabcDEF123_realtoken"
+    )
+    sanitized = _sanitize_exception(exc)
+    assert "ya29." not in sanitized
+    assert "realtoken" not in sanitized
+
+
+def test_sanitize_strips_jwt_shape():
+    from backlink_publisher.verifier import _sanitize_exception
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signaturePart"
+    exc = RuntimeError(f"got token {jwt}")
+    sanitized = _sanitize_exception(exc)
+    assert "eyJ" not in sanitized
+
+
+def test_sanitize_strips_sk_prefix_key():
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError("auth failed with sk-proj-abcdefghijklmnop12345 invalid")
+    sanitized = _sanitize_exception(exc)
+    assert "sk-proj" not in sanitized
+
+
+def test_sanitize_case_insensitive_needles():
+    """Lowercase 'bearer' is also redacted (was case-sensitive .replace pre-fix)."""
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError("header was bearer xyz")
+    sanitized = _sanitize_exception(exc)
+    assert "bearer" not in sanitized.lower() or "<redacted>" in sanitized
 
 
 def test_sanitize_strips_crlf():

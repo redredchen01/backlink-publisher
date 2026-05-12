@@ -140,18 +140,23 @@ def main(argv: list[str] | None = None) -> None:
     _blogger_service_cache: dict[str, Any] = {}
 
     def _get_blogger_service() -> Any:
+        # Only cache successful builds. A transient OAuth/network failure on
+        # the first Blogger row must not poison the entire batch — the next
+        # row gets another attempt. (Review-fix: review-finding adv-3 /
+        # reliability-3 / correctness-2.)
         if "service" in _blogger_service_cache:
             return _blogger_service_cache["service"]
         try:
             from ..adapters.blogger_api import _get_service as _bs
-            _blogger_service_cache["service"] = _bs(config)
+            service = _bs(config)
         except Exception as exc:  # noqa: BLE001 — verifier handles missing service
             publish_logger.warning(
                 f"could not build Blogger service for verifier: "
                 f"{type(exc).__name__}: {_safe_for_log(str(exc))}"
             )
-            _blogger_service_cache["service"] = None
-        return _blogger_service_cache["service"]
+            return None
+        _blogger_service_cache["service"] = service
+        return service
 
     throttle_min = int(os.environ.get("MEDIUM_THROTTLE_MIN", "60"))
     throttle_max = int(os.environ.get("MEDIUM_THROTTLE_MAX", "300"))
@@ -343,7 +348,11 @@ def main(argv: list[str] | None = None) -> None:
                 verified_false_count += 1
             elif err_str.startswith(_ERR_INTERNAL_PREFIX):
                 verifier_internal_error_count += 1
-            elif err_str:
+            else:
+                # Every published row lands in exactly one bucket — drop
+                # the guarded `elif err_str:` so a future verifier change
+                # that emits (None, None, None) for an unrecognised skip
+                # path still surfaces in the summary.
                 verified_null_count += 1
 
         outputs.append(output_dict)
@@ -374,15 +383,18 @@ def main(argv: list[str] | None = None) -> None:
 
     # R17 run-end summary. V1 simplified shape (lag_ratio + Medium-tagging
     # dropped per scope-guardian trim). Internal-error count surfaces only
-    # when non-zero so a clean run shows three counters.
-    summary = (
-        f"verification: {verified_true_count} verified, "
-        f"{verified_false_count} unverified (verified=false), "
-        f"{verified_null_count} null (verified=null)"
-    )
-    if verifier_internal_error_count > 0:
-        summary += f" ({verifier_internal_error_count} internal-error)"
-    print(summary, file=sys.stderr)
+    # when non-zero so a clean run shows three counters. Suppressed on
+    # empty batches — emitting "0/0/0" before the no-payloads exit-5
+    # message is just noise.
+    if outputs:
+        summary = (
+            f"verification: {verified_true_count} verified, "
+            f"{verified_false_count} unverified (verified=false), "
+            f"{verified_null_count} null (verified=null)"
+        )
+        if verifier_internal_error_count > 0:
+            summary += f" ({verifier_internal_error_count} internal-error)"
+        print(summary, file=sys.stderr)
 
     publish_logger.info(
         f"publish complete: {success_count} succeeded, {fail_count} failed",

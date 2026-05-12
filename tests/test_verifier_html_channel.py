@@ -172,6 +172,23 @@ def test_resolved_ip_rejects_ipv6_link_local():
     assert "fe80" in err
 
 
+def test_resolved_ip_rejects_cgnat():
+    """Review-fix: RFC 6598 CGNAT (100.64.0.0/10) not flagged by stdlib."""
+    with patch("backlink_publisher.verifier.socket.getaddrinfo",
+               return_value=_make_addrinfo("100.64.5.10")):
+        ok, err = _check_resolved_ip_safe("medium.com")
+    assert ok is False
+    assert "100.64.5.10" in err
+
+
+def test_resolved_ip_rejects_6to4_anycast():
+    with patch("backlink_publisher.verifier.socket.getaddrinfo",
+               return_value=_make_addrinfo("192.88.99.1")):
+        ok, err = _check_resolved_ip_safe("medium.com")
+    assert ok is False
+    assert "192.88.99.1" in err
+
+
 def test_resolved_ip_rejects_when_any_address_is_private():
     """Multi-A-record: reject if ANY address is unsafe (no skip-and-continue)."""
     infos = _make_addrinfo("93.184.216.34") + _make_addrinfo("10.0.0.5")

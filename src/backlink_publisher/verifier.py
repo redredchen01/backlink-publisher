@@ -83,6 +83,17 @@ _PRIVATE_METADATA_IPS = frozenset({
     "fe80:a9fe:a9fe::fe",
 })
 
+# Network ranges that Python's ipaddress module classifies as "public" but
+# that are practically internal (carrier-grade NAT, IPv6 6to4 anycast,
+# Teredo). Empty if your environment has no exposure to these — but the
+# cost of including them is negligible.
+_UNSAFE_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),    # RFC 6598 CGNAT (not is_private)
+    ipaddress.ip_network("192.88.99.0/24"),   # 6to4 relay anycast (deprecated, but routable)
+    ipaddress.ip_network("2002::/16"),         # 6to4 prefix
+    ipaddress.ip_network("2001::/32"),         # Teredo
+)
+
 # Article-container detection. The HTML-channel parser scopes visible-text
 # title-matching and <a href> collection to inside these elements, defending
 # against title-in-sidebar and href-in-JSON-blob false positives.
@@ -184,7 +195,20 @@ def _resolve_adapter_metadata(adapter_name: str) -> dict[str, Any]:
         )
 
 
-_CREDENTIAL_NEEDLES = ("Bearer", "Authorization", "access_token", "refresh_token")
+# Literal substrings to redact case-insensitively from exception messages.
+_CREDENTIAL_NEEDLES = ("bearer", "authorization", "access_token", "refresh_token")
+
+# Token-shape regexes to redact. Each pattern matches an entire token value;
+# the match is replaced with "<redacted>". Patterns are checked in order;
+# earlier matches win. Adding patterns is the right place to handle a newly-
+# observed credential format.
+_CREDENTIAL_PATTERNS = (
+    re.compile(r"ya29\.[A-Za-z0-9._\-]+"),                        # Google OAuth access token
+    re.compile(r"1//[A-Za-z0-9_\-]+"),                            # Google refresh token
+    re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),  # JWT
+    re.compile(r"sk-[A-Za-z0-9\-_]{16,}"),                        # OpenAI / Stripe-style key
+    re.compile(r"AIza[A-Za-z0-9_\-]{30,}"),                       # Google API key
+)
 
 
 def _sanitize_exception(exc: BaseException, *, max_len: int = 200) -> str:
@@ -194,11 +218,19 @@ def _sanitize_exception(exc: BaseException, *, max_len: int = 200) -> str:
     reference to a Google OAuth Credentials object (or similar) cannot leak
     a bearer or refresh token into the JSONL/stderr stream. Also strips
     CR/LF/TAB to defend against log injection.
+
+    Redaction strategy: regex patterns for known token shapes (Google OAuth
+    access/refresh, JWT, sk-prefixed keys, Google API keys) plus a
+    case-insensitive substring sweep for the English needles. Patterns run
+    first so the surrounding token value is replaced, not just the literal
+    English word.
     """
     cls = type(exc).__name__
     msg = str(exc)
+    for pattern in _CREDENTIAL_PATTERNS:
+        msg = pattern.sub("<redacted>", msg)
     for needle in _CREDENTIAL_NEEDLES:
-        msg = msg.replace(needle, "<redacted>")
+        msg = re.sub(re.escape(needle), "<redacted>", msg, flags=re.IGNORECASE)
     msg = msg.replace("\r", " ").replace("\n", " ").replace("\t", " ")
     if len(msg) > max_len:
         msg = msg[: max_len - 3] + "..."
@@ -376,6 +408,10 @@ def _check_resolved_ip_safe(host: str) -> tuple[bool, str | None]:
             return False, f"host_resolved_to_private_ip: {addr}"
         if addr in _PRIVATE_METADATA_IPS:
             return False, f"host_resolved_to_private_ip: {addr}"
+        # CGNAT and 6to4/Teredo: not flagged by Python's stdlib attributes.
+        for net in _UNSAFE_NETWORKS:
+            if ip.version == net.version and ip in net:
+                return False, f"host_resolved_to_private_ip: {addr}"
     return True, None
 
 
@@ -412,13 +448,17 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
 
     Per-hop SSRF defense addresses DNS rebinding: an initial allowlisted host
     may resolve to a public IP, then a 301 redirect's target host may
-    resolve to a private IP. We re-check on every hop.
+    resolve to a private IP. We re-check on every hop. Also refuses
+    HTTPS → HTTP downgrades — defends against an on-path attacker who
+    redirects a TLS-verified initial request to plain HTTP to bypass
+    certificate validation.
     """
 
     def __init__(self, allowed_hosts: tuple[str, ...]) -> None:
         super().__init__()
         self._allowed_hosts = allowed_hosts
         self.hop_count = 0
+        self._initial_scheme: str | None = None  # set on first redirect_request
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         self.hop_count += 1
@@ -429,6 +469,14 @@ class _SafeRedirectHandler(HTTPRedirectHandler):
             raise _RedirectRejected(
                 f"host_not_allowed: <invalid_scheme:{_safe_for_log(parsed.scheme, max_len=16)}>"
             )
+        # Reject HTTPS → HTTP downgrade on the first redirect (or any
+        # subsequent hop). The initial request's scheme is captured from
+        # `req` since urllib's redirect handler hands us the previous
+        # request object.
+        if self._initial_scheme is None:
+            self._initial_scheme = urlparse(req.full_url).scheme
+        if self._initial_scheme == "https" and parsed.scheme == "http":
+            raise _RedirectRejected("scheme_downgrade: https_to_http")
         new_host = _normalize_host(parsed.hostname)
         if not new_host:
             raise _RedirectRejected("host_not_allowed: <unparseable>")
@@ -457,15 +505,12 @@ def _read_body_bounded(resp: Any) -> bytes:
         if not chunk:
             return bytes(buf)
         buf.extend(chunk)
-    # Hit the cap. Probe one more byte to decide whether the body was
-    # exactly at the cap (rare) or over.
-    try:
-        extra = resp.read(1)
-    except Exception:
-        extra = b""
-    if extra:
-        raise _BodyTooLarge()
-    return bytes(buf)
+    # Hit the cap. A body exactly at the cap is rare; treat the boundary
+    # case as "too large" rather than probing one more byte (the probe
+    # read is unguarded by the wall-clock budget and can hang up to the
+    # socket timeout). Trades a tiny false-positive risk at exactly
+    # _MAX_BODY_BYTES for a hard wall-clock guarantee.
+    raise _BodyTooLarge()
 
 
 def _fetch_html_once(url: str, allowed_hosts: tuple[str, ...]) -> tuple[int, bytes, str]:
