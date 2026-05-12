@@ -216,14 +216,21 @@ def test_dispatches_html_channel_for_medium_adapter():
         m.assert_called_once()
 
 
-def test_unknown_adapter_raises_through_for_dispatcher_to_handle():
-    """The dispatcher (Unit 6) handles the KeyError; verifier doesn't swallow it."""
+def test_unknown_adapter_becomes_verifier_internal_error():
+    """Unknown adapter → verifier wraps the KeyError as verifier_internal_error.
+
+    The defensive wrap means a verifier bug (or new adapter without metadata)
+    never aborts the batch; instead it surfaces in the internal-error count
+    and rolls into verified_false for exit-code purposes (Unit 6's
+    saturation guard)."""
     result = AdapterResult(
         status="published", adapter="substack-api", platform="substack",
         published_url="https://substack.com/p/x",
     )
-    with pytest.raises(KeyError):
-        verify_published({"links": []}, result)
+    out = verify_published({"links": []}, result)
+    assert out.verified is None
+    assert out.verification_error.startswith("verifier_internal_error:")
+    assert "substack-api" in out.verification_error or "KeyError" in out.verification_error
 
 
 def test_verify_published_signature_keyword_only_service():
@@ -234,6 +241,41 @@ def test_verify_published_signature_keyword_only_service():
             status="published", adapter="medium-api", platform="medium",
             published_url="https://medium.com/x"))
     assert out is sentinel
+
+
+# ---------- _sanitize_exception ----------
+
+
+def test_sanitize_strips_bearer_token():
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError("auth header was Bearer ya29.abc123secret")
+    sanitized = _sanitize_exception(exc)
+    assert "Bearer" not in sanitized
+    assert "<redacted>" in sanitized
+    assert sanitized.startswith("RuntimeError:")
+
+
+def test_sanitize_strips_refresh_token_string():
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = ValueError("refresh_token=1//abc was rejected")
+    sanitized = _sanitize_exception(exc)
+    assert "refresh_token" not in sanitized
+
+
+def test_sanitize_strips_crlf():
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError("a\r\nb\tc")
+    sanitized = _sanitize_exception(exc)
+    assert "\r" not in sanitized
+    assert "\n" not in sanitized
+    assert "\t" not in sanitized
+
+
+def test_sanitize_caps_length():
+    from backlink_publisher.verifier import _sanitize_exception
+    exc = RuntimeError("x" * 1000)
+    sanitized = _sanitize_exception(exc, max_len=50)
+    assert len(sanitized) <= 50 + len("RuntimeError: ")  # cls prefix added after cap
 
 
 def test_module_importable_without_side_effects():

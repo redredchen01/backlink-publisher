@@ -250,8 +250,13 @@ def test_external_service_error_all_rows_fail(mock_pub, mock_verify):
 
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
-def test_dependency_error_still_aborts(mock_pub, mock_verify):
-    """DependencyError still aborts immediately (exit 3, not log-and-continue)."""
+def test_dependency_error_logs_and_continues(mock_pub, mock_verify):
+    """DependencyError mid-loop now logs and continues (was: abort + exit 3).
+
+    The refactor lets the max() exit-code rule reach verification failure
+    (exit 4) instead of being masked by an early exit 3. Every row still
+    gets attempted; subsequent rows record their own failure.
+    """
     mock_pub.side_effect = DependencyError("oauth not configured")
 
     payloads = [_make_valid_payload(platform="blogger") for _ in range(2)]
@@ -261,8 +266,8 @@ def test_dependency_error_still_aborts(mock_pub, mock_verify):
 
     assert code == 3
     assert "oauth not configured" in stderr
-    # Only first adapter call was made — abort on first DependencyError
-    assert mock_pub.call_count == 1
+    # Both rows attempted (no more mid-loop abort) — Unit 6 refactor.
+    assert mock_pub.call_count == 2
 
 
 def test_publish_empty_input():

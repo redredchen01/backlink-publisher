@@ -184,6 +184,27 @@ def _resolve_adapter_metadata(adapter_name: str) -> dict[str, Any]:
         )
 
 
+_CREDENTIAL_NEEDLES = ("Bearer", "Authorization", "access_token", "refresh_token")
+
+
+def _sanitize_exception(exc: BaseException, *, max_len: int = 200) -> str:
+    """Stable string form of an exception with credential strings stripped.
+
+    The verifier wraps every internal exception with this so a transitive
+    reference to a Google OAuth Credentials object (or similar) cannot leak
+    a bearer or refresh token into the JSONL/stderr stream. Also strips
+    CR/LF/TAB to defend against log injection.
+    """
+    cls = type(exc).__name__
+    msg = str(exc)
+    for needle in _CREDENTIAL_NEEDLES:
+        msg = msg.replace(needle, "<redacted>")
+    msg = msg.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    if len(msg) > max_len:
+        msg = msg[: max_len - 3] + "..."
+    return f"{cls}: {msg}"
+
+
 def verify_published(
     row: dict[str, Any],
     result: AdapterResult,
@@ -204,7 +225,28 @@ def verify_published(
       - `_dry_run=True`     → outcome(None, None, "dry_run")
       - `status != published` → outcome(None, None, None)
       - otherwise dispatch by adapter channel.
+
+    Defensive: any exception escaping a channel implementation is wrapped as
+    a `verifier_internal_error:` outcome (verified=null) so a verifier bug
+    can never abort the batch. The dispatcher rolls these into the
+    verified=false count for exit-code purposes.
     """
+    try:
+        return _dispatch(row, result, service=service)
+    except Exception as exc:  # noqa: BLE001 — defensive wrap by design
+        return VerificationOutcome(
+            verified=None,
+            verified_at=None,
+            verification_error=f"{_ERR_INTERNAL_PREFIX}{_sanitize_exception(exc)}",
+        )
+
+
+def _dispatch(
+    row: dict[str, Any],
+    result: AdapterResult,
+    *,
+    service: Any = None,
+) -> VerificationOutcome:
     if result._dry_run:
         return VerificationOutcome(
             verified=None, verified_at=None, verification_error="dry_run"
