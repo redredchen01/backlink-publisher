@@ -1,7 +1,7 @@
 ---
 title: "feat: Real-Publish Verification"
 type: feat
-status: active
+status: completed
 date: 2026-05-12
 origin: backlink-publisher/docs/brainstorms/2026-05-12-real-publish-verification-requirements.md
 ---
@@ -164,7 +164,7 @@ verifier.py
 
 ## Implementation Units
 
-- [ ] **Unit 1: Verifier module skeleton — outcome model, constants, dispatch entry**
+- [x] **Unit 1: Verifier module skeleton — outcome model, constants, dispatch entry**
 
 **Goal:** Land the public surface of `verifier.py` — `VerificationOutcome` dataclass, per-channel retry constants, and the `verify_published` dispatch entry that handles status/dry-run skip paths without doing any I/O yet. Channel-specific verifiers are stubs returning `null` outcomes.
 
@@ -198,7 +198,7 @@ verifier.py
 
 ---
 
-- [ ] **Unit 2: HTML channel verifier — host allowlist, retry, paywall, parsed-text + hrefs**
+- [x] **Unit 2: HTML channel verifier — host allowlist, retry, paywall, parsed-text + hrefs**
 
 **Goal:** Implement `_verify_html_channel` end-to-end against the Medium adapter's needs. Covers R5/R5a/R6/R7/R8/R8a/R9/R10 for the HTML path plus SSRF defense, scoped `<a href>` matching, and final-URL path-shape check (per resolved Resolve Before Implementation items).
 
@@ -269,7 +269,7 @@ _verify_html_channel(url, title, expected_hrefs, host_allowlist):
 
 ---
 
-- [ ] **Unit 3: Blogger API channel verifier — `posts.get` + structured match**
+- [x] **Unit 3: Blogger API channel verifier — `posts.get` + structured match**
 
 **Goal:** Implement `_verify_blogger_api` that uses the existing Blogger API client to fetch the published post by `blogId`/`postId` and matches against `title` and the verified link subset. Covers the Blogger half of R4a/R6/R7/R8.
 
@@ -306,7 +306,7 @@ _verify_html_channel(url, title, expected_hrefs, host_allowlist):
 
 ---
 
-- [ ] **Unit 4: Centralized adapter metadata in verifier + Blogger `_provider_meta` capture**
+- [x] **Unit 4: Centralized adapter metadata in verifier + Blogger `_provider_meta` capture**
 
 **Goal:** Replace the proposed per-adapter declaration surface with a single `_ADAPTER_METADATA` dict inside `verifier.py`. Add a `_provider_meta` field to `AdapterResult` and have `BloggerAPIAdapter.publish()` populate it with `blog_id` / `post_id` from the insert response. Two adapters don't justify spreading metadata across four adapter modules.
 
@@ -365,7 +365,7 @@ _verify_html_channel(url, title, expected_hrefs, host_allowlist):
 
 ---
 
-- [ ] **Unit 5: `AdapterResult.to_publish_output` schema additive update**
+- [x] **Unit 5: `AdapterResult.to_publish_output` schema additive update**
 
 **Goal:** Add three additive verification fields to the canonical JSONL output shape with safe `null` defaults. Dispatcher (Unit 6) overrides these per row.
 
@@ -396,7 +396,7 @@ _verify_html_channel(url, title, expected_hrefs, host_allowlist):
 
 ---
 
-- [ ] **Unit 6: Dispatcher integration — verifier call, exit-code `max`, diagnostics**
+- [x] **Unit 6: Dispatcher integration — verifier call, exit-code `max`, diagnostics**
 
 **Goal:** Wire the verifier into `publish_backlinks.py`, implement R14/R15 (`max()` exit-code logic), emit R16 per-row stderr lines and R17 run-end summary including `lag_ratio`. This is the unit that turns Units 1-5 into observable behavior.
 
