@@ -15,6 +15,22 @@ from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 _SCOPES = ["https://www.googleapis.com/auth/blogger"]
 
 
+def _get_service(config: Config):
+    """Build and return an authorised Blogger API v3 service.
+
+    Single centralised entry point so both the publisher (`BloggerAPIAdapter.publish`)
+    and the verifier (`backlink_publisher.verifier._verify_blogger_api`) use the
+    same OAuth credentials and HTTP client. No caching in V1 — each call builds
+    a fresh service from current credentials, which keeps test mocking simple
+    and avoids cross-test state leakage. Re-build cost is negligible compared
+    with the OAuth refresh that may happen inside `_build_credentials`.
+    """
+    from googleapiclient.discovery import build
+
+    creds = _build_credentials(config)
+    return build("blogger", "v3", credentials=creds)
+
+
 def _build_credentials(config: Config):
     """Return valid google.oauth2.credentials.Credentials, running OAuth if needed."""
     from google.oauth2.credentials import Credentials
@@ -94,7 +110,7 @@ class BloggerAPIAdapter:
         blog_id = resolve_blog_id(config, payload.get("main_domain", ""))
 
         try:
-            creds = _build_credentials(config)
+            service = _get_service(config)
         except DependencyError:
             raise
         except Exception as exc:
@@ -105,11 +121,8 @@ class BloggerAPIAdapter:
         log.info(json_log(adapter="blogger-api", phase="auth", id=article_id))
 
         try:
-            from googleapiclient.discovery import build
             from googleapiclient.errors import HttpError
-            import google.auth.transport.requests as google_requests
 
-            service = build("blogger", "v3", credentials=creds)
             body = {
                 "title": payload.get("title", ""),
                 "content": render_to_html(payload.get("content_markdown", "")),
@@ -162,6 +175,20 @@ class BloggerAPIAdapter:
             ) from exc
 
         url = result.get("url", "")
+        # Capture structured identifiers from the insert response for the
+        # verifier (real-publish-verification Unit 4). Blogger's published-URL
+        # path shape (/YYYY/MM/slug.html) does not embed postId, so structured
+        # passthrough is the only reliable path. Defensive .get so a malformed
+        # response does not block publication — the verifier will surface the
+        # missing data as verification_error="missing_provider_meta".
+        post_id = str(result.get("id") or "")
+        blog_id_from_response = str((result.get("blog") or {}).get("id") or "")
+        provider_meta = {}
+        if post_id:
+            provider_meta["post_id"] = post_id
+        if blog_id_from_response:
+            provider_meta["blog_id"] = blog_id_from_response
+
         elapsed = int((time.monotonic() - t0) * 1000)
         log.info(
             json_log(adapter="blogger-api", phase="done", id=article_id, elapsed_ms=elapsed)
@@ -173,12 +200,14 @@ class BloggerAPIAdapter:
                 adapter="blogger-api",
                 platform=platform,
                 draft_url=url,
+                _provider_meta=provider_meta,
             )
         return AdapterResult(
             status="published",
             adapter="blogger-api",
             platform=platform,
             published_url=url,
+            _provider_meta=provider_meta,
         )
 
 

@@ -24,11 +24,13 @@ CONFIG = Config(
 )
 
 
-def make_mock_service(url="https://myblog.blogspot.com/2026/05/post.html"):
+def make_mock_service(url="https://myblog.blogspot.com/2026/05/post.html",
+                      post_id="12345", blog_id="999"):
     mock_service = MagicMock()
     mock_service.posts.return_value.insert.return_value.execute.return_value = {
         "url": url,
-        "id": "12345",
+        "id": post_id,
+        "blog": {"id": blog_id},
     }
     return mock_service
 
@@ -111,7 +113,10 @@ def test_429_retried_and_recovers(mock_build, mock_creds, mock_sleep):
 
     mock_service = MagicMock()
     execute = mock_service.posts.return_value.insert.return_value.execute
-    execute.side_effect = [HttpError(resp=resp_429, content=b"rate limited"), {"url": "https://myblog.blogspot.com/post"}]
+    execute.side_effect = [
+        HttpError(resp=resp_429, content=b"rate limited"),
+        {"url": "https://myblog.blogspot.com/post", "id": "12345", "blog": {"id": "999"}},
+    ]
     mock_build.return_value = mock_service
 
     adapter = BloggerAPIAdapter()
@@ -178,6 +183,88 @@ def test_401_not_retried(mock_build, mock_creds, mock_sleep):
     with pytest.raises(ExternalServiceError, match="authentication failed"):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
     mock_sleep.assert_not_called()
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_publish_captures_provider_meta_from_insert_response(mock_build, mock_creds):
+    """Unit 4: postId and blog.id from the insert response land in _provider_meta."""
+    mock_build.return_value = make_mock_service(
+        post_id="POST_42", blog_id="BLOG_99",
+    )
+    adapter = BloggerAPIAdapter()
+    result = adapter.publish(PAYLOAD, mode="publish", config=CONFIG)
+
+    assert result._provider_meta == {"post_id": "POST_42", "blog_id": "BLOG_99"}
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_publish_provider_meta_does_not_leak_into_jsonl(mock_build, mock_creds):
+    """Internal _provider_meta must not surface in to_publish_output."""
+    mock_build.return_value = make_mock_service()
+    adapter = BloggerAPIAdapter()
+    result = adapter.publish(PAYLOAD, mode="publish", config=CONFIG)
+    out = result.to_publish_output(PAYLOAD, "2026-05-12T00:00:00+00:00")
+
+    assert "post_id" not in out
+    assert "blog_id" not in out
+    assert "_provider_meta" not in out
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_publish_tolerates_missing_blog_in_response(mock_build, mock_creds):
+    """Malformed insert response (no blog id) must not block publication.
+    The verifier surfaces the gap later as missing_provider_meta."""
+    mock_service = MagicMock()
+    mock_service.posts.return_value.insert.return_value.execute.return_value = {
+        "url": "https://myblog.blogspot.com/2026/05/post.html",
+        "id": "12345",
+        # no "blog" key at all
+    }
+    mock_build.return_value = mock_service
+
+    adapter = BloggerAPIAdapter()
+    result = adapter.publish(PAYLOAD, mode="publish", config=CONFIG)
+
+    assert result.status == "published"
+    assert result._provider_meta == {"post_id": "12345"}  # blog_id absent, no crash
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_publish_tolerates_missing_post_id_in_response(mock_build, mock_creds):
+    """Same as above but the postId is missing."""
+    mock_service = MagicMock()
+    mock_service.posts.return_value.insert.return_value.execute.return_value = {
+        "url": "https://myblog.blogspot.com/2026/05/post.html",
+        "blog": {"id": "999"},
+    }
+    mock_build.return_value = mock_service
+
+    adapter = BloggerAPIAdapter()
+    result = adapter.publish(PAYLOAD, mode="publish", config=CONFIG)
+    assert result.status == "published"
+    assert result._provider_meta == {"blog_id": "999"}
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_get_service_centralises_credential_and_service_construction(mock_build, mock_creds):
+    """Unit 4: both publisher and verifier go through _get_service.
+
+    Asserting that one call to publish invokes _build_credentials exactly
+    once AND build() exactly once — there is no second auth path inside
+    the publisher itself."""
+    mock_creds.return_value = MagicMock(valid=True)
+    mock_build.return_value = make_mock_service()
+
+    adapter = BloggerAPIAdapter()
+    adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+
+    assert mock_creds.call_count == 1
+    assert mock_build.call_count == 1
 
 
 @patch("backlink_publisher.adapters.blogger_api._build_credentials")
