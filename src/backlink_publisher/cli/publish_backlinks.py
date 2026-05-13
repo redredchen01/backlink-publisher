@@ -20,6 +20,7 @@ from ..errors import DependencyError, ExternalServiceError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
 from ..logger import publish_logger
 from ..schema import SUPPORTED_PLATFORMS, validate_publish_payload
+from ..verify_publish import verify_published
 
 
 def _error_class(exc: Exception) -> str:
@@ -29,6 +30,30 @@ def _error_class(exc: Exception) -> str:
     if isinstance(exc, ExternalServiceError):
         return "transient"
     return "unexpected"
+
+
+def _do_verify(
+    no_verify: bool,
+    dry_run: bool,
+    result: Any,
+    row: dict[str, Any],
+) -> tuple[bool, str]:
+    """Run post-publish verification if enabled. Returns (ok, reason)."""
+    if no_verify or dry_run:
+        return True, ""
+    verify_url = result.published_url or result.draft_url
+    if not verify_url:
+        return True, ""
+    is_medium = getattr(result, "adapter", "") in _MEDIUM_ADAPTERS
+    max_wait = 30 if is_medium else 10
+    required_links = [lnk["url"] for lnk in row.get("links", []) if lnk.get("required")]
+    vr = verify_published(
+        verify_url,
+        title=row.get("title", ""),
+        required_link_urls=required_links,
+        max_wait=max_wait,
+    )
+    return vr.ok, vr.reason
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
@@ -47,7 +72,10 @@ def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_resume(args: Any) -> None:
-    """Handle --resume <run_id>: load checkpoint, process pending/failed items, emit union output."""
+    """Handle --resume <run_id>: load checkpoint, process pending/failed items, emit union output.
+
+    Runs post-publish verification for newly published items unless --no-verify is set.
+    """
     run_id = args.resume
 
     try:
@@ -104,6 +132,7 @@ def _run_resume(args: Any) -> None:
 
     first_medium_in_resume = True
     last_medium_success_idx = -1
+    unverified_ids: set[str] = set()
 
     for item_idx, item in enumerate(to_process):
         row = item["payload"]
@@ -165,6 +194,19 @@ def _run_resume(args: Any) -> None:
         )
         if result.adapter in _MEDIUM_ADAPTERS:
             last_medium_success_idx = item_idx
+
+        # Post-publish verification
+        row = item["payload"]
+        verify_ok, verify_reason = _do_verify(
+            getattr(args, "no_verify", False), False, result, row
+        )
+        if not verify_ok:
+            unverified_ids.add(item["id"])
+            publish_logger.warn(
+                f"verification failed: id={item['id']} reason={verify_reason}",
+                extra={"id": item["id"], "adapter": result.adapter},
+            )
+
         publish_logger.info(
             f"published: id={item['id']} status={result.status}",
             extra={"id": item["id"], "status": result.status},
@@ -172,13 +214,23 @@ def _run_resume(args: Any) -> None:
 
     # build union output in original checkpoint order
     updated_ckpt = checkpoint.load_checkpoint(run_id)
-    all_done = [item_to_publish_output(i) for i in updated_ckpt["items"] if i["status"] == "done"]
+    all_done = []
+    for i in updated_ckpt["items"]:
+        if i["status"] == "done":
+            out = item_to_publish_output(i)
+            if i["id"] in unverified_ids:
+                out["status"] += "_unverified"
+            all_done.append(out)
     write_jsonl(all_done)
     sys.stdout.flush()
 
     still_unfinished = [i for i in updated_ckpt["items"] if i["status"] in ("pending", "failed")]
     if not still_unfinished:
         checkpoint.mark_complete(run_id)
+        if unverified_ids:
+            for uid in unverified_ids:
+                print(f"verification failed: id={uid}", file=sys.stderr)
+            raise SystemExit(5)
         raise SystemExit(0)
     else:
         for f in still_unfinished:
@@ -257,6 +309,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         default=False,
         help="Delete all complete checkpoints and exit",
+    )
+    parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        default=False,
+        help="Skip post-publish content verification (default: verify after each publish)",
     )
     args = parser.parse_args(argv)
 
@@ -514,6 +572,18 @@ def main(argv: list[str] | None = None) -> None:
             success_count += 1
             if result.adapter in _MEDIUM_ADAPTERS:
                 last_medium_success_idx = row_idx
+
+            # Post-publish verification
+            verify_ok, verify_reason = _do_verify(
+                args.no_verify, args.dry_run, result, row
+            )
+            if not verify_ok:
+                outputs[-1]["status"] += "_unverified"
+                publish_logger.warn(
+                    f"verification failed: id={row.get('id', '')} reason={verify_reason}",
+                    extra={"id": row.get("id"), "adapter": result.adapter},
+                )
+
             if run_id is not None:
                 try:
                     checkpoint.update_item(
@@ -533,6 +603,7 @@ def main(argv: list[str] | None = None) -> None:
     # Only output successful results to stdout
     successful = [r for r in outputs if r.get("error") is None]
     failed = [r for r in outputs if r.get("error") is not None]
+    unverified = [r for r in successful if r.get("status", "").endswith("_unverified")]
 
     if successful:
         write_jsonl(successful)
@@ -544,6 +615,14 @@ def main(argv: list[str] | None = None) -> None:
 
     if not args.dry_run and not successful:
         emit_error("no payloads were published", exit_code=5)
+
+    if unverified:
+        for u in unverified:
+            print(
+                f"verification failed: id={u.get('id', '')} status={u.get('status', '')}",
+                file=sys.stderr,
+            )
+        raise SystemExit(5)
 
     publish_logger.info(
         f"publish complete: {success_count} succeeded, {fail_count} failed",

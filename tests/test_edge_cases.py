@@ -14,6 +14,15 @@ import pytest
 from backlink_publisher.cli.plan_backlinks import main as plan_main
 from backlink_publisher.cli.validate_backlinks import main as validate_main
 from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher.verify_publish import VerificationResult
+
+
+@pytest.fixture(autouse=True)
+def _mock_verify_pass(mocker):
+    mocker.patch(
+        "backlink_publisher.cli.publish_backlinks.verify_published",
+        return_value=VerificationResult(ok=True, reason=""),
+    )
 
 
 # ──────────────────────────────────────────────────────────
