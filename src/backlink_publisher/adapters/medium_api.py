@@ -61,6 +61,16 @@ class MediumAPIAdapter:
             raise DependencyError("medium access token or integration token not configured"
                                  " — please authorize via Settings → Medium 授权")
 
+        # Pre-flight expiry check for OAuth tokens that carry an expires_at field.
+        # Integration tokens and pre-fix OAuth tokens lack expires_at — skipped (fail-open).
+        # expires_at = 0 is a sentinel meaning "unknown"; treated as absent.
+        if medium_token_data and "expires_at" in medium_token_data:
+            expires_at = medium_token_data["expires_at"]
+            if expires_at > 0 and time.time() >= expires_at - 300:
+                raise ExternalServiceError(
+                    "Medium OAuth token expires in < 5 minutes — re-authorize via Settings → Medium 授权"
+                )
+
         t0 = time.monotonic()
         article_id = payload.get("id", "")
         log.info(_json_log(adapter="medium-api", phase="start", id=article_id))
