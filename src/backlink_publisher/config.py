@@ -237,11 +237,18 @@ def save_config(
     medium_token: str | None = None,
     blogger_client_id: str | None = None,
     blogger_client_secret: str | None = None,
+    target_anchor_keywords: dict[str, list[str]] | None = None,
 ) -> None:
     """Write (or update) config.toml with the supplied values.
 
     Merges new values with any existing config so that calling this
     function never silently drops keys that were already there.
+
+    ``target_anchor_keywords`` follows the same three-state semantics as
+    ``extra_blogger_ids``:
+    - ``None`` (default) — preserve whatever is already on disk
+    - ``{}`` — explicitly clear the ``[targets]`` section
+    - non-empty dict — write exactly the provided pools (overrides disk)
     """
     config_path = path or (_config_dir() / "config.toml")
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,8 +303,14 @@ def save_config(
         lines.append("# integration_token = \"your-medium-integration-token\"")
     lines.append("")
 
-    # [targets] — merge from disk so hand-edited anchor_keywords are never lost
-    targets = dict(existing.target_anchor_keywords)
+    # [targets] — three-state merge matching extra_blogger_ids semantics:
+    #   None → preserve existing disk contents
+    #   {}   → explicitly clear (write no [targets] section)
+    #   {...} → write exactly the provided pools
+    if target_anchor_keywords is None:
+        targets = dict(existing.target_anchor_keywords)
+    else:
+        targets = dict(target_anchor_keywords)
     if targets:
         for domain, keywords in targets.items():
             quoted_kws = ", ".join(f'"{k}"' for k in keywords)

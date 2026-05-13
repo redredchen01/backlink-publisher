@@ -14,6 +14,7 @@ from backlink_publisher.config import (
     load_blogger_token,
     resolve_blog_id,
     save_blogger_token,
+    save_config,
 )
 from backlink_publisher.errors import DependencyError
 
@@ -231,3 +232,71 @@ anchor_keywords = ["kw1", "kw2"]
     assert get_anchor_keywords(cfg, "http://example.com") == ["kw1", "kw2"]
     # Bare domain lookup should also succeed
     assert get_anchor_keywords(cfg, "https://example.com/") == ["kw1", "kw2"]
+
+
+def test_save_config_explicit_target_keywords(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[blogger]
+"https://site.com" = "111"
+""")
+    cfg = load_config(cfg_path)
+    # Explicit dict → write those pools
+    save_config(
+        cfg,
+        path=cfg_path,
+        target_anchor_keywords={"https://site.com": ["brand", "head term"]},
+    )
+    cfg2 = load_config(cfg_path)
+    assert get_anchor_keywords(cfg2, "https://site.com") == ["brand", "head term"]
+
+
+def test_save_config_empty_dict_clears_targets(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[blogger]
+"https://site.com" = "111"
+
+[targets."https://site.com"]
+anchor_keywords = ["brand"]
+""")
+    cfg = load_config(cfg_path)
+    # {} → clear targets section
+    save_config(cfg, path=cfg_path, target_anchor_keywords={})
+    cfg2 = load_config(cfg_path)
+    assert cfg2.target_anchor_keywords == {}
+
+
+def test_save_config_none_preserves_existing_targets(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[blogger]
+"https://site.com" = "111"
+
+[targets."https://site.com"]
+anchor_keywords = ["brand"]
+""")
+    cfg = load_config(cfg_path)
+    # None (default) → preserve disk
+    save_config(cfg, path=cfg_path, medium_token="tok")
+    cfg2 = load_config(cfg_path)
+    assert get_anchor_keywords(cfg2, "https://site.com") == ["brand"]
+
+
+def test_save_config_explicit_overwrites_existing(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[blogger]
+"https://site.com" = "111"
+
+[targets."https://site.com"]
+anchor_keywords = ["old-kw"]
+""")
+    cfg = load_config(cfg_path)
+    save_config(
+        cfg,
+        path=cfg_path,
+        target_anchor_keywords={"https://site.com": ["new-kw1", "new-kw2"]},
+    )
+    cfg2 = load_config(cfg_path)
+    assert get_anchor_keywords(cfg2, "https://site.com") == ["new-kw1", "new-kw2"]
