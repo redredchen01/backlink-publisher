@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import _cache_dir
+from .io_utils import atomic_write_json
 
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _lock = threading.Lock()
@@ -36,13 +37,10 @@ def _checkpoint_path(run_id: str) -> Path:
 
 
 def _atomic_write(path: Path, data: dict) -> None:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
-    except OSError:
-        pass
-    tmp.replace(path)
+    # Preserved as a module-private alias so existing call sites and tests that
+    # patch ``checkpoint._atomic_write`` keep working. New code should import
+    # ``atomic_write_json`` from ``io_utils`` directly.
+    atomic_write_json(path, data, mode=stat.S_IRUSR | stat.S_IWUSR)
 
 
 def generate_run_id() -> str:
