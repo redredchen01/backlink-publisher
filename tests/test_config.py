@@ -9,6 +9,7 @@ import pytest
 
 from backlink_publisher.config import (
     Config,
+    get_anchor_keywords,
     load_config,
     load_blogger_token,
     resolve_blog_id,
@@ -103,3 +104,87 @@ def test_save_blogger_token_mode_0600(tmp_path):
 def test_load_blogger_token_missing(tmp_path):
     result = load_blogger_token(tmp_path / "nonexistent.json")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# target_anchor_keywords parsing
+# ---------------------------------------------------------------------------
+
+ANCHOR_TOML = b"""
+[targets."https://my-site.com"]
+anchor_keywords = ["brand", "head term", "long tail phrase"]
+
+[targets."https://other-site.org/"]
+anchor_keywords = ["other-brand", "industry word"]
+"""
+
+
+def test_target_anchor_keywords_parsed(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(ANCHOR_TOML)
+    cfg = load_config(cfg_path)
+
+    assert cfg.target_anchor_keywords["https://my-site.com"] == [
+        "brand", "head term", "long tail phrase",
+    ]
+    # Trailing slash stripped at parse time
+    assert cfg.target_anchor_keywords["https://other-site.org"] == [
+        "other-brand", "industry word",
+    ]
+
+
+def test_get_anchor_keywords_normalises_trailing_slash(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(ANCHOR_TOML)
+    cfg = load_config(cfg_path)
+
+    # Lookup tolerates either form
+    assert get_anchor_keywords(cfg, "https://my-site.com") == [
+        "brand", "head term", "long tail phrase",
+    ]
+    assert get_anchor_keywords(cfg, "https://my-site.com/") == [
+        "brand", "head term", "long tail phrase",
+    ]
+
+
+def test_get_anchor_keywords_missing_returns_empty(tmp_path):
+    cfg = Config()
+    assert get_anchor_keywords(cfg, "https://unknown.com") == []
+
+
+def test_target_anchor_keywords_section_absent(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(SAMPLE_TOML)  # no [targets] section
+    cfg = load_config(cfg_path)
+    assert cfg.target_anchor_keywords == {}
+
+
+def test_target_anchor_keywords_invalid_type_skipped(tmp_path, caplog):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[targets."https://bad.com"]
+anchor_keywords = "should-be-a-list"
+
+[targets."https://good.com"]
+anchor_keywords = ["foo"]
+""")
+    with caplog.at_level("WARNING"):
+        cfg = load_config(cfg_path)
+
+    # Bad entry skipped, good entry kept
+    assert "https://bad.com" not in cfg.target_anchor_keywords
+    assert cfg.target_anchor_keywords["https://good.com"] == ["foo"]
+    # Warning emitted for the malformed entry
+    assert any("anchor_keywords" in rec.message for rec in caplog.records)
+
+
+def test_target_anchor_keywords_empty_list_kept(tmp_path):
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_bytes(b"""
+[targets."https://empty.com"]
+anchor_keywords = []
+""")
+    cfg = load_config(cfg_path)
+    # Empty list is preserved verbatim — caller (selector) treats as "no pool"
+    assert cfg.target_anchor_keywords["https://empty.com"] == []
+    assert get_anchor_keywords(cfg, "https://empty.com") == []

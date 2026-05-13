@@ -37,3 +37,26 @@ client_secret = "your-client-secret"
 # [medium.oauth]
 # client_id     = "your-medium-client-id"
 # client_secret = "your-medium-client-secret"
+
+# ────────────────────────────────────────────────────────────
+# SEO anchor keywords per target site
+# ────────────────────────────────────────────────────────────
+# Each generated article inserts two backlinks pointing at the target's
+# main_domain. Without an entry below, both anchors fall back to the bare
+# domain (e.g. "your-site.com") which has near-zero SEO value. Add a pool of
+# 5–10 keywords per target — mix branded terms, head terms, and long-tail
+# phrases. The renderer picks two distinct keywords per article using a
+# deterministic mapping over (url_mode, link position), so distribution
+# across articles stays naturally varied.
+#
+# [targets."https://your-site.com"]
+# anchor_keywords = [
+#   "your-site",                  # branded
+#   "comprehensive content hub",  # head term
+#   "in-depth resource guide",    # long-tail
+#   "curated reference library",
+#   "expert tutorials",
+# ]
+#
+# [targets."https://another-site.org"]
+# anchor_keywords = ["another-site", "industry analysis", "data insights"]

@@ -7,6 +7,7 @@ Token file:  ~/.config/backlink-publisher/blogger-token.json
 from __future__ import annotations
 
 import json
+import logging
 import os
 import stat
 import sys
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from .errors import DependencyError
+
+_log = logging.getLogger(__name__)
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -57,6 +60,12 @@ class Config:
     medium_oauth: MediumOAuthConfig | None = None
     medium_integration_token: str | None = None
     medium_user_data_dir: Path | None = None
+    target_anchor_keywords: dict[str, list[str]] = field(default_factory=dict)
+    """Per-target SEO anchor keyword pool, keyed by main_domain (trailing slash
+    stripped). Populated from ``[targets."<main_domain>"].anchor_keywords`` in
+    config.toml. Empty pool / missing entry triggers fallback to bare domain
+    label at link-rendering time. Must be edited by hand — ``save_config``
+    does not write this section back."""
 
     @property
     def config_dir(self) -> Path:
@@ -118,13 +127,57 @@ def load_config(path: Path | None = None) -> Config:
     # blogger_section now contains only main_domain → blog_id mappings
     blog_ids = {k: str(v) for k, v in blogger_section.items() if isinstance(v, (str, int))}
 
+    target_anchor_keywords = _parse_target_anchor_keywords(data.get("targets", {}))
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
         medium_oauth=medium_oauth,
         medium_integration_token=medium_section.get("integration_token") or None,
         medium_user_data_dir=user_data_dir,
+        target_anchor_keywords=target_anchor_keywords,
     )
+
+
+def _parse_target_anchor_keywords(targets_section: Any) -> dict[str, list[str]]:
+    """Parse ``[targets."<main_domain>"].anchor_keywords`` entries.
+
+    Tolerant of missing / malformed entries — invalid entries are skipped with a
+    warning rather than aborting the whole config load. Keys are normalised by
+    stripping trailing slashes so lookups work regardless of how the user wrote
+    the domain.
+    """
+    if not isinstance(targets_section, dict):
+        return {}
+    result: dict[str, list[str]] = {}
+    for raw_domain, entry in targets_section.items():
+        if not isinstance(entry, dict):
+            _log.warning(
+                "[targets.%r] is not a table, skipping", raw_domain,
+            )
+            continue
+        keywords = entry.get("anchor_keywords")
+        if keywords is None:
+            continue
+        if not isinstance(keywords, list) or not all(isinstance(k, str) for k in keywords):
+            _log.warning(
+                "[targets.%r].anchor_keywords must be a list of strings, skipping",
+                raw_domain,
+            )
+            continue
+        key = raw_domain.rstrip("/")
+        result[key] = list(keywords)
+    return result
+
+
+def get_anchor_keywords(config: Config, main_domain: str) -> list[str]:
+    """Return the configured anchor keyword pool for ``main_domain``.
+
+    Returns an empty list when no pool is configured — callers are expected to
+    detect that condition and fall back to bare-domain anchor text.
+    """
+    key = main_domain.rstrip("/")
+    return config.target_anchor_keywords.get(key, [])
 
 
 def resolve_blog_id(config: Config, main_domain: str) -> str:

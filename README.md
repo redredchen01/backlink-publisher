@@ -175,6 +175,48 @@ cat validated.jsonl | publish-backlinks --mode draft
 MEDIUM_THROTTLE_MIN=30 MEDIUM_THROTTLE_MAX=90 publish-backlinks ...
 ```
 
+## SEO Anchor Keywords
+
+Generated articles place two backlinks pointing at each target site's
+`main_domain`. Without configuration, both anchor texts default to the bare
+domain (e.g. `your-site.com`) — a near-zero SEO signal. To improve keyword
+relevance, configure a per-target keyword pool in `~/.config/backlink-publisher/config.toml`:
+
+```toml
+[targets."https://your-site.com"]
+anchor_keywords = [
+  "your-site",                  # branded
+  "comprehensive content hub",  # head term
+  "in-depth resource guide",    # long-tail
+  "curated reference library",
+  "expert tutorials",
+]
+```
+
+**Selection strategy.** For each article, two distinct keywords are picked
+deterministically using `keywords[(position + offset) % len(keywords)]`, where
+`offset` is `0/1/2` for `url_mode` `A/B/C`. Same article configuration always
+yields the same anchor distribution; varying `url_mode` across articles rotates
+which keyword anchors which slot, producing natural distribution. Recommended
+pool size: **5–10 keywords**, mixing branded terms, head terms, and long-tail
+phrases.
+
+**All anchored references** in the article (excerpt, body paragraphs, density
+fallback paragraph, references section) use the configured keywords.
+
+**Fallback.** If `anchor_keywords` is missing or an empty list, the renderer
+falls back to the bare domain label and emits a single `WARN` per article so
+the operator notices the missed SEO opportunity. Articles still publish
+normally.
+
+**New-tab behaviour.** All `<a>` tags in the rendered HTML include
+`target="_blank" rel="noopener"` so backlinks open in a new tab without
+exposing the opener window. (Note: Medium's renderer may strip these
+attributes — behaviour on Medium is best-effort.)
+
+`save_config` does **not** write the `[targets]` section back. Edit
+`config.toml` by hand to add or update keyword pools.
+
 ## Publisher Adapters
 
 Publishing is API-first with a browser fallback for Medium.

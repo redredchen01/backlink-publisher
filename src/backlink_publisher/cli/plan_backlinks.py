@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .. import errors
+from ..config import Config, get_anchor_keywords, load_config
 from ..errors import InputValidationError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
 from ..language_check import detect_language
@@ -24,6 +25,7 @@ from ..markdown_utils import (
     _zh_body_b,
     _zh_body_c,
     links_to_markdown,
+    select_anchor_keywords,
     slugify,
 )
 from ..schema import (
@@ -47,11 +49,11 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
             "C": "Deep Dive into {domain}: {topic}",
         },
         "excerpt": {
-            "A": "This article explores the resources and value offered by [{domain}]({main_domain}), "
+            "A": "This article explores the resources and value offered by [{anchor}]({main_domain}), "
                   "providing context and curated links for readers.",
-            "B": "A curated overview of [{domain}]({main_domain})'s sections and key pages, "
+            "B": "A curated overview of [{anchor}]({main_domain})'s sections and key pages, "
                   "helping you navigate the site effectively.",
-            "C": "A detailed look at {topic} as covered by [{domain}]({main_domain}), with "
+            "C": "A detailed look at {topic} as covered by [{anchor}]({main_domain}), with "
                   "additional references for further reading.",
         },
         "seo_title": "{title} | Backlink Article",
@@ -72,9 +74,9 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
             "C": "\u6df1\u5ea6\u89e3\u6790{domain}\uff1a{topic}",
         },
         "excerpt": {
-            "A": "\u672c\u6587\u63a2\u8ba8[{domain}]({main_domain})\u63d0\u4f9b\u7684\u8d44\u6e90\u548c\u4ef7\u503c\uff0c\u4e3a\u8bfb\u8005\u63d0\u4f9b\u80cc\u666f\u548c\u7cbe\u9009\u94fe\u63a5\u3002",
-            "B": "\u5bf9[{domain}]({main_domain})\u5404\u677f\u5757\u548c\u5173\u952e\u9875\u9762\u7684\u7cbe\u9009\u6982\u89c8\uff0c\u5e2e\u52a9\u60a8\u9ad8\u6548\u6d4f\u89c8\u8be5\u7f51\u7ad9\u3002",
-            "C": "\u8be6\u7ec6\u89e3\u8bfb[{domain}]({main_domain})\u4e0a\u7684{topic}\u5185\u5bb9\uff0c\u5e76\u63d0\u4f9b\u5ef6\u4f38\u53c2\u8003\u8d44\u6599\u3002",
+            "A": "\u672c\u6587\u63a2\u8ba8[{anchor}]({main_domain})\u63d0\u4f9b\u7684\u8d44\u6e90\u548c\u4ef7\u503c\uff0c\u4e3a\u8bfb\u8005\u63d0\u4f9b\u80cc\u666f\u548c\u7cbe\u9009\u94fe\u63a5\u3002",
+            "B": "\u5bf9[{anchor}]({main_domain})\u5404\u677f\u5757\u548c\u5173\u952e\u9875\u9762\u7684\u7cbe\u9009\u6982\u89c8\uff0c\u5e2e\u52a9\u60a8\u9ad8\u6548\u6d4f\u89c8\u8be5\u7f51\u7ad9\u3002",
+            "C": "\u8be6\u7ec6\u89e3\u8bfb[{anchor}]({main_domain})\u4e0a\u7684{topic}\u5185\u5bb9\uff0c\u5e76\u63d0\u4f9b\u5ef6\u4f38\u53c2\u8003\u8d44\u6599\u3002",
         },
         "seo_title": "{title} | \u53cd\u5411\u94fe\u63a5\u6587\u7ae0",
         "seo_desc": "\u4e00\u7bc7\u7cbe\u5fc3\u64b0\u5199\u7684\u53cd\u5411\u94fe\u63a5\u6587\u7ae0\uff0c\u5f15\u7528{main_domain}\u5e76\u63d0\u4f9b\u7cbe\u9009\u5916\u90e8\u94fe\u63a5\u548c\u8d44\u6e90\u3002",
@@ -93,11 +95,11 @@ _TEMPLATES: dict[str, dict[str, Any]] = {
             "C": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u0430\u043d\u0430\u043b\u0438\u0437 {domain}: {topic}",
         },
         "excerpt": {
-            "A": "\u042d\u0442\u0430 \u0441\u0442\u0430\u0442\u044c\u044f \u0438\u0441\u0441\u043b\u0435\u0434\u0443\u0435\u0442 \u0440\u0435\u0441\u0443\u0440\u0441\u044b \u0438 \u0446\u0435\u043d\u043d\u043e\u0441\u0442\u044c [{domain}]({main_domain}), "
+            "A": "\u042d\u0442\u0430 \u0441\u0442\u0430\u0442\u044c\u044f \u0438\u0441\u0441\u043b\u0435\u0434\u0443\u0435\u0442 \u0440\u0435\u0441\u0443\u0440\u0441\u044b \u0438 \u0446\u0435\u043d\u043d\u043e\u0441\u0442\u044c [{anchor}]({main_domain}), "
                   "\u043f\u0440\u0435\u0434\u043e\u0441\u0442\u0430\u0432\u043b\u044f\u044f \u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442 \u0438 \u043a\u0443\u0440\u0438\u0440\u043e\u0432\u0430\u043d\u043d\u044b\u0435 \u0441\u0441\u044b\u043b\u043a\u0438 \u0434\u043b\u044f \u0447\u0438\u0442\u0430\u0442\u0435\u043b\u0435\u0439.",
-            "B": "\u041f\u043e\u0434\u0431\u043e\u0440 \u0440\u0430\u0437\u0434\u0435\u043b\u043e\u0432 \u0438 \u043a\u043b\u044e\u0447\u0435\u0432\u044b\u0445 \u0441\u0442\u0440\u0430\u043d\u0438\u0446 [{domain}]({main_domain}), "
+            "B": "\u041f\u043e\u0434\u0431\u043e\u0440 \u0440\u0430\u0437\u0434\u0435\u043b\u043e\u0432 \u0438 \u043a\u043b\u044e\u0447\u0435\u0432\u044b\u0445 \u0441\u0442\u0440\u0430\u043d\u0438\u0446 [{anchor}]({main_domain}), "
                   "\u043a\u043e\u0442\u043e\u0440\u044b\u0439 \u043f\u043e\u043c\u043e\u0436\u0435\u0442 \u0432\u0430\u043c \u044d\u0444\u0444\u0435\u043a\u0442\u0438\u0432\u043d\u043e \u043e\u0440\u0438\u0435\u043d\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c\u0441\u044f \u043d\u0430 \u0441\u0430\u0439\u0442\u0435.",
-            "C": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u0430\u043d\u0430\u043b\u0438\u0437 \u0442\u0435\u043c\u044b {topic} \u043d\u0430 [{domain}]({main_domain}) "
+            "C": "\u041f\u043e\u0434\u0440\u043e\u0431\u043d\u044b\u0439 \u0430\u043d\u0430\u043b\u0438\u0437 \u0442\u0435\u043c\u044b {topic} \u043d\u0430 [{anchor}]({main_domain}) "
                   "\u0441 \u0434\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u043c\u0438 \u0441\u0441\u044b\u043b\u043a\u0430\u043c\u0438 \u0434\u043b\u044f \u0434\u0430\u043b\u044c\u043d\u0435\u0439\u0448\u0435\u0433\u043e \u0447\u0442\u0435\u043d\u0438\u044f.",
         },
         "seo_title": "{title} | \u041e\u0431\u0440\u0430\u0442\u043d\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430 \u0441\u0442\u0430\u0442\u044c\u044f",
@@ -120,24 +122,34 @@ def _build_links(
     target_url: str,
     url_mode: str,
     extra_urls: list[str] | None = None,
+    anchors: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Construct the list of links for the article (target: 6-8 links)."""
+    """Construct the list of links for the article (target: 6-8 links).
+
+    ``anchors`` (when provided) supplies SEO-friendly keyword anchors for the
+    main_domain and target links — anchors[0] for main_domain, anchors[1] for
+    target. When omitted or shorter than needed, falls back to the bare-domain
+    label (legacy behaviour).
+    """
     links: list[dict[str, Any]] = []
 
     # 1. Main domain link (always present) - 1 link
     domain_label = main_domain.rstrip("/").replace("https://", "").replace("http://", "")
+    main_anchor = anchors[0] if anchors and len(anchors) >= 1 else domain_label
     links.append({
         "url": main_domain.rstrip("/"),
-        "anchor": domain_label,
+        "anchor": main_anchor,
         "kind": "main_domain",
         "required": True,
     })
 
     # 2. Target URL link - 1 link
     if target_url != main_domain:
+        target_label = target_url.rstrip("/").replace("https://", "").replace("http://", "")
+        target_anchor = anchors[1] if anchors and len(anchors) >= 2 else target_label
         links.append({
             "url": target_url,
-            "anchor": target_url.rstrip("/").replace("https://", "").replace("http://", ""),
+            "anchor": target_anchor,
             "kind": "target",
             "required": True,
         })
@@ -234,12 +246,16 @@ def _build_link_density_paragraph(
     language: str,
     url_mode: str,
     extra_url_count: int,
+    anchors: list[str] | None = None,
 ) -> str:
     """Return a short paragraph that adds missing target-site links to reach A+B+C ≥ 6.
 
     Computes the expected link count after body/excerpt/references are assembled,
     and only produces content when the count would be below 6.
     Mode B (categories URL) and C (categories+detail) already reach 6-7 and are skipped.
+
+    ``anchors`` (when provided) supplies SEO keywords for the two link slots in
+    the paragraph; falls back to ``domain`` (bare label) otherwise.
     """
     # Base count: excerpt(1) + body_template(2) + references_main(1) = 4
     base = 4
@@ -255,42 +271,67 @@ def _build_link_density_paragraph(
         return ""
 
     same_url = (target_url == main_domain)
+    a0 = anchors[0] if anchors and len(anchors) >= 1 else domain
+    a1 = anchors[1] if anchors and len(anchors) >= 2 else domain
 
     if language == "zh-CN":
         if same_url:
             return (
-                f"\n\n欲了解更多资源，请访问[{domain}]({main_domain})，"
-                f"探索[{domain}]({main_domain})为您精心准备的丰富内容。"
+                f"\n\n欲了解更多资源，请访问[{a0}]({main_domain})，"
+                f"探索[{a1}]({main_domain})为您精心准备的丰富内容。"
             )
         return (
-            f"\n\n阅读更多请访问[{domain}]({target_url})，"
-            f"并前往[{domain}]({main_domain})获取完整内容。"
+            f"\n\n阅读更多请访问[{a1}]({target_url})，"
+            f"并前往[{a0}]({main_domain})获取完整内容。"
         )
 
     if language == "ru":
         if same_url:
             return (
-                f"\n\nБольше материалов доступно на [{domain}]({main_domain}) — "
-                f"посетите [{domain}]({main_domain}) для просмотра полного каталога."
+                f"\n\nБольше материалов доступно на [{a0}]({main_domain}) — "
+                f"посетите [{a1}]({main_domain}) для просмотра полного каталога."
             )
         return (
-            f"\n\nЧитайте подробнее на [{domain}]({target_url}) и "
-            f"посетите [{domain}]({main_domain}) для обзора всех материалов."
+            f"\n\nЧитайте подробнее на [{a1}]({target_url}) и "
+            f"посетите [{a0}]({main_domain}) для обзора всех материалов."
         )
 
     # English (default)
     if same_url:
         return (
-            f"\n\nFor more resources, visit [{domain}]({main_domain}) and explore "
-            f"the wide range of content available at [{domain}]({main_domain})."
+            f"\n\nFor more resources, visit [{a0}]({main_domain}) and explore "
+            f"the wide range of content available at [{a1}]({main_domain})."
         )
     return (
-        f"\n\nRead more at [{domain}]({target_url}) and visit the main hub "
-        f"[{domain}]({main_domain}) for the full collection."
+        f"\n\nRead more at [{a1}]({target_url}) and visit the main hub "
+        f"[{a0}]({main_domain}) for the full collection."
     )
 
 
-def _generate_payload(row: dict[str, Any]) -> dict[str, Any]:
+def _resolve_article_anchors(
+    config: Config | None,
+    main_domain: str,
+    url_mode: str,
+    fallback_label: str,
+) -> list[str]:
+    """Pick the two SEO anchor keywords for an article's main_domain links.
+
+    When the target site has no configured ``anchor_keywords`` (or the entry is
+    empty), fall back to the bare-domain label and emit a single WARN per
+    article so the operator notices the missed SEO opportunity.
+    """
+    keywords = get_anchor_keywords(config, main_domain) if config is not None else []
+    selected = select_anchor_keywords(keywords, url_mode, 2)
+    if selected is None:
+        plan_logger.warn(
+            f"anchor_keywords missing for {main_domain}, falling back to bare domain label",
+            main_domain=main_domain,
+        )
+        return [fallback_label, fallback_label]
+    return selected
+
+
+def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict[str, Any]:
     """Generate a single backlink article payload from a seed row."""
     main_domain = row["main_domain"].rstrip("/")
     target_url = row["target_url"].rstrip("/")
@@ -308,6 +349,10 @@ def _generate_payload(row: dict[str, Any]) -> dict[str, Any]:
     tdk_keywords = row.get('tdk_keywords', '')
 
     domain_label = main_domain.replace("https://", "").replace("http://", "").replace("www.", "")
+
+    # Resolve the two SEO anchor keywords for this article (or fall back to the
+    # bare domain label with a WARN if no pool is configured).
+    anchors = _resolve_article_anchors(config, main_domain, url_mode, domain_label)
 
     tmpl = _TEMPLATES.get(target_language, _TEMPLATES.get(language, _TEMPLATES["en"]))
     title_tmpl = tmpl["title"].get(url_mode, tmpl["title"]["A"])
@@ -328,7 +373,8 @@ def _generate_payload(row: dict[str, Any]) -> dict[str, Any]:
         excerpt = tdk_description[:200]
     else:
         excerpt = tmpl["excerpt"].get(url_mode, tmpl["excerpt"]["A"]).format(
-            main_domain=main_domain, domain=domain_label, topic=topic_val
+            main_domain=main_domain, domain=domain_label, topic=topic_val,
+            anchor=anchors[0],
         )
 
     tags_raw = tmpl.get("tags", ["backlink"])
@@ -346,7 +392,7 @@ def _generate_payload(row: dict[str, Any]) -> dict[str, Any]:
                 tags.append(kw)
 
     body_tmpl = tmpl["body_paragraphs"].get(url_mode, tmpl["body_paragraphs"]["A"])
-    body = body_tmpl(domain=domain_label, main_domain=main_domain)
+    body = body_tmpl(domain=domain_label, main_domain=main_domain, anchors=anchors)
     
     # Add TDK info section if available
     if tdk_title or tdk_description:
@@ -415,11 +461,12 @@ def _generate_payload(row: dict[str, Any]) -> dict[str, Any]:
         language=language,
         url_mode=url_mode,
         extra_url_count=len(extra_urls) if extra_urls else 0,
+        anchors=anchors,
     )
     if density_para:
         body = body + density_para
 
-    links = _build_links(main_domain, target_url, url_mode, extra_urls)
+    links = _build_links(main_domain, target_url, url_mode, extra_urls, anchors=anchors)
 
     # Build content_markdown
     content_parts: list[str] = []
@@ -493,6 +540,15 @@ def main(argv: list[str] | None = None) -> None:
 
     plan_logger.info(f"read {len(rows)} seed rows")
 
+    # Load user config so SEO anchor_keywords are available to payload generation.
+    # If the file is missing or malformed, fall back to an empty Config (each
+    # article will then WARN once and use the bare-domain anchor).
+    try:
+        cfg: Config | None = load_config()
+    except Exception as exc:  # pragma: no cover — never fail planning over config
+        plan_logger.warn(f"failed to load config, anchors will fall back: {exc}")
+        cfg = None
+
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
 
@@ -502,7 +558,7 @@ def main(argv: list[str] | None = None) -> None:
             all_errors.extend(errs)
             continue
         try:
-            payload = _generate_payload(row)
+            payload = _generate_payload(row, config=cfg)
             plan_logger.debug(
                 f"generated payload: id={payload['id']} platform={payload['platform']}",
                 extra={"id": payload["id"], "platform": payload["platform"]},
