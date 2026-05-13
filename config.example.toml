@@ -60,3 +60,76 @@ client_secret = "your-client-secret"
 #
 # [targets."https://another-site.org"]
 # anchor_keywords = ["another-site", "industry analysis", "data insights"]
+
+# ────────────────────────────────────────────────────────────
+# zh-CN short-form path: URL categories + typed anchor pools
+# ────────────────────────────────────────────────────────────
+# The zh-CN path generates 150–200-character short articles with 2–3 links —
+# one main link (the site home page) + 1–2 secondary links to non-home pages.
+# Anchor types are chosen by a sliding-window scheduler that aims for a Safe
+# SEO distribution (Branded 55% / Partial 25% / Exact 10% / LSI 10%).
+#
+# These sections are READ-ONLY — `save_config` will not round-trip them.
+# Edit by hand.
+#
+# [sites."https://51acgs.com".url_categories]
+# home = "https://51acgs.com/"
+# hot = "https://51acgs.com/comic/hot"
+# animate = "https://51acgs.com/animate"
+# category = "https://51acgs.com/category"
+# topic = "https://51acgs.com/topic/blog"
+#
+# [sites."https://51acgs.com".anchor_pools.home]
+# branded = ["51漫画首页", "51漫画"]            # contains the brand name
+# partial = ["成人ACG漫画平台"]                  # contains the target keyword
+# exact   = []                                    # leave empty → LLM fallback
+# lsi     = ["线上漫画阅读", "同人漫画推荐"]
+#
+# [sites."https://51acgs.com".anchor_pools.hot]
+# branded = []                                    # empty → LLM fallback
+# partial = ["热门漫画推荐"]
+# exact   = ["热门漫画", "本周热门漫画"]
+# lsi     = ["漫画排行"]
+#
+# [sites."https://51acgs.com".anchor_pools.animate]
+# partial = ["动漫推荐"]
+# lsi     = ["ACG动画", "成人ACG动漫"]
+#
+# [sites."https://51acgs.com".anchor_pools.category]
+# partial = ["漫画分类"]
+# lsi     = ["ACG内容分类"]
+#
+# [sites."https://51acgs.com".anchor_pools.topic]
+# partial = ["漫画推荐文章"]
+# lsi     = ["漫画阅读指南"]
+
+# ────────────────────────────────────────────────────────────
+# Anchor profile scheduler — target distribution
+# ────────────────────────────────────────────────────────────
+# Safe SEO is the default. Use `preset = "safe_seo"` for clarity, or override
+# any subset of the four types — the sum must remain 1.0 ± 0.001.
+#
+# [anchor.proportions]
+# preset = "safe_seo"
+# # branded = 0.55
+# # partial = 0.25
+# # exact = 0.10
+# # lsi = 0.10
+
+# ────────────────────────────────────────────────────────────
+# LLM anchor provider (OpenAI-compatible HTTP)
+# ────────────────────────────────────────────────────────────
+# Used to generate anchor candidates when typed pools above are empty for a
+# given (url_category, anchor_type) slot. Optional — if absent, the resolver
+# only uses config-pinned pools.
+#
+# `base_url` MUST be https:// (http:// is rejected at load time).
+# `api_key` is preferentially read from the BACKLINK_LLM_API_KEY env var with
+# the value below as fallback. If you store the key in this file, set the file
+# permissions to 0600 (`chmod 600 config.toml`) — a warning is emitted if not.
+#
+# [llm.anchor_provider]
+# base_url = "https://api.openai.com/v1"
+# # api_key = "sk-..."                   # prefer the BACKLINK_LLM_API_KEY env var
+# model = "gpt-4o-mini"
+# timeout_s = 30

@@ -16,10 +16,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .errors import DependencyError
+from .errors import DependencyError, InputValidationError
 
 _log = logging.getLogger(__name__)
 _UNSAFE_IN_ANCHOR = re.compile(r'[\]\[()><"\'\n\r]')
+
+# Anchor profile scheduler (zh-CN short-form) — type & proportion constants.
+# These live module-level so other consumers (scheduler, resolver, validator)
+# import a single source of truth.
+ANCHOR_TYPES: tuple[str, ...] = ("branded", "partial", "exact", "lsi")
+_SAFE_SEO_PROPORTIONS: dict[str, float] = {
+    "branded": 0.55,
+    "partial": 0.25,
+    "exact": 0.10,
+    "lsi": 0.10,
+}
+_LLM_API_KEY_ENV_VAR = "BACKLINK_LLM_API_KEY"
+_PROPORTIONS_SUM_TOLERANCE = 1e-3
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -56,6 +69,22 @@ class MediumOAuthConfig:
 
 
 @dataclass
+class LLMProviderConfig:
+    """OpenAI-compatible LLM endpoint used to generate anchor-text candidates.
+
+    The provider is optional — the anchor resolver falls back to config-pinned
+    typed pools when this is unset. ``base_url`` MUST be ``https://`` (enforced
+    at load time); ``api_key`` is preferentially loaded from the
+    ``BACKLINK_LLM_API_KEY`` env var with the toml value as fallback.
+    """
+
+    base_url: str
+    api_key: str
+    model: str
+    timeout_s: float = 30.0
+
+
+@dataclass
 class Config:
     blogger_blog_ids: dict[str, str] = field(default_factory=dict)
     blogger_oauth: BloggerOAuthConfig | None = None
@@ -66,8 +95,51 @@ class Config:
     """Per-target SEO anchor keyword pool, keyed by main_domain (trailing slash
     stripped). Populated from ``[targets."<main_domain>"].anchor_keywords`` in
     config.toml. Empty pool / missing entry triggers fallback to bare domain
-    label at link-rendering time. Must be edited by hand — ``save_config``
-    does not write this section back."""
+    label at link-rendering time. Used by the en/ru long-form path. Must be
+    edited by hand — ``save_config`` does not write this section back."""
+
+    site_url_categories: dict[str, dict[str, str]] = field(default_factory=dict)
+    """Per-site URL category → URL mapping for the zh-CN short-form path.
+
+    Schema: ``[main_domain][category_name] → URL``. ``category_name`` is one of
+    ``home`` / ``hot`` / ``animate`` / ``category`` / ``topic`` (the scheduler
+    treats this set as opaque — any string is accepted, but the scheduler
+    requires at least ``home`` plus one non-``home`` category to engage).
+
+    Populated from ``[sites."<main_domain>".url_categories]`` in config.toml.
+    Not round-tripped by ``save_config`` — manual edit only."""
+
+    target_anchor_pools_v2: dict[str, dict[str, dict[str, list[str]]]] = field(
+        default_factory=dict,
+    )
+    """Per-site, per-(url_category, anchor_type) anchor candidate pool.
+
+    Schema: ``[main_domain][url_category][anchor_type] → list[anchor_text]``.
+    ``anchor_type`` is one of ``branded`` / ``partial`` / ``exact`` / ``lsi``.
+
+    Empty inner pools are valid and signal the anchor resolver to fall back to
+    LLM-generated candidates. Populated from
+    ``[sites."<main_domain>".anchor_pools.<url_category>.<anchor_type>]`` in
+    config.toml. Not round-tripped by ``save_config``."""
+
+    anchor_proportions: dict[str, float] = field(
+        default_factory=lambda: dict(_SAFE_SEO_PROPORTIONS),
+    )
+    """Target distribution for the anchor profile scheduler.
+
+    Defaults to Safe SEO (Branded 55% / Partial 25% / Exact 10% / LSI 10%).
+    Sum must equal 1.0 ± 0.001 — validated at load time. Override by setting
+    ``[anchor.proportions]`` in config.toml. Not round-tripped by
+    ``save_config``."""
+
+    llm_anchor_provider: LLMProviderConfig | None = None
+    """Optional OpenAI-compatible LLM provider used to generate anchor candidates
+    when typed pools are empty for a given (url_category, anchor_type).
+
+    Populated from ``[llm.anchor_provider]`` in config.toml. ``api_key`` is
+    loaded with priority ``BACKLINK_LLM_API_KEY`` env var > toml value.
+    ``base_url`` is required to use ``https://`` — ``http://`` raises
+    ``InputValidationError`` at load time. Not round-tripped by ``save_config``."""
 
     @property
     def config_dir(self) -> Path:
@@ -131,6 +203,17 @@ def load_config(path: Path | None = None) -> Config:
 
     target_anchor_keywords = _parse_target_anchor_keywords(data.get("targets", {}))
 
+    sites_section = data.get("sites", {})
+    site_url_categories = _parse_site_url_categories(sites_section)
+    target_anchor_pools_v2 = _parse_target_anchor_pools_v2(sites_section)
+
+    anchor_proportions = _parse_anchor_proportions(data.get("anchor", {}))
+
+    llm_anchor_provider = _parse_llm_anchor_provider(
+        data.get("llm", {}).get("anchor_provider", {}),
+        config_path=config_path,
+    )
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -138,6 +221,10 @@ def load_config(path: Path | None = None) -> Config:
         medium_integration_token=medium_section.get("integration_token") or None,
         medium_user_data_dir=user_data_dir,
         target_anchor_keywords=target_anchor_keywords,
+        site_url_categories=site_url_categories,
+        target_anchor_pools_v2=target_anchor_pools_v2,
+        anchor_proportions=anchor_proportions,
+        llm_anchor_provider=llm_anchor_provider,
     )
 
 
@@ -176,9 +263,261 @@ def _parse_target_anchor_keywords(targets_section: Any) -> dict[str, list[str]]:
     return result
 
 
+def _parse_site_url_categories(sites_section: Any) -> dict[str, dict[str, str]]:
+    """Parse ``[sites."<main_domain>".url_categories]`` entries.
+
+    Each URL must be a string starting with ``http://`` or ``https://``;
+    malformed entries are skipped with a warning rather than raising.
+    """
+    if not isinstance(sites_section, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for raw_domain, entry in sites_section.items():
+        if not isinstance(entry, dict):
+            continue
+        categories = entry.get("url_categories")
+        if categories is None:
+            continue
+        if not isinstance(categories, dict):
+            _log.warning(
+                "[sites.%r].url_categories must be a table, skipping", raw_domain,
+            )
+            continue
+        cleaned: dict[str, str] = {}
+        for cat_name, cat_url in categories.items():
+            if not isinstance(cat_name, str) or not isinstance(cat_url, str):
+                continue
+            if not re.match(r"^https?://", cat_url):
+                _log.warning(
+                    "[sites.%r].url_categories.%r is not a valid URL, skipping",
+                    raw_domain, cat_name,
+                )
+                continue
+            cleaned[cat_name] = cat_url
+        if cleaned:
+            result[raw_domain.rstrip("/")] = cleaned
+    return result
+
+
+def _parse_target_anchor_pools_v2(
+    sites_section: Any,
+) -> dict[str, dict[str, dict[str, list[str]]]]:
+    """Parse ``[sites."<main_domain>".anchor_pools.<url_cat>.<anchor_type>]``.
+
+    Schema-strict: ``anchor_type`` must be one of ``ANCHOR_TYPES``; lists must
+    be ``list[str]``. Pool entries are run through ``_UNSAFE_IN_ANCHOR`` to
+    strip characters that would break Markdown/HTML link syntax — same hygiene
+    contract as the legacy ``target_anchor_keywords`` parser.
+    """
+    if not isinstance(sites_section, dict):
+        return {}
+    result: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for raw_domain, entry in sites_section.items():
+        if not isinstance(entry, dict):
+            continue
+        pools = entry.get("anchor_pools")
+        if pools is None:
+            continue
+        if not isinstance(pools, dict):
+            _log.warning(
+                "[sites.%r].anchor_pools must be a table, skipping", raw_domain,
+            )
+            continue
+        site_pools: dict[str, dict[str, list[str]]] = {}
+        for url_cat, type_table in pools.items():
+            if not isinstance(type_table, dict):
+                continue
+            cat_pools: dict[str, list[str]] = {}
+            for anchor_type, words in type_table.items():
+                if anchor_type not in ANCHOR_TYPES:
+                    _log.warning(
+                        "[sites.%r].anchor_pools.%s.%s is not a known anchor "
+                        "type (expected one of %s), skipping",
+                        raw_domain, url_cat, anchor_type, ANCHOR_TYPES,
+                    )
+                    continue
+                if not isinstance(words, list) or not all(isinstance(w, str) for w in words):
+                    _log.warning(
+                        "[sites.%r].anchor_pools.%s.%s must be a list of strings, skipping",
+                        raw_domain, url_cat, anchor_type,
+                    )
+                    continue
+                cleaned = [_UNSAFE_IN_ANCHOR.sub("", w).strip() for w in words]
+                cleaned = [w for w in cleaned if w]
+                cat_pools[anchor_type] = cleaned
+            if cat_pools:
+                site_pools[url_cat] = cat_pools
+        if site_pools:
+            result[raw_domain.rstrip("/")] = site_pools
+    return result
+
+
+def _parse_anchor_proportions(anchor_section: Any) -> dict[str, float]:
+    """Parse ``[anchor.proportions]``; default to Safe SEO if absent.
+
+    Validates that the four anchor types are covered and their sum is ~1.0.
+    Raises ``InputValidationError`` on schema or sum violations — anchor
+    distribution is load-bearing for the scheduler, silent fall-through would
+    mask configuration bugs.
+    """
+    if not isinstance(anchor_section, dict):
+        return dict(_SAFE_SEO_PROPORTIONS)
+    proportions_section = anchor_section.get("proportions")
+    if proportions_section is None:
+        return dict(_SAFE_SEO_PROPORTIONS)
+    if not isinstance(proportions_section, dict):
+        raise InputValidationError(
+            "[anchor.proportions] must be a table mapping anchor type → float"
+        )
+    # Start from Safe SEO and let toml keys override individual values; that
+    # lets users tweak one slot without restating the whole map.
+    result: dict[str, float] = dict(_SAFE_SEO_PROPORTIONS)
+    for key, value in proportions_section.items():
+        if key == "preset":
+            # Only "safe_seo" is implemented; reject unknown presets explicitly.
+            if value != "safe_seo":
+                raise InputValidationError(
+                    f"[anchor.proportions].preset = {value!r} is unknown "
+                    f'(supported: "safe_seo")'
+                )
+            continue
+        if key not in ANCHOR_TYPES:
+            raise InputValidationError(
+                f"[anchor.proportions].{key} is not a known anchor type "
+                f"(expected one of {ANCHOR_TYPES})"
+            )
+        if not isinstance(value, (int, float)):
+            raise InputValidationError(
+                f"[anchor.proportions].{key} must be a number, got {type(value).__name__}"
+            )
+        result[key] = float(value)
+    total = sum(result.values())
+    if abs(total - 1.0) > _PROPORTIONS_SUM_TOLERANCE:
+        raise InputValidationError(
+            f"[anchor.proportions] values must sum to 1.0 ± {_PROPORTIONS_SUM_TOLERANCE} "
+            f"(got {total:.4f}). Values: {result!r}"
+        )
+    return result
+
+
+def _parse_llm_anchor_provider(
+    section: Any,
+    *,
+    config_path: Path | None = None,
+) -> LLMProviderConfig | None:
+    """Parse ``[llm.anchor_provider]`` and resolve ``api_key`` from env.
+
+    Returns ``None`` when the section is empty or missing required fields —
+    LLM is optional; absence simply means the anchor resolver will only use
+    config-pinned typed pools.
+
+    Enforces ``https://`` on ``base_url`` and warns if config.toml contains
+    ``api_key`` but its file permissions are not 0600.
+    """
+    if not isinstance(section, dict):
+        return None
+
+    env_api_key = os.environ.get(_LLM_API_KEY_ENV_VAR)
+    toml_api_key_raw = section.get("api_key")
+    toml_has_api_key = isinstance(toml_api_key_raw, str) and bool(toml_api_key_raw)
+
+    if toml_has_api_key and config_path is not None and config_path.exists():
+        _warn_if_loose_config_permissions(config_path)
+
+    base_url = section.get("base_url")
+    model = section.get("model")
+    timeout_s = section.get("timeout_s", 30.0)
+
+    api_key = env_api_key or (toml_api_key_raw if toml_has_api_key else None)
+
+    if not base_url and not model and not api_key:
+        # Section absent or fully empty — silent no-op.
+        return None
+
+    # Beyond this point we treat a section with ANY content as an explicit
+    # intent to configure the provider, so missing fields become errors.
+    if not isinstance(base_url, str) or not base_url:
+        raise InputValidationError(
+            "[llm.anchor_provider].base_url is required when the section is present"
+        )
+    if not base_url.startswith("https://"):
+        raise InputValidationError(
+            f"[llm.anchor_provider].base_url must use https:// "
+            f"(got {base_url!r}). Insecure endpoints are rejected to prevent "
+            f"prompt-injection and credential exfiltration via a hostile host."
+        )
+    if not isinstance(model, str) or not model:
+        raise InputValidationError(
+            "[llm.anchor_provider].model is required when the section is present"
+        )
+    if not api_key:
+        raise InputValidationError(
+            f"LLM provider is configured but no api_key is available — set "
+            f"the {_LLM_API_KEY_ENV_VAR} env var or [llm.anchor_provider].api_key"
+        )
+    if not isinstance(timeout_s, (int, float)) or timeout_s <= 0:
+        raise InputValidationError(
+            f"[llm.anchor_provider].timeout_s must be a positive number, got {timeout_s!r}"
+        )
+
+    return LLMProviderConfig(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        timeout_s=float(timeout_s),
+    )
+
+
+def _warn_if_loose_config_permissions(config_path: Path) -> None:
+    """Emit a warning if config.toml contains api_key but isn't 0600.
+
+    No-op on Windows where POSIX permission bits aren't meaningful.
+    """
+    if os.name == "nt":
+        return
+    try:
+        mode = stat.S_IMODE(config_path.stat().st_mode)
+    except OSError:
+        return
+    if mode != 0o600:
+        _log.warning(
+            "config file %s contains an LLM api_key but has mode %s; "
+            "set permissions to 0600 (chmod 600) to prevent credential leakage",
+            config_path, oct(mode),
+        )
+
+
 def _normalize_domain_key(domain: str) -> str:
     """Strip scheme and trailing slashes for config key comparison."""
     return domain.rstrip("/").removeprefix("https://").removeprefix("http://")
+
+
+def get_anchor_pool_v2(
+    config: Config,
+    main_domain: str,
+    url_category: str,
+    anchor_type: str,
+) -> list[str]:
+    """Return the configured typed-pool anchor candidates for one slot.
+
+    Returns ``[]`` when any layer of the (main_domain, url_category,
+    anchor_type) lookup is missing — callers should interpret an empty pool
+    as the cue to fall back to LLM-generated candidates.
+
+    Like ``get_anchor_keywords``, tolerates trailing-slash variants in the
+    main_domain key.
+    """
+    for candidate in (
+        main_domain.rstrip("/"),
+        main_domain.rstrip("/") + "/",
+    ):
+        if candidate in config.target_anchor_pools_v2:
+            return (
+                config.target_anchor_pools_v2[candidate]
+                .get(url_category, {})
+                .get(anchor_type, [])
+            )
+    return []
 
 
 def get_anchor_keywords(config: Config, main_domain: str) -> list[str]:
