@@ -217,6 +217,94 @@ attributes — behaviour on Medium is best-effort.)
 `save_config` does **not** write the `[targets]` section back. Edit
 `config.toml` by hand to add or update keyword pools.
 
+## zh-CN Short-Form Anchor Profile Scheduler
+
+The default path above (`[targets."<domain>"].anchor_keywords`) drives en/ru
+articles and any zh-CN target that hasn't opted into the scheduler. zh-CN
+targets can opt into a richer **anchor profile scheduler** that:
+
+- generates 150–200-character short articles (1 main link to home + 1–2
+  secondary links to non-home pages) instead of the long-form 6–8-link layout
+- enforces a sliding-window distribution against a Safe SEO target
+  (Branded 55% / Partial 25% / Exact 10% / LSI 10%) across the four anchor
+  type buckets
+- picks each secondary link's URL category from `{hot, animate, category,
+  topic}` so a single article never repeats the same target page twice
+
+### Default mode: LLM-free runtime
+
+The 51acgs.com block in `config.example.toml` is pre-sized for **no LLM at
+runtime**: 126 hand-picked candidates across 20 `(url_category, anchor_type)`
+cells, the heavy-use `home/branded` cell padded to 15 entries to comfortably
+outlast the 20-entry text-dedup window. A 500-article × 3-seed simulation
+produces zero LLM fallback calls and lands within 1 pp of every target
+proportion.
+
+To enable, uncomment the `[sites."https://51acgs.com".url_categories]` and
+`[sites."https://51acgs.com".anchor_pools.*]` blocks in `config.example.toml`
+(or copy them to your `~/.config/backlink-publisher/config.toml`). The
+scheduler engages automatically for any zh-CN seed row whose `main_domain`
+has these blocks configured; rows without v2 config fall through to the
+legacy long-form path with zero behavior change.
+
+To extend the scheduler to another site, mirror the 51acgs.com structure:
+
+1. List the site's `url_categories` (must include `home` plus at least one
+   non-home category).
+2. Fill `[sites."<site>".anchor_pools.<category>.<type>]` for every
+   `(url_category, anchor_type)` cell you want covered — minimum 3
+   candidates per cell, **≥12 in `home/branded`** to keep the scheduler
+   out of the degrade path.
+3. Run `pytest tests/test_config_example_pool.py` after editing — the
+   regression tests run a 500-article simulation against your pool and
+   fail if any cell would trigger a degrade.
+
+### Optional mode: hybrid with LLM fallback
+
+If you want to thin some cells and let an LLM generate candidates on
+demand, uncomment the `[llm.anchor_provider]` block:
+
+```toml
+[llm.anchor_provider]
+base_url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+timeout_s = 30
+```
+
+Provide the API key via the `BACKLINK_LLM_API_KEY` env var (preferred) or
+`api_key = "sk-..."` in the same block (which requires `chmod 600
+config.toml` — a warning is emitted otherwise). `base_url` must be
+`https://`.
+
+Before promoting hybrid config to production, validate the provider's
+rejection rate against your content shape:
+
+```bash
+python scripts/llm_rejection_spike.py
+# exit 0 = rejection rate < 20%, exit 1 = above threshold
+```
+
+Adult-content sites should expect significant rejection rates from
+mainstream providers — `scripts/llm_rejection_spike.py` makes that
+measurement reproducible so the trade-off is explicit rather than
+discovered during a production batch.
+
+### Observability
+
+After at least 50 articles, inspect the per-site anchor profile:
+
+```bash
+report-anchors --from-profile https://51acgs.com
+```
+
+The report shows the rolling type distribution vs. target, a
+`url_category × anchor_type` cross-tab, and degradation rate flagged
+with ⚠️ when above 10%. JSON output is available via `--json` for
+scripting.
+
+`save_config` does not round-trip `[sites.*]`, `[anchor.proportions]`, or
+`[llm.anchor_provider]` — edit `config.toml` by hand.
+
 ## Publisher Adapters
 
 Publishing is API-first with a browser fallback for Medium.

@@ -72,6 +72,30 @@ client_secret = "your-client-secret"
 # These sections are READ-ONLY — `save_config` will not round-trip them.
 # Edit by hand.
 #
+# ─── Complete 51acgs.com site config — LLM-free runtime ─────────────────────
+#
+# This block is sized for "no LLM at runtime" operation: 126 anchors across
+# 20 (url_category, anchor_type) cells, with home/branded specifically
+# expanded to 15 candidates — that cell sees the heaviest use (~5-6 of the
+# 20 sliding dedup-window entries are home/branded), so a thin pool there
+# would force the resolver into degrade-to-branded retries.
+#
+# Verified via 500-article × 3-seed simulation: zero degrades, max
+# distribution deviation 1pp from Safe SEO target. Tests live in
+# tests/test_config_example_pool.py — if you tweak the candidates, run them
+# to make sure the math still holds.
+#
+# Every entry has been validated against the resolver's _passes_filters:
+# 2-8 chars, not in FORBIDDEN_ANCHOR_TEXTS, no unsafe characters, ≥50% CJK.
+#
+# Anchor type semantics (relative to the page's primary keyword):
+#   branded = contains site brand "51"
+#   exact   = highly close to the page's main keyword (no brand)
+#   partial = contains the main keyword with natural modifiers
+#   lsi     = semantically related, no brand, no exact keyword
+#
+# Uncomment everything below to enable.
+#
 # [sites."https://51acgs.com".url_categories]
 # home = "https://51acgs.com/"
 # hot = "https://51acgs.com/comic/hot"
@@ -79,29 +103,50 @@ client_secret = "your-client-secret"
 # category = "https://51acgs.com/category"
 # topic = "https://51acgs.com/topic/blog"
 #
+# # ── home (主关键词: 漫画 / 成人漫画) ──
 # [sites."https://51acgs.com".anchor_pools.home]
-# branded = ["51漫画首页", "51漫画"]            # contains the brand name
-# partial = ["成人ACG漫画平台"]                  # contains the target keyword
-# exact   = []                                    # leave empty → LLM fallback
-# lsi     = ["线上漫画阅读", "同人漫画推荐"]
+# branded = [
+#   "51漫画", "51漫画首页", "51漫画平台", "51漫画推荐", "51漫画站",
+#   "51漫画网", "51漫画家", "51漫画馆", "51漫画社", "51漫画大全",
+#   "51同人漫画", "51成人漫画", "51漫画精选", "51漫画聚集", "51漫画基地",
+# ]
+# exact   = ["成人漫画", "漫画", "同人漫画", "本子漫画", "情色漫画"]
+# partial = [
+#   "成人漫画平台", "在线漫画", "漫画阅读", "同人漫画推荐", "漫画站",
+#   "成人漫画站", "成人漫画网", "漫画大全", "在线漫画站",
+# ]
+# lsi     = [
+#   "二次元资源", "同人作品", "同人推荐", "动漫资源", "ACG动漫平台",
+#   "同人作品集", "二次元站", "同好分享",
+# ]
 #
+# # ── hot (主关键词: 热门漫画) ──
 # [sites."https://51acgs.com".anchor_pools.hot]
-# branded = []                                    # empty → LLM fallback
-# partial = ["热门漫画推荐"]
-# exact   = ["热门漫画", "本周热门漫画"]
-# lsi     = ["漫画排行"]
+# branded = ["51漫画热门", "51漫画排行", "51漫画榜单", "51热门作品", "51人气榜", "51漫画风云榜"]
+# exact   = ["热门漫画", "漫画排行", "本周热门", "热门作品", "本周漫画"]
+# partial = ["热门漫画排行", "热门漫画推荐", "热门成人漫画", "本周热门漫画", "最新热门漫画", "成人漫画排行"]
+# lsi     = ["人气榜单", "人气推荐", "人气作品", "周榜推荐", "人气精选", "周榜单"]
 #
+# # ── animate (主关键词: 动漫 / 成人动漫) ──
 # [sites."https://51acgs.com".anchor_pools.animate]
-# partial = ["动漫推荐"]
-# lsi     = ["ACG动画", "成人ACG动漫"]
+# branded = ["51动漫", "51动漫推荐", "51动漫站", "51动漫网", "51动漫平台", "51动漫大全"]
+# exact   = ["动漫", "成人动漫", "在线动漫", "动漫资源"]
+# partial = ["成人动漫推荐", "动漫推荐", "在线动漫资源", "动漫资源站", "在线动漫", "成人动漫站"]
+# lsi     = ["二次元资源", "番剧推荐", "二次元站", "ACG动画推荐", "在线动画", "番剧资源"]
 #
+# # ── category (主关键词: 漫画分类 / 动漫分类) ──
 # [sites."https://51acgs.com".anchor_pools.category]
-# partial = ["漫画分类"]
-# lsi     = ["ACG内容分类"]
+# branded = ["51漫画分类", "51动漫分类", "51分类导航", "51内容分类", "51作品分类", "51同人分类"]
+# exact   = ["漫画分类", "动漫分类", "内容分类", "作品分类"]
+# partial = ["漫画分类导航", "漫画分类整理", "动漫分类列表", "漫画分类列表", "漫画作品分类", "成人漫画分类"]
+# lsi     = ["内容分类导航", "资源分类", "作品分类", "同人分类", "二次元分类", "同好分类"]
 #
+# # ── topic (主关键词: 漫画专题 / 漫画推荐) ──
 # [sites."https://51acgs.com".anchor_pools.topic]
-# partial = ["漫画推荐文章"]
-# lsi     = ["漫画阅读指南"]
+# branded = ["51漫画专题", "51漫画推荐", "51专题文章", "51专题精选", "51同人专题", "51漫画指南"]
+# exact   = ["漫画专题", "专题文章", "漫画推荐", "专题精选"]
+# partial = ["漫画专题文章", "漫画推荐文章", "同人漫画精选", "漫画阅读指南", "漫画专题精选", "成人漫画专题"]
+# lsi     = ["同人专题", "阅读指南", "资源精选", "二次元专题", "同好分享", "同好推荐"]
 
 # ────────────────────────────────────────────────────────────
 # Anchor profile scheduler — target distribution
@@ -117,16 +162,21 @@ client_secret = "your-client-secret"
 # # lsi = 0.10
 
 # ────────────────────────────────────────────────────────────
-# LLM anchor provider (OpenAI-compatible HTTP)
+# LLM anchor provider (OPTIONAL — default mode is LLM-free)
 # ────────────────────────────────────────────────────────────
-# Used to generate anchor candidates when typed pools above are empty for a
-# given (url_category, anchor_type) slot. Optional — if absent, the resolver
-# only uses config-pinned pools.
+# The 51acgs.com block above is sized so the scheduler operates entirely off
+# the config-pinned pools — no LLM at runtime. Leave this section commented
+# unless you have an intentional reason to thin some pool cell and let the
+# LLM fill the gap on demand.
 #
-# `base_url` MUST be https:// (http:// is rejected at load time).
-# `api_key` is preferentially read from the BACKLINK_LLM_API_KEY env var with
-# the value below as fallback. If you store the key in this file, set the file
-# permissions to 0600 (`chmod 600 config.toml`) — a warning is emitted if not.
+# When uncommented:
+#   - Used to generate anchor candidates when a typed pool above is empty
+#     for a given (url_category, anchor_type) slot
+#   - `base_url` MUST be https:// (http:// is rejected at load time)
+#   - `api_key` is read from BACKLINK_LLM_API_KEY env var first, then the
+#     toml value below as fallback
+#   - If you store the key in this file, `chmod 600 config.toml` — a
+#     warning is emitted on every run if the file mode is looser
 #
 # [llm.anchor_provider]
 # base_url = "https://api.openai.com/v1"
