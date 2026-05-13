@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
+import re
 import sys
 from typing import Any
 from urllib.parse import urlparse
 
-from .. import errors
-from ..config import Config, get_anchor_keywords, load_config
+from .. import anchor_profile, anchor_resolver, anchor_scheduler, errors, markdown_utils
+from ..adapters.llm_anchor_provider import OpenAICompatibleProvider
+from ..anchor_profile import ProfileEntry
+from ..anchor_scheduler import ScheduleDecision, SecondaryLink
+from ..config import (
+    Config,
+    get_anchor_keywords,
+    get_anchor_pool_v2,
+    load_config,
+)
 from ..errors import InputValidationError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
 from ..language_check import detect_language
@@ -500,6 +510,307 @@ def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict
     }
 
 
+# ─── zh-CN short-form scheduler integration ─────────────────────────────────
+#
+# The scheduler engages only when (a) the seed row is zh-CN AND (b) the site
+# config carries the v2 typed pool + url_categories ≥ home + 1 non-home. Any
+# other combination falls back to the legacy long-form ``_generate_payload``,
+# so existing en/ru rows and any zh-CN row from a site that hasn't been
+# migrated to v2 config are bit-for-bit unchanged.
+
+
+def _scheduler_enabled_for(config: Config, main_domain: str) -> bool:
+    """Return True iff the zh-CN scheduler can engage for ``main_domain``."""
+    key = main_domain.rstrip("/")
+    cats = config.site_url_categories.get(key, {})
+    has_home = "home" in cats
+    has_non_home = any(c != "home" for c in cats)
+    has_pools = bool(config.target_anchor_pools_v2.get(key))
+    return has_home and has_non_home and has_pools
+
+
+def _domain_label_of(main_domain: str) -> str:
+    """Bare-domain string used as the last-resort branded anchor."""
+    return (
+        main_domain.rstrip("/")
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace("www.", "")
+    )
+
+
+def _extract_zh_keyword(row: dict[str, Any], main_domain: str) -> str:
+    """Pick a keyword for the resolver prompt: seed_keywords[0] → topic → domain."""
+    seeds = row.get("seed_keywords")
+    if isinstance(seeds, list) and seeds and isinstance(seeds[0], str) and seeds[0]:
+        return seeds[0]
+    topic = row.get("topic", "")
+    if isinstance(topic, str) and topic:
+        return topic
+    return _domain_label_of(main_domain)
+
+
+def _build_profile_entries(
+    decision: ScheduleDecision,
+    main_anchor: str,
+    sec_records: list[tuple[str, str, str]],
+    *,
+    degraded: bool,
+) -> list[ProfileEntry]:
+    """Pack the article's link decisions into ProfileEntry rows.
+
+    ``sec_records`` is ``[(url_category, anchor_type, anchor_text), ...]`` —
+    one tuple per secondary, ordered as rendered.
+    """
+    ts = anchor_profile.now_iso()
+    entries = [
+        ProfileEntry(
+            ts=ts,
+            link_role="main",
+            url_category="home",
+            anchor_type=decision.main_link_anchor_type,
+            anchor_text=main_anchor,
+            degraded=degraded,
+        )
+    ]
+    for url_cat, anchor_type, anchor_text in sec_records:
+        entries.append(
+            ProfileEntry(
+                ts=ts,
+                link_role="secondary",
+                url_category=url_cat,
+                anchor_type=anchor_type,
+                anchor_text=anchor_text,
+                degraded=degraded,
+            )
+        )
+    return entries
+
+
+def _build_zh_short_payload(
+    row: dict[str, Any],
+    html: str,
+    main_domain: str,
+    main_anchor: str,
+    sec_pairs: list[tuple[str, str]],
+) -> dict[str, Any]:
+    """Shape a zh-CN short-form payload to the same schema as ``_generate_payload``.
+
+    ``content_markdown`` holds the rendered HTML directly — markdown-it is
+    idempotent on plain HTML (see Unit 6 round-trip test), so downstream
+    ``publish_backlinks`` works without changes.
+    """
+    target_url = row["target_url"].rstrip("/")
+    platform = row["platform"]
+    publish_mode = row.get("publish_mode", "draft")
+    language = row["language"]
+    url_mode = row.get("url_mode", "A")
+
+    domain_label = _domain_label_of(main_domain)
+    home_url = main_domain.rstrip("/") + "/"
+
+    links: list[dict[str, Any]] = [
+        {"url": home_url, "anchor": main_anchor, "kind": "main_domain"},
+    ]
+    for sec_url, sec_anchor in sec_pairs:
+        links.append({"url": sec_url, "anchor": sec_anchor, "kind": "supporting"})
+
+    custom_title = row.get("custom_title", "")
+    title = custom_title or f"{domain_label} 内容推荐"
+    slug = slugify(title) or hashlib.sha256(title.encode()).hexdigest()[:12]
+    excerpt = re.sub(r"<[^>]+>", "", html)[:100]
+
+    custom_tags = row.get("custom_tags", "")
+    tags = ["backlink", domain_label]
+    if custom_tags:
+        tags.extend(t.strip() for t in custom_tags.split(",") if t.strip())
+
+    seed_str = f"{target_url}:{main_domain}:zh-short:{platform}"
+    article_id = hashlib.sha256(seed_str.encode()).hexdigest()[:16]
+
+    return {
+        "id": article_id,
+        "platform": platform,
+        "language": language,
+        "source_language": language,
+        "publish_mode": publish_mode,
+        "target_url": target_url + "/",
+        "main_domain": home_url,
+        "url_mode": url_mode,
+        "title": title,
+        "slug": slug,
+        "excerpt": excerpt,
+        "tags": tags,
+        "content_markdown": html,
+        "links": links,
+        "seo": {
+            "title": title,
+            "description": excerpt,
+            "canonical_url": target_url,
+        },
+    }
+
+
+def _plan_zh_short_row(
+    row: dict[str, Any],
+    config: Config,
+    llm_provider: OpenAICompatibleProvider | None,
+    rng: random.Random | None = None,
+) -> dict[str, Any] | None:
+    """Generate one zh-CN short article via scheduler + resolver + validator.
+
+    Flow per Unit 7+8 spec:
+    1. Schedule the anchor types and url_categories for this article
+    2. Resolve each slot's anchor text (config pool → LLM fallback)
+    3. Render the short HTML body
+    4. Validate; on failure, retry one full pass with a new schedule
+    5. After two failures, degrade to 1 main + 1 secondary, all Branded,
+       both pointing at the home URL — accept the temporary URL repetition
+       in exchange for never failing the row.
+    6. Record the resulting link types in the per-site profile (with
+       ``degraded=True`` flagged honestly so observability stays accurate).
+
+    Returns ``None`` when the site config doesn't meet the scheduler's
+    minimum requirements (no non-home category, or no v2 pool) — caller
+    routes to the legacy long-form path.
+    """
+    main_domain = row["main_domain"].rstrip("/")
+    cats_map = config.site_url_categories.get(main_domain, {})
+    available_cats = list(cats_map.keys())
+    if "home" not in cats_map or not any(c != "home" for c in cats_map):
+        return None
+
+    rng = rng or random.Random()
+    style_seed = abs(hash(row.get("target_url", main_domain))) % 10_000
+    keyword = _extract_zh_keyword(row, main_domain)
+    home_url = cats_map["home"]
+    topic = row.get("topic")
+
+    last_errors: list[str] = []
+
+    for attempt in range(2):
+        profile = anchor_profile.load_profile(main_domain)
+        recent = anchor_profile.recent_texts(profile, n=20)
+        try:
+            decision = anchor_scheduler.schedule(
+                profile, config.anchor_proportions, available_cats,
+            )
+        except InputValidationError:
+            # Site genuinely lacks a non-home category — caller falls back.
+            return None
+
+        # Resolve main link.
+        main_anchor = anchor_resolver.resolve_anchor(
+            url_category="home",
+            anchor_type=decision.main_link_anchor_type,
+            keyword=keyword,
+            target_url=home_url,
+            url_subject=topic,
+            config=config,
+            main_domain=main_domain,
+            recent_texts=recent,
+            provider=llm_provider,
+            rng=rng,
+        )
+        if main_anchor is None:
+            last_errors = ["main_anchor_resolution_failed"]
+            continue
+
+        # Resolve each secondary, tracking already-picked anchor texts for dedup.
+        running_recent = list(recent) + [main_anchor]
+        sec_pairs: list[tuple[str, str]] = []
+        sec_records: list[tuple[str, str, str]] = []
+        for sec in decision.secondary_links:
+            sec_url = cats_map.get(sec.url_category)
+            if not sec_url:
+                last_errors = [f"missing_url_for_category:{sec.url_category}"]
+                break
+            sec_anchor = anchor_resolver.resolve_anchor(
+                url_category=sec.url_category,
+                anchor_type=sec.anchor_type,
+                keyword=keyword,
+                target_url=sec_url,
+                url_subject=topic,
+                config=config,
+                main_domain=main_domain,
+                recent_texts=running_recent,
+                provider=llm_provider,
+                rng=rng,
+            )
+            if sec_anchor is None:
+                last_errors = ["secondary_anchor_resolution_failed"]
+                break
+            sec_pairs.append((sec_url, sec_anchor))
+            sec_records.append((sec.url_category, sec.anchor_type, sec_anchor))
+            running_recent.append(sec_anchor)
+
+        if len(sec_pairs) != len(decision.secondary_links):
+            continue
+
+        html = markdown_utils.render_zh_short_article(
+            keyword=keyword,
+            main_domain=home_url,
+            main_anchor=main_anchor,
+            secondary_links=sec_pairs,
+            style_seed=style_seed + attempt,
+        )
+        expected = [main_anchor] + [a for _, a in sec_pairs]
+        ok, errors_out = markdown_utils.validate_zh_short_payload(html, expected)
+        if ok:
+            entries = _build_profile_entries(
+                decision, main_anchor, sec_records, degraded=False,
+            )
+            anchor_profile.record_article(main_domain, entries)
+            return _build_zh_short_payload(
+                row, html, main_domain, main_anchor, sec_pairs,
+            )
+        last_errors = errors_out
+
+    # ── Degrade path ────────────────────────────────────────────────────────
+    # Both attempts failed. Produce a 2-link payload using only branded text
+    # from the home pool; if that pool is also empty (or every entry already
+    # collided with recent_texts twice), fall back to the bare domain label.
+    branded_pool = get_anchor_pool_v2(config, main_domain, "home", "branded")
+    branded_clean = [w for w in branded_pool if anchor_resolver._passes_filters(w)]
+    if not branded_clean:
+        branded_clean = [_domain_label_of(main_domain)]
+
+    main_anchor = rng.choice(branded_clean)
+    sec_candidates = [w for w in branded_clean if w != main_anchor]
+    sec_anchor = rng.choice(sec_candidates) if sec_candidates else main_anchor
+    sec_pairs = [(home_url, sec_anchor)]
+
+    html = markdown_utils.render_zh_short_article(
+        keyword=keyword,
+        main_domain=home_url,
+        main_anchor=main_anchor,
+        secondary_links=sec_pairs,
+        style_seed=style_seed + 999,
+    )
+
+    degrade_decision = ScheduleDecision(
+        main_link_anchor_type="branded",
+        secondary_links=(
+            SecondaryLink(url_category="home", anchor_type="branded"),
+        ),
+    )
+
+    plan_logger.warn(
+        "anchor_resolver_degraded",
+        main_domain=main_domain,
+        errors=last_errors,
+    )
+
+    entries = _build_profile_entries(
+        degrade_decision,
+        main_anchor,
+        [("home", "branded", sec_anchor)],
+        degraded=True,
+    )
+    anchor_profile.record_article(main_domain, entries)
+    return _build_zh_short_payload(row, html, main_domain, main_anchor, sec_pairs)
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
@@ -613,6 +924,22 @@ def main(argv: list[str] | None = None) -> None:
     # mistake in config.toml should not silently degrade SEO across the whole batch.
     cfg = load_config()
 
+    # Build the LLM provider once at startup if config supplies one — the
+    # zh-CN scheduler's resolver uses it for typed-pool fallback. None is a
+    # valid state (config-pinned pools only).
+    llm_provider: OpenAICompatibleProvider | None = None
+    if cfg.llm_anchor_provider is not None:
+        llm_provider = OpenAICompatibleProvider(
+            base_url=cfg.llm_anchor_provider.base_url,
+            api_key=cfg.llm_anchor_provider.api_key,
+            model=cfg.llm_anchor_provider.model,
+            timeout_s=cfg.llm_anchor_provider.timeout_s,
+        )
+
+    # Shared RNG so identical input batches stay deterministic across runs.
+    # Tests can preempt this by passing their own ``random.Random``.
+    rng = random.Random()
+
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
 
@@ -622,7 +949,15 @@ def main(argv: list[str] | None = None) -> None:
             all_errors.extend(errs)
             continue
         try:
-            payload = _generate_payload(row, config=cfg)
+            payload: dict[str, Any] | None = None
+            if row["language"] == "zh-CN" and _scheduler_enabled_for(cfg, row["main_domain"]):
+                payload = _plan_zh_short_row(row, cfg, llm_provider, rng=rng)
+            if payload is None:
+                # Either zh-CN path is disabled for this site, or the scheduler
+                # refused (no non-home categories) — fall through to the
+                # legacy long-form generator. Zero-regression contract for
+                # en/ru and any zh-CN site without v2 config.
+                payload = _generate_payload(row, config=cfg)
             plan_logger.debug(
                 f"generated payload: id={payload['id']} platform={payload['platform']}",
                 extra={"id": payload["id"], "platform": payload["platform"]},

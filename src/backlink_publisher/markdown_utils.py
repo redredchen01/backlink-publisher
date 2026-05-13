@@ -254,6 +254,68 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+def validate_zh_short_payload(
+    html: str,
+    expected_anchors: list[str],
+) -> tuple[bool, list[str]]:
+    """Validate a zh-CN short-article HTML payload against the contract.
+
+    Six checks, returned as ``(ok, errors)``:
+
+    1. Plain-text body length 150-200 characters (HTML tags stripped).
+    2. Exactly 2 or 3 ``<a>`` tags — the short-form contract.
+    3. Every ``<a>`` tag carries ``target="_blank"`` AND ``rel="noopener noreferrer"``.
+    4. Every anchor text passes ``_passes_filters`` from anchor_resolver
+       (2-8 chars, not in FORBIDDEN_ANCHOR_TEXTS, no unsafe characters, ≥50% CJK).
+    5. Every anchor text appears in ``expected_anchors`` — guards against
+       generator bugs that inject anchor text the resolver never decided.
+    6. No bare URL outside an ``<a>`` tag (brainstorm R4 prohibition).
+
+    ``ok`` is True only when all six pass. ``errors`` lists every distinct
+    failure so the validator pipeline can log all of them instead of bailing
+    at the first one. Unit 8's retry/degrade lifts off this signal.
+    """
+    # Imported locally so the markdown_utils module doesn't acquire a runtime
+    # dependency on the resolver — keeps the module graph clean.
+    from .anchor_resolver import _passes_filters
+
+    errors: list[str] = []
+
+    plain = _strip_html(html)
+    plain_len = len(plain)
+    if plain_len < _ZH_SHORT_TARGET_MIN:
+        errors.append(f"plain_text_length_below_{_ZH_SHORT_TARGET_MIN}:{plain_len}")
+    elif plain_len > _ZH_SHORT_TARGET_MAX:
+        errors.append(f"plain_text_length_above_{_ZH_SHORT_TARGET_MAX}:{plain_len}")
+
+    # Capture every <a ...>anchor</a> pair so we can re-check both the tag
+    # attributes (#3) and the anchor text (#4 & #5) in one pass.
+    anchor_pattern = re.compile(r"<a(\s[^>]*)>([^<]*)</a>", re.IGNORECASE)
+    matches = anchor_pattern.findall(html)
+    anchor_count = len(matches)
+    if anchor_count < 2 or anchor_count > 3:
+        errors.append(f"anchor_count_out_of_range:{anchor_count}")
+
+    expected_set = set(expected_anchors)
+    for attrs, anchor_text in matches:
+        if 'target="_blank"' not in attrs:
+            errors.append(f"missing_target_blank:{anchor_text}")
+        if 'rel="noopener noreferrer"' not in attrs:
+            errors.append(f"missing_rel_noopener_noreferrer:{anchor_text}")
+        if not _passes_filters(anchor_text):
+            errors.append(f"anchor_failed_filters:{anchor_text}")
+        if anchor_text not in expected_set:
+            errors.append(f"unexpected_anchor_text:{anchor_text}")
+
+    # Check #6: bare URLs outside <a> tags. Strip every <a>...</a> region first
+    # (the href inside an anchor is legitimate), then scan the remainder.
+    stripped = re.sub(r"<a\s[^>]*>.*?</a>", "", html, flags=re.IGNORECASE)
+    if re.search(r"https?://", stripped):
+        errors.append("bare_url_outside_anchor")
+
+    return (not errors, errors)
+
+
 def format_link_md(url: str, anchor: str) -> str:
     """Format a link as a Markdown hyperlink."""
     return f"[{anchor}]({url})"
