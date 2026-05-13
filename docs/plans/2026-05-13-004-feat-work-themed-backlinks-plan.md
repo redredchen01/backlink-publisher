@@ -284,7 +284,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 3: Config schema for three-URL targets + save_config 扩展 + caller audit**
+- [x] **Unit 3: Config schema for three-URL targets + save_config 扩展 + caller audit** ✅ shipped 2026-05-13
 
 **Goal:** 扩展 `[targets."<domain>"]` schema 接收三连结输入与 anchor pool；**严肃修补 `save_config` 静默丢字段风险**——扩展签名、审计所有现有 caller、加 round-trip + 老 section 留存断言。
 
@@ -336,29 +336,9 @@ flowchart TB
 
 **Verification:**
 - 所有现有 webui.py save_config caller 都 audit 过并显式传 `target_three_url=None`。
-- save_config round-trip 测试 + [blogger.oauth] 留存测试均通过。
+- save_config round-trip 测试 + [blogger.oauth] 留存测试 + [sites.x] 留存测试均通过。
 
-**Patterns to follow:**
-- `config.py:_parse_target_anchor_keywords` (line 231-263)、`_parse_target_anchor_pools_v2` (line 302-352) 容错风格。
-- `config.py:get_anchor_keywords` (line 523-542) scheme/slash 容错查找。
-- `config.py:save_config` 三态语义（None/{}/{...}）。
-- `tests/test_config_v2_pools.py:380-390` round-trip 测试模板。
-
-**Test scenarios:**
-- Happy path: `[targets."https://site.com/"] main_url="..." list_url="..." work_urls=[...]` 完整解析 → `ThreeUrlConfig` 字段齐全。
-- Edge case: URL 不带尾斜杠的主域 → 解析时归一化；查找时同时命中带/不带尾斜杠 key。
-- Edge case: `work_urls` 缺省 → 字段为 `[]`，不报错（运行时由 scraper fallback）。
-- Edge case: 空 `branded_pool` → WARN + 该 target 不可用（log 一次）。
-- Error path: `main_url` 不是 https → entry skip + WARN。
-- Error path: `[targets."x"]` 缺 `list_url` → entry skip + WARN。
-- Happy path: detect `[sites."x"]` 存在 → WARN emitted（断言 log content 含 "deprecated"）；同 entry 仍可被旧 parser 读出（向后兼容）。
-- Integration: `save_config(target_three_url={...})` round-trip 后所有字段都在；与现有 `[blogger]`/`[medium]` section 共存不丢。
-- Integration: `save_config(target_three_url=None)` preserves existing；`target_three_url={}` clears all；具体 dict overwrites。
-- Edge case: 同时存在 `[targets.x]` 三连结配置与旧 `[sites.x]` → 解析返回新 schema + emit 双 WARN（旧 schema 提示用户清理）。
-
-**Verification:**
-- round-trip 测试通过（save→load→save→load 全 section 保留）。
-- 旧 `tests/test_config_v2_pools.py` 全部仍 pass（向后兼容）。
+> Note: An earlier draft of this unit duplicated the Patterns/Test scenarios/Verification fields below with a contradictory "emit WARN/deprecated" stance on the legacy `[sites.x]` coexistence. The duplicate has been removed; the authoritative semantics above are INFO-level "maintenance mode" (no WARN, no migration pressure).
 
 ---
 

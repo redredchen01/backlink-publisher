@@ -3213,7 +3213,9 @@ def settings_save_target_keywords():
             new_pools[domain] = deduped
 
         cfg = load_config()
-        save_config(cfg, target_anchor_keywords=new_pools)
+        # target_three_url=None preserves any existing work-themed config on disk
+        # (audit per Plan 2026-05-13-004 Unit 3 — defends against silent field drop).
+        save_config(cfg, target_anchor_keywords=new_pools, target_three_url=None)
 
         msg = '关键词池已保存'
         if dup_warnings:
@@ -3648,7 +3650,8 @@ def settings_save_blog_ids():
         cfg = load_config()
         # Override blog_ids completely (not merge) by setting them before calling save
         cfg.blogger_blog_ids = mapping
-        save_config(cfg, extra_blogger_ids={})  # extra_blogger_ids={} means no extra additions
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(cfg, extra_blogger_ids={}, target_three_url=None)  # extra_blogger_ids={} means no extra additions
         return redirect('/settings?flash_type=success&flash_msg=Blog ID 映射已保存')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
@@ -3658,7 +3661,8 @@ def settings_save_blog_ids():
 def settings_save_medium_token():
     token = request.form.get('medium_token', '').strip()
     try:
-        save_config(load_config(), medium_token=token)
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(load_config(), medium_token=token, target_three_url=None)
         msg = 'Medium Token 已保存' if token else 'Medium Token 已清除'
         return redirect(f'/settings?flash_type=success&flash_msg={msg}')
     except Exception as e:
@@ -3668,7 +3672,8 @@ def settings_save_medium_token():
 @app.route('/settings/clear-medium-token', methods=['POST'])
 def settings_clear_medium_token():
     try:
-        save_config(load_config(), medium_token="")
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(load_config(), medium_token="", target_three_url=None)
         return redirect('/settings?flash_type=success&flash_msg=Medium Token 已清除')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=清除失败: {e}')
@@ -3782,7 +3787,8 @@ def settings_medium_oauth_callback():
 
         cfg = load_config()
         cfg.medium_oauth = MediumOAuthConfig(client_id=client_id, client_secret=client_secret)
-        save_config(cfg)
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(cfg, target_three_url=None)
 
         # 清除 session 中的临时数据
         session.pop('medium_oauth_state', None)
@@ -3831,9 +3837,11 @@ def settings_save_blogger_oauth():
     if not client_id or not client_secret:
         return redirect('/settings?flash_type=warning&flash_msg=请填写 Client ID 和 Client Secret')
     try:
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
         save_config(load_config(),
                     blogger_client_id=client_id,
-                    blogger_client_secret=client_secret)
+                    blogger_client_secret=client_secret,
+                    target_three_url=None)
         return redirect('/settings?flash_type=success&flash_msg=凭据已确认绑定，可随时点击「使用 Google 帐号登入」完成授权')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
@@ -3856,9 +3864,11 @@ def settings_blogger_oauth_start():
                         + '请填写 Client ID 和 Client Secret 后再登入')
 
     try:
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
         save_config(load_config(),
                     blogger_client_id=client_id,
-                    blogger_client_secret=client_secret)
+                    blogger_client_secret=client_secret,
+                    target_three_url=None)
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=凭据保存失败: {e}')
 

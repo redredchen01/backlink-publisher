@@ -39,7 +39,39 @@ client_secret = "your-client-secret"
 # client_secret = "your-medium-client-secret"
 
 # ────────────────────────────────────────────────────────────
-# SEO anchor keywords per target site
+# Work-Themed Backlinks (three-URL form) — RECOMMENDED for new projects
+# ────────────────────────────────────────────────────────────
+# Each generated article carries THREE backlinks: main_url (branded), list_url
+# (partial/exact), and one per-article work_url (work-themed, derived from the
+# scraped page title via `work_anchor_templates`). The dispatcher picks this
+# path whenever a target carries the three-URL schema below.
+#
+# Required: main_url (host-root + trailing slash), list_url, three non-empty
+# anchor pools (branded_pool / partial_pool / exact_pool).
+#
+# Optional: work_urls (when empty, the scraper discovers them via the target's
+# /sitemap.xml or /sitemap_index.xml, falling back to scraping <a href>
+# elements off the list page), work_anchor_templates (default templates use
+# `{title}` placeholder), list_path_blocklist (overrides the scraper's default
+# nav-path filter — /tag/, /category/, /page/, /author/, /about, /contact,
+# /search, /feed), insecure_tls (set true ONLY when the target's TLS chain is
+# legitimately broken — this disables certificate verification).
+#
+# Uncomment + edit:
+#
+# [targets."https://your-site.com"]
+# main_url = "https://your-site.com/"
+# list_url = "https://your-site.com/list"
+# work_urls = []                                       # empty → scraper auto-discovers
+# branded_pool = ["Your Site", "Your Site Hub"]
+# partial_pool = ["site hub partial keyword"]
+# exact_pool = ["site keyword"]
+# # work_anchor_templates = ["{title}", "{title} 详情", "{title} 推荐", "{title} 介绍"]
+# # list_path_blocklist = ["/tag/", "/category/", "/page/"]
+# # insecure_tls = false
+
+# ────────────────────────────────────────────────────────────
+# SEO anchor keywords per target site  (legacy en/ru long-form path)
 # ────────────────────────────────────────────────────────────
 # Each generated article inserts two backlinks pointing at the target's
 # main_domain. Without an entry below, both anchors fall back to the bare
@@ -62,15 +94,18 @@ client_secret = "your-client-secret"
 # anchor_keywords = ["another-site", "industry analysis", "data insights"]
 
 # ────────────────────────────────────────────────────────────
-# zh-CN short-form path: URL categories + typed anchor pools
+# zh-CN short-form path: URL categories + typed anchor pools  (MAINTENANCE MODE)
 # ────────────────────────────────────────────────────────────
-# The zh-CN path generates 150–200-character short articles with 2–3 links —
-# one main link (the site home page) + 1–2 secondary links to non-home pages.
-# Anchor types are chosen by a sliding-window scheduler that aims for a Safe
-# SEO distribution (Branded 55% / Partial 25% / Exact 10% / LSI 10%).
+# Maintenance mode — new projects should prefer the Work-Themed Backlinks
+# section above. This path is kept alive: the dispatcher continues to route
+# domains that ONLY have a [sites.x] block here through the zh-CN short-form
+# flow. Domains that also have a [targets.x] three-URL block are routed
+# through the work-themed path instead (a single INFO log notes the
+# coexistence — no WARN, no migration pressure).
 #
-# These sections are READ-ONLY — `save_config` will not round-trip them.
-# Edit by hand.
+# `save_config` preserves these sections VERBATIM from disk (since Plan
+# 2026-05-13-004 Unit 3) — the previous "silent drop" behavior is fixed.
+# Edit by hand as before; the WebUI does not write back into [sites.*].
 #
 # ─── Complete 51acgs.com site config — LLM-free runtime ─────────────────────
 #

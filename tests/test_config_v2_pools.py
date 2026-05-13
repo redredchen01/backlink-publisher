@@ -373,11 +373,16 @@ weird = "not-a-url"
     assert any("weird" in r.message for r in caplog.records)
 
 
-# ── deferred behavior: save_config must not write new fields ────────────────
+# ── save_config preserves read-only sections verbatim ──────────────────────
+# Pre-Unit-3 this test asserted the inverse — that save_config silently dropped
+# [sites.*] etc. That was the P0 data-loss bug fixed in Plan 2026-05-13-004
+# Unit 3. save_config now preserves unmanaged sections verbatim from disk
+# (it still doesn't re-emit derived state from parsed Config objects, which is
+# what the original "read-only" contract was protecting).
 
 
-def test_save_config_does_not_round_trip_v2_fields(tmp_path, monkeypatch):
-    """Critical contract: new fields are read-only — save_config must not emit them."""
+def test_save_config_preserves_unmanaged_sections_verbatim(tmp_path, monkeypatch):
+    """save_config preserves [sites.*], [anchor.*], [llm.*] verbatim from disk."""
     monkeypatch.delenv("BACKLINK_LLM_API_KEY", raising=False)
     from backlink_publisher.config import save_config
 
@@ -386,7 +391,13 @@ def test_save_config_does_not_round_trip_v2_fields(tmp_path, monkeypatch):
     save_config(cfg, path=cfg_path)
 
     rewritten = cfg_path.read_text(encoding="utf-8")
-    assert "[sites." not in rewritten
-    assert "anchor_pools" not in rewritten
-    assert "[anchor.proportions]" not in rewritten
-    assert "[llm.anchor_provider]" not in rewritten
+    # Sections that were ON DISK survive — round-trip is now safe
+    assert "[sites." in rewritten
+    assert "anchor_pools" in rewritten
+    assert "[anchor.proportions]" in rewritten
+    assert "[llm.anchor_provider]" in rewritten
+
+    # And the data is still parseable after the round-trip
+    reloaded = load_config(cfg_path)
+    assert reloaded.site_url_categories == cfg.site_url_categories
+    assert reloaded.target_anchor_pools_v2 == cfg.target_anchor_pools_v2
