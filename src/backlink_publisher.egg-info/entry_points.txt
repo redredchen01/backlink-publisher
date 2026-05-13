@@ -1,4 +1,5 @@
 [console_scripts]
 plan-backlinks = backlink_publisher.cli.plan_backlinks:main
 publish-backlinks = backlink_publisher.cli.publish_backlinks:main
+report-anchors = backlink_publisher.cli.report_anchors:main
 validate-backlinks = backlink_publisher.cli.validate_backlinks:main
