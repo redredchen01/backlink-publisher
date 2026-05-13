@@ -15,6 +15,16 @@ from backlink_publisher.adapters.base import AdapterResult
 from backlink_publisher.checkpoint import create_checkpoint, update_item, mark_complete
 from backlink_publisher.cli.publish_backlinks import main
 from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher.verify_publish import VerificationResult
+
+
+@pytest.fixture(autouse=True)
+def _mock_verify_pass(mocker):
+    """Default: verification always passes so tests stay fast and network-free."""
+    mocker.patch(
+        "backlink_publisher.cli.publish_backlinks.verify_published",
+        return_value=VerificationResult(ok=True, reason=""),
+    )
 
 
 def _run_publish(
