@@ -1,7 +1,7 @@
 ---
 title: "feat: Checkpoint & Resume for Batch Pipeline"
 type: feat
-status: active
+status: completed
 date: 2026-05-13
 deepened: 2026-05-13
 origin: docs/brainstorms/2026-05-13-checkpoint-resume-requirements.md
