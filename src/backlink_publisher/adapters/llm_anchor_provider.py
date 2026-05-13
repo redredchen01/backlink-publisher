@@ -232,10 +232,28 @@ def _is_retryable(exc: Exception) -> bool:
 
 
 def _sanitize_input(text: str) -> str:
-    """Clamp length + strip control/bidi chars before splicing into a prompt."""
+    """Clamp length, strip control/bidi chars, and escape XML structural chars.
+
+    The prompt template wraps untrusted input in ``<input keyword="..."
+    target_url="..." subject="..." />`` XML attributes. Stripping control/bidi
+    chars alone isn't enough — an unescaped ``"`` or ``</input>`` lets a
+    malicious seed_keyword break out of the attribute / tag boundary and
+    inject sibling content that the system message no longer treats as data.
+    HTML-attribute escaping closes that hole so the only thing the model sees
+    inside ``<input ...>`` is genuinely the user-supplied data string.
+    """
     if not isinstance(text, str):
         return ""
     cleaned = _PROMPT_UNSAFE_CHARS.sub("", text)
+    # Escape the five XML/HTML-attribute-significant characters. ``&`` must
+    # go first so we don't double-escape the entities we're about to write.
+    cleaned = (
+        cleaned.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("'", "&apos;")
+    )
     return cleaned[:_INPUT_MAX_LEN]
 
 

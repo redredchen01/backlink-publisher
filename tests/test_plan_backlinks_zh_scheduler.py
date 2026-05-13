@@ -280,6 +280,90 @@ def test_degrade_uses_domain_label_when_branded_pool_empty(profile_cache):
     assert all(a for a in anchors)
 
 
+# ── degrade-path dedup regression ───────────────────────────────────────────
+
+
+def test_degrade_path_respects_recent_texts_dedup(profile_cache):
+    """Regression for the ce:review adversarial finding: the degrade path
+    must apply the same 20-entry text-dedup filter the normal resolver uses,
+    so a burst of degrades can't resurrect an anchor that just shipped."""
+    from backlink_publisher.anchor_profile import (
+        ProfileEntry,
+        now_iso,
+        record_article,
+    )
+
+    # Pre-load profile with the entire branded pool as "recent" entries so
+    # dedup filtering empties out branded_clean — the new logic should then
+    # relax to the unfiltered pool rather than infinite-looping.
+    branded_words = ["51首页", "51平台", "51推荐"]
+    record_article(
+        "https://51acgs.com",
+        [
+            ProfileEntry(
+                ts=now_iso(),
+                link_role="main",
+                url_category="home",
+                anchor_type="branded",
+                anchor_text=word,
+            )
+            for word in branded_words
+        ],
+    )
+
+    cfg = Config(
+        site_url_categories={
+            "https://51acgs.com": {
+                "home": "https://51acgs.com/",
+                "hot": "https://51acgs.com/hot",
+            },
+        },
+        target_anchor_pools_v2={
+            "https://51acgs.com": {
+                "home": {"branded": branded_words},
+                # 'hot' empty → resolver returns None → degrade triggers
+            },
+        },
+    )
+
+    payload = _plan_zh_short_row(_zh_row(), cfg, None, rng=random.Random(0))
+    assert payload is not None
+    # Even though every branded word is in recent_texts, the fallback to the
+    # unfiltered pool keeps the article shippable
+    anchors = [link["anchor"] for link in payload["links"]]
+    assert all(a for a in anchors)
+
+
+def test_degrade_path_avoids_duplicate_main_and_secondary(profile_cache):
+    """When the branded pool has only one clean entry, the degrade path must
+    NOT produce two identical anchors — that would publish two <a> tags
+    with the same text pointing at the same URL, an obvious SEO-spam signal."""
+    cfg = Config(
+        site_url_categories={
+            "https://51acgs.com": {
+                "home": "https://51acgs.com/",
+                "hot": "https://51acgs.com/hot",
+            },
+        },
+        target_anchor_pools_v2={
+            "https://51acgs.com": {
+                # 1 branded entry → after main picks it, sec_candidates would
+                # be [] without the new domain-label fallback
+                "home": {"branded": ["51独家"]},
+                # 'hot' empty → degrade
+            },
+        },
+    )
+
+    payload = _plan_zh_short_row(_zh_row(), cfg, None, rng=random.Random(0))
+    assert payload is not None
+    anchors = [link["anchor"] for link in payload["links"]]
+    # Main and secondary must differ
+    assert anchors[0] != anchors[1], (
+        f"degrade path produced duplicate anchor: {anchors}"
+    )
+
+
 # ── retry behavior ──────────────────────────────────────────────────────────
 
 

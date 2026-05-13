@@ -768,16 +768,44 @@ def _plan_zh_short_row(
 
     # ── Degrade path ────────────────────────────────────────────────────────
     # Both attempts failed. Produce a 2-link payload using only branded text
-    # from the home pool; if that pool is also empty (or every entry already
-    # collided with recent_texts twice), fall back to the bare domain label.
+    # from the home pool. Two safety nets are layered here:
+    #
+    # 1. Apply the same recent_texts dedup the normal resolver uses. The
+    #    20-entry text-dedup window is the scheduler's defence against
+    #    anchor repetition; without re-applying it on the degrade path, a
+    #    burst of degrades could surface an anchor that just shipped 2-3
+    #    articles ago, breaking the dedup invariant the rest of the
+    #    pipeline relies on.
+    #
+    # 2. If recent-aware filtering empties the pool, fall back to the
+    #    raw branded pool (allowing repetition is still better than
+    #    failing the row). Last resort is the bare domain label.
+    #
+    # Then guarantee main_anchor != sec_anchor so the article never
+    # publishes with two identical anchors pointing at the home URL —
+    # an obvious SEO-spam signal that the validator's set-based check
+    # wouldn't catch.
+    recent_for_dedup = anchor_profile.recent_texts(
+        anchor_profile.load_profile(main_domain), n=20,
+    )
     branded_pool = get_anchor_pool_v2(config, main_domain, "home", "branded")
-    branded_clean = [w for w in branded_pool if anchor_resolver._passes_filters(w)]
+    branded_clean_all = [w for w in branded_pool if anchor_resolver._passes_filters(w)]
+    branded_clean = [w for w in branded_clean_all if w not in recent_for_dedup]
     if not branded_clean:
-        branded_clean = [_domain_label_of(main_domain)]
+        # Recent-aware filtering exhausted the pool — relax dedup before
+        # giving up entirely.
+        branded_clean = branded_clean_all or [_domain_label_of(main_domain)]
 
     main_anchor = rng.choice(branded_clean)
     sec_candidates = [w for w in branded_clean if w != main_anchor]
-    sec_anchor = rng.choice(sec_candidates) if sec_candidates else main_anchor
+    if not sec_candidates:
+        # Same pool, just relax the recent_texts filter for the secondary
+        # slot. Pulling from the unfiltered branded list is preferable to
+        # publishing two identical anchors.
+        sec_candidates = [w for w in branded_clean_all if w != main_anchor]
+    sec_anchor = (
+        rng.choice(sec_candidates) if sec_candidates else _domain_label_of(main_domain)
+    )
     sec_pairs = [(home_url, sec_anchor)]
 
     html = markdown_utils.render_zh_short_article(
