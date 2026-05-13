@@ -10,6 +10,9 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+# Skip entire module if Flask is not installed (CI without webui deps)
+pytest.importorskip("flask")
+
 # We need to import webui without running the Flask dev server startup.
 # webui.py uses sys.path.insert at module level, so we add the src dir here too.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
