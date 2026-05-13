@@ -1,9 +1,11 @@
 ---
 title: "feat: anchor-keyword pool persistence + WebUI editor + distribution report + Medium attr verification"
 type: feat
-status: active
+status: completed
 date: 2026-05-13
 revised: 2026-05-13
+completed: 2026-05-13
+pr: https://github.com/redredchen01/backlink-publisher/pull/3
 note: "PR #2 review complete (3ace4b4 pushed). Merge to main unblocks execution. Unit 1 R2 pre-implemented in PR #2 review fix — save_config now preserves [targets] on any save. Unit 1 scope reduced to adding the explicit parameter for WebUI writes."
 ---
 
@@ -178,7 +180,7 @@ medium_api.py / medium_browser.py / medium_brave.py
 
 ## Implementation Units
 
-- [ ] **Unit 1: `save_config` 添加 `target_anchor_keywords` 显式写入参数**
+- [x] **Unit 1: `save_config` 添加 `target_anchor_keywords` 显式写入参数**
 
 **Goal:** 在 `save_config` 签名追加可选参数 `target_anchor_keywords`，让 WebUI 能主动写入新 keywords 池，而不仅仅是保留磁盘上的既有值。
 
