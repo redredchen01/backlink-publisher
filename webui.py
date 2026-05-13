@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from urllib.parse import urlparse, urljoin, urlencode
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
 
@@ -3587,6 +3587,13 @@ def settings_medium_oauth_callback():
         if not access_token:
             raise Exception("Missing access_token in Medium response")
         
+        # Augment token with expires_at (Unix timestamp) so the adapter can
+        # detect near-expiry before making API calls.
+        if "expires_in" in token_data and "expires_at" not in token_data:
+            token_data["expires_at"] = (
+                int(datetime.now(timezone.utc).timestamp()) + int(token_data["expires_in"])
+            )
+
         # 保存 token 和凭据
         from backlink_publisher.config import save_medium_token, MediumOAuthConfig, save_config
         save_medium_token(token_data)
