@@ -18,6 +18,7 @@ class AdapterResult:
     error: str | None = None
     _dry_run: bool = False
     _command: str = ""
+    _provider_meta: dict[str, Any] | None = None  # optional platform-specific metadata
 
     def to_publish_output(self, row: dict[str, Any], created_at: str) -> dict[str, Any]:
         """Convert to the JSONL output shape expected by publish_backlinks."""

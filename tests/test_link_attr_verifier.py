@@ -1,0 +1,244 @@
+"""Tests for the link-attribute verifier helper."""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from backlink_publisher.adapters.link_attr_verifier import verify_link_attributes
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _mock_resp(text: str = "", status_code: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.ok = status_code < 400
+    resp.status_code = status_code
+    resp.text = text
+    return resp
+
+
+def _html(*a_tags: str) -> str:
+    body = "\n".join(a_tags)
+    return f"<html><body>{body}</body></html>"
+
+
+# ---------------------------------------------------------------------------
+# Happy path
+# ---------------------------------------------------------------------------
+
+def test_all_anchors_have_blank_target():
+    html = _html(
+        '<a href="https://a.com" target="_blank" rel="noopener">link</a>',
+        '<a href="https://b.com" target="_blank">link2</a>',
+        '<a href="https://c.com" target="_blank">link3</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+
+    assert result["verification"] == "ok"
+    assert result["total_anchors"] == 3
+    assert result["blank_anchors"] == 3
+    assert result["blank_ratio"] == 1.0
+
+
+def test_half_anchors_have_blank_target():
+    html = _html(
+        '<a href="https://a.com" target="_blank">link</a>',
+        '<a href="https://b.com" target="_blank">link2</a>',
+        '<a href="https://c.com">link3</a>',
+        '<a href="https://d.com">link4</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+
+    assert result["verification"] == "ok"
+    assert result["blank_ratio"] == 0.5
+
+
+def test_no_anchors_in_html():
+    with patch("requests.get", return_value=_mock_resp("<html><body>no links</body></html>")):
+        result = verify_link_attributes("https://example.com")
+
+    assert result["verification"] == "ok"
+    assert result["total_anchors"] == 0
+    assert result["blank_ratio"] == 0.0
+
+
+def test_single_quote_target_matches():
+    html = _html("<a href='https://a.com' target='_blank'>link</a>")
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["blank_anchors"] == 1
+
+
+def test_uppercase_target_matches():
+    html = _html('<a href="https://a.com" TARGET="_BLANK">link</a>')
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["blank_anchors"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Error / skip scenarios
+# ---------------------------------------------------------------------------
+
+def test_connection_error_returns_skipped():
+    import requests as req_lib
+    with patch("requests.get", side_effect=req_lib.ConnectionError("refused")):
+        result = verify_link_attributes("http://127.0.0.1:19999/nonexistent", timeout=0.1)
+    assert result["verification"] == "skipped"
+    assert "reason" in result
+
+
+def test_http_5xx_returns_skipped():
+    with patch("requests.get", return_value=_mock_resp("", status_code=503)):
+        result = verify_link_attributes("https://example.com")
+    assert result["verification"] == "skipped"
+    assert "503" in result["reason"]
+
+
+def test_http_4xx_returns_skipped():
+    with patch("requests.get", return_value=_mock_resp("", status_code=404)):
+        result = verify_link_attributes("https://example.com")
+    assert result["verification"] == "skipped"
+
+
+def test_timeout_returns_skipped():
+    import requests as req_lib
+    with patch("requests.get", side_effect=req_lib.Timeout("timed out")):
+        result = verify_link_attributes("https://example.com", timeout=0.001)
+    assert result["verification"] == "skipped"
+
+
+def test_non_html_response_does_not_crash():
+    with patch("requests.get", return_value=_mock_resp('{"not": "html"}')):
+        result = verify_link_attributes("https://example.com")
+    assert result["verification"] == "ok"
+    assert result["total_anchors"] == 0
+
+
+# ---------------------------------------------------------------------------
+# medium_api integration: hook fires on publish mode only
+# ---------------------------------------------------------------------------
+
+def _make_payload(mode: str = "publish", article_id: str = "test01") -> dict:
+    return {
+        "id": article_id,
+        "platform": "medium",
+        "title": "Test",
+        "slug": "test",
+        "content_markdown": "# Test\n\nHello.",
+        "tags": ["test"],
+        "publish_mode": mode,
+        "language": "en",
+        "source_language": "en",
+        "target_url": "https://x.com/",
+        "main_domain": "https://x.com/",
+        "url_mode": "A",
+        "excerpt": "Hello.",
+        "links": [],
+        "seo": {"title": "Test", "description": "Test", "canonical_url": "https://x.com/"},
+    }
+
+
+def test_medium_api_publish_hook_wires_meta():
+    """publish mode → verifier result stored in AdapterResult._provider_meta."""
+    from backlink_publisher.adapters.medium_api import MediumAPIAdapter
+    from backlink_publisher.config import Config
+
+    html = _html(
+        '<a href="https://x.com" target="_blank">link</a>',
+        '<a href="https://y.com" target="_blank">link2</a>',
+    )
+    api_resp = MagicMock()
+    api_resp.ok = True
+    api_resp.status_code = 200
+    api_resp.json.return_value = {"data": {"url": "https://medium.com/p/abc123", "id": "p1"}}
+    me_resp = MagicMock()
+    me_resp.ok = True
+    me_resp.status_code = 200
+    me_resp.json.return_value = {"data": {"id": "me123"}}
+    page_resp = _mock_resp(html)
+
+    def _requests_get(url, **kw):
+        if "v1/me" in url:
+            return me_resp
+        return page_resp
+
+    cfg = Config(medium_integration_token="dummy-token")
+    adapter = MediumAPIAdapter()
+
+    with patch("requests.get", side_effect=_requests_get), \
+         patch("requests.post", return_value=api_resp):
+        result = adapter.publish(_make_payload("publish"), mode="publish", config=cfg)
+
+    assert result.status == "published"
+    assert result._provider_meta is not None
+    meta = result._provider_meta["link_attr_verification"]
+    assert meta["verification"] == "ok"
+    assert meta["blank_anchors"] == 2
+
+
+def test_medium_api_draft_mode_skips_verifier():
+    """draft mode → verify_link_attributes must NOT be called."""
+    from backlink_publisher.adapters.medium_api import MediumAPIAdapter
+    from backlink_publisher.config import Config
+
+    api_resp = MagicMock()
+    api_resp.ok = True
+    api_resp.status_code = 200
+    api_resp.json.return_value = {"data": {"url": "https://medium.com/p/draft/edit", "id": "d1"}}
+    me_resp = MagicMock()
+    me_resp.ok = True
+    me_resp.status_code = 200
+    me_resp.json.return_value = {"data": {"id": "me456"}}
+
+    cfg = Config(medium_integration_token="dummy-token")
+    adapter = MediumAPIAdapter()
+
+    with patch("requests.get", return_value=me_resp), \
+         patch("requests.post", return_value=api_resp), \
+         patch(
+             "backlink_publisher.adapters.medium_api.verify_link_attributes"
+         ) as mock_verify:
+        result = adapter.publish(_make_payload("draft", "draft01"), mode="draft", config=cfg)
+
+    assert result.status == "drafted"
+    mock_verify.assert_not_called()
+
+
+def test_verifier_skipped_result_no_warn(caplog):
+    """When verifier returns skipped, no WARN about stripping should fire."""
+    from backlink_publisher.adapters.medium_api import MediumAPIAdapter
+    from backlink_publisher.config import Config
+
+    api_resp = MagicMock()
+    api_resp.ok = True
+    api_resp.status_code = 200
+    api_resp.json.return_value = {"data": {"url": "https://medium.com/p/abc", "id": "p2"}}
+    me_resp = MagicMock()
+    me_resp.ok = True
+    me_resp.status_code = 200
+    me_resp.json.return_value = {"data": {"id": "me789"}}
+
+    skipped = {"verification": "skipped", "reason": "timeout"}
+
+    cfg = Config(medium_integration_token="dummy-token")
+    adapter = MediumAPIAdapter()
+
+    with patch("requests.get", return_value=me_resp), \
+         patch("requests.post", return_value=api_resp), \
+         patch(
+             "backlink_publisher.adapters.medium_api.verify_link_attributes",
+             return_value=skipped,
+         ):
+        result = adapter.publish(_make_payload("publish", "p2"), mode="publish", config=cfg)
+
+    assert result.status == "published"
+    meta = result._provider_meta["link_attr_verification"]
+    assert meta["verification"] == "skipped"
+    assert "stripped" not in caplog.text

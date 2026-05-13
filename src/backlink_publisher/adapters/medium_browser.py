@@ -18,6 +18,7 @@ from ..errors import DependencyError, ExternalServiceError
 from ..logger import opencli_logger as log
 from ..markdown_utils import render_to_html
 from .base import AdapterResult
+from .link_attr_verifier import verify_link_attributes
 from .retry import retry_transient_call
 from . import _medium_selectors as sel
 
@@ -171,11 +172,24 @@ class MediumBrowserAdapter:
                     context.close()
 
                     if mode == "publish":
+                        meta: dict = {}
+                        if final_url:
+                            attr_check = verify_link_attributes(final_url)
+                            meta["link_attr_verification"] = attr_check
+                            ratio = attr_check.get("blank_ratio", 1.0)
+                            total = attr_check.get("total_anchors", 0)
+                            if attr_check.get("verification") == "ok" and total > 0 and ratio < 0.5:
+                                log.warn(
+                                    f"Medium stripped target attributes: "
+                                    f"{attr_check['blank_anchors']}/{total} anchors "
+                                    "retain target=_blank"
+                                )
                         return AdapterResult(
                             status="published",
                             adapter="medium-browser",
                             platform="medium",
                             published_url=final_url,
+                            _provider_meta=meta if meta else None,
                         )
                     return AdapterResult(
                         status="drafted",
