@@ -62,8 +62,9 @@ def test_medium_with_token_uses_api_adapter(mock_pub):
 
 
 @patch("backlink_publisher.adapters.MediumBrowserAdapter.publish", return_value=MEDIUM_BROWSER_RESULT)
+@patch("backlink_publisher.adapters.MediumBraveAdapter.publish", side_effect=DependencyError("brave not running"))
 @patch("backlink_publisher.adapters.MediumAPIAdapter.publish", side_effect=DependencyError("no token"))
-def test_medium_fallthrough_to_browser_on_dependency_error(mock_api, mock_browser):
+def test_medium_fallthrough_to_browser_on_dependency_error(mock_api, mock_brave, mock_browser):
     result = publish(MEDIUM_PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
     assert result.adapter == "medium-browser"
     mock_api.assert_called_once()
