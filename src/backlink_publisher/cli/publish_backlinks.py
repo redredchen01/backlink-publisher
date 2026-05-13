@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import sys
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 _MEDIUM_ADAPTERS = {"medium-api", "medium-browser"}
+_HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 
 from ..adapters import publish as adapter_publish, verify_adapter_setup
+from .. import checkpoint
 from ..config import load_config
 from ..errors import DependencyError, ExternalServiceError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
 from ..logger import publish_logger
 from ..schema import SUPPORTED_PLATFORMS, validate_publish_payload
+
+
+def _error_class(exc: Exception) -> str:
+    msg = str(exc)
+    if _HTTP_5XX_RE.search(msg):
+        return "http_5xx"
+    if isinstance(exc, ExternalServiceError):
+        return "transient"
+    return "unexpected"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -115,6 +127,22 @@ def main(argv: list[str] | None = None) -> None:
             except DependencyError as exc:
                 emit_error(str(exc), exit_code=3)
 
+    # Create checkpoint (after pre-flight passes, skipped for dry-run)
+    run_id: str | None = None
+    if not args.dry_run:
+        try:
+            run_id, _ = checkpoint.create_checkpoint(
+                rows,
+                platform=args.platform,
+                mode=args.mode,
+            )
+            print(f"publish-backlinks: run_id={run_id}", file=sys.stderr, flush=True)
+        except Exception as exc:
+            print(
+                f"[WARN] checkpoint not created — this run cannot be resumed: {exc}",
+                file=sys.stderr,
+            )
+
     outputs: list[dict[str, Any]] = []
     ts = datetime.now(timezone.utc).isoformat()
     success_count = 0
@@ -199,6 +227,8 @@ def main(argv: list[str] | None = None) -> None:
             emit_error(str(exc), exit_code=3)
             return  # unreachable but satisfies type checker
         except ExternalServiceError as exc:
+            err_class = _error_class(exc)
+            err_msg = f"service error: {exc}"
             outputs.append({
                 "id": row.get("id", ""),
                 "platform": platform,
@@ -208,15 +238,26 @@ def main(argv: list[str] | None = None) -> None:
                 "published_url": "",
                 "created_at": ts,
                 "adapter": f"{platform}",
-                "error": f"service error: {exc}",
+                "error": err_msg,
             })
             fail_count += 1
+            if run_id is not None:
+                try:
+                    checkpoint.update_item(
+                        run_id, row.get("id", ""), "failed",
+                        error=err_msg,
+                        error_class=err_class,
+                    )
+                except Exception as ckpt_exc:
+                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+                    run_id = None
             publish_logger.error(
                 f"publish failed: {exc}",
                 extra={"id": row.get("id"), "platform": platform},
             )
             continue
         except Exception as exc:
+            err_msg = f"unexpected error: {exc}"
             outputs.append({
                 "id": row.get("id", ""),
                 "platform": platform,
@@ -226,9 +267,19 @@ def main(argv: list[str] | None = None) -> None:
                 "published_url": "",
                 "created_at": ts,
                 "adapter": f"{platform}",
-                "error": f"unexpected error: {exc}",
+                "error": err_msg,
             })
             fail_count += 1
+            if run_id is not None:
+                try:
+                    checkpoint.update_item(
+                        run_id, row.get("id", ""), "failed",
+                        error=err_msg,
+                        error_class="unexpected",
+                    )
+                except Exception as ckpt_exc:
+                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+                    run_id = None
             publish_logger.error(
                 f"publish failed: {exc}",
                 extra={"id": row.get("id"), "platform": platform},
@@ -242,6 +293,17 @@ def main(argv: list[str] | None = None) -> None:
             success_count += 1
             if result.adapter in _MEDIUM_ADAPTERS:
                 last_medium_success_idx = row_idx
+            if run_id is not None:
+                try:
+                    checkpoint.update_item(
+                        run_id, row.get("id", ""), "done",
+                        published_url=result.published_url,
+                        adapter=result.adapter,
+                        completed_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                except Exception as ckpt_exc:
+                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+                    run_id = None
             publish_logger.info(
                 f"published: id={row.get('id', '')} status={result.status}",
                 extra={"id": row.get("id"), "status": result.status},
