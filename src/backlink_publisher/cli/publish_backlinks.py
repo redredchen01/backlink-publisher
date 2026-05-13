@@ -31,6 +31,161 @@ def _error_class(exc: Exception) -> str:
     return "unexpected"
 
 
+def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
+    """Convert a done checkpoint item to the standard 9-field publish output shape."""
+    return {
+        "id": item.get("id", ""),
+        "platform": item.get("platform", ""),
+        "status": item.get("status", ""),
+        "title": item.get("title", ""),
+        "draft_url": "",
+        "published_url": item.get("published_url") or "",
+        "created_at": item.get("completed_at", ""),
+        "adapter": item.get("adapter") or "",
+        "error": None,
+    }
+
+
+def _run_resume(args: Any) -> None:
+    """Handle --resume <run_id>: load checkpoint, process pending/failed items, emit union output."""
+    run_id = args.resume
+
+    try:
+        ckpt = checkpoint.load_checkpoint(run_id)
+    except (ValueError, FileNotFoundError) as exc:
+        emit_error(str(exc), exit_code=2)
+        return
+
+    config = load_config()
+
+    # verify adapter setup for platforms in checkpoint
+    platforms_in_ckpt = {item["platform"] for item in ckpt["items"] if item.get("platform")}
+    for plat in platforms_in_ckpt:
+        if plat in SUPPORTED_PLATFORMS:
+            try:
+                verify_adapter_setup(plat, config)
+            except DependencyError as exc:
+                emit_error(str(exc), exit_code=3)
+
+    to_process = [item for item in ckpt["items"] if item["status"] in ("pending", "failed")]
+
+    # warn on http_5xx items
+    for item in to_process:
+        if item.get("error_class") == "http_5xx":
+            print(
+                f"WARNING: item {item['id']} failed with HTTP 5xx — "
+                f"post may already be live on {item['platform']}. Verify before resuming.",
+                file=sys.stderr,
+            )
+
+    # all done: emit union and mark complete
+    if not to_process:
+        all_done = [item_to_publish_output(i) for i in ckpt["items"] if i["status"] == "done"]
+        write_jsonl(all_done)
+        sys.stdout.flush()
+        checkpoint.mark_complete(run_id)
+        raise SystemExit(0)
+
+    # R8: find last done Medium item and compute elapsed
+    throttle_min = int(os.environ.get("MEDIUM_THROTTLE_MIN", "60"))
+    throttle_max = int(os.environ.get("MEDIUM_THROTTLE_MAX", "300"))
+    resume_elapsed_skip_throttle = False
+    for item in ckpt["items"]:
+        if item["status"] == "done" and item.get("adapter") in _MEDIUM_ADAPTERS:
+            try:
+                last_ts = datetime.fromisoformat(item["completed_at"])
+                elapsed = (datetime.now(timezone.utc) - last_ts).total_seconds()
+                if elapsed >= 300:
+                    resume_elapsed_skip_throttle = True
+                else:
+                    resume_elapsed_skip_throttle = False
+            except (ValueError, TypeError):
+                pass
+
+    first_medium_in_resume = True
+    last_medium_success_idx = -1
+
+    for item_idx, item in enumerate(to_process):
+        row = item["payload"]
+        platform = ckpt.get("platform") or row.get("platform", "")
+        mode = ckpt.get("mode") or row.get("publish_mode", "draft")
+
+        if platform == "medium":
+            if first_medium_in_resume:
+                if not resume_elapsed_skip_throttle:
+                    sleep_secs = random.uniform(throttle_min, throttle_max)
+                    publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s before resume Medium post")
+                    time.sleep(sleep_secs)
+                first_medium_in_resume = False
+            elif last_medium_success_idx == item_idx - 1:
+                sleep_secs = random.uniform(throttle_min, throttle_max)
+                publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s before next Medium post")
+                time.sleep(sleep_secs)
+
+        publish_logger.info(
+            f"resume publishing: {platform} id={item['id']}",
+            extra={"id": item["id"], "platform": platform},
+        )
+
+        try:
+            result = adapter_publish(
+                payload={**row, "platform": platform},
+                mode=mode,
+                config=config,
+                dry_run=False,
+            )
+        except DependencyError as exc:
+            emit_error(str(exc), exit_code=3)
+            return
+        except ExternalServiceError as exc:
+            err_msg = f"service error: {exc}"
+            checkpoint.update_item(
+                run_id, item["id"], "failed",
+                error=err_msg,
+                error_class=_error_class(exc),
+            )
+            publish_logger.error(f"publish failed: {exc}", extra={"id": item["id"], "platform": platform})
+            continue
+        except Exception as exc:
+            err_msg = f"unexpected error: {exc}"
+            checkpoint.update_item(
+                run_id, item["id"], "failed",
+                error=err_msg,
+                error_class="unexpected",
+            )
+            publish_logger.error(f"publish failed: {exc}", extra={"id": item["id"], "platform": platform})
+            continue
+
+        completed_at = datetime.now(timezone.utc).isoformat()
+        checkpoint.update_item(
+            run_id, item["id"], "done",
+            published_url=result.published_url,
+            adapter=result.adapter,
+            completed_at=completed_at,
+        )
+        if result.adapter in _MEDIUM_ADAPTERS:
+            last_medium_success_idx = item_idx
+        publish_logger.info(
+            f"published: id={item['id']} status={result.status}",
+            extra={"id": item["id"], "status": result.status},
+        )
+
+    # build union output in original checkpoint order
+    updated_ckpt = checkpoint.load_checkpoint(run_id)
+    all_done = [item_to_publish_output(i) for i in updated_ckpt["items"] if i["status"] == "done"]
+    write_jsonl(all_done)
+    sys.stdout.flush()
+
+    still_unfinished = [i for i in updated_ckpt["items"] if i["status"] in ("pending", "failed")]
+    if not still_unfinished:
+        checkpoint.mark_complete(run_id)
+        raise SystemExit(0)
+    else:
+        for f in still_unfinished:
+            print(f"publish failed: {f.get('error', 'unknown error')}", file=sys.stderr)
+        raise SystemExit(4)
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
@@ -79,10 +234,76 @@ def main(argv: list[str] | None = None) -> None:
         choices=["DEBUG", "INFO", "WARN", "ERROR"],
         help="Log verbosity (default: WARN)",
     )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="RUN_ID",
+        help="Resume an interrupted batch run from checkpoint",
+    )
+    parser.add_argument(
+        "--list-runs",
+        action="store_true",
+        default=False,
+        help="List incomplete checkpoint runs and exit",
+    )
+    parser.add_argument(
+        "--cleanup",
+        default=None,
+        metavar="RUN_ID",
+        help="Delete a specific checkpoint and exit",
+    )
+    parser.add_argument(
+        "--cleanup-all",
+        action="store_true",
+        default=False,
+        help="Delete all complete checkpoints and exit",
+    )
     args = parser.parse_args(argv)
 
     from ..logger import set_log_level
     set_log_level(args.log_level)
+
+    # Mutual exclusion: only one of --resume, --list-runs, --cleanup, --cleanup-all
+    exclusive = [args.resume, args.list_runs, args.cleanup, args.cleanup_all]
+    if sum(bool(x) for x in exclusive) > 1:
+        emit_error(
+            "error: --resume, --list-runs, --cleanup, and --cleanup-all are mutually exclusive",
+            exit_code=2,
+        )
+
+    # ── Housekeeping short-circuits ───────────────────────────────────────────
+
+    if args.list_runs:
+        runs = checkpoint.list_incomplete()
+        if not runs:
+            print("No incomplete runs.")
+        else:
+            print(f"{'RUN_ID':<32}  {'STARTED':<26}  {'PENDING':>7}  {'FAILED':>7}")
+            print("-" * 76)
+            for run in runs:
+                pending = sum(1 for i in run["items"] if i["status"] == "pending")
+                failed = sum(1 for i in run["items"] if i["status"] == "failed")
+                print(f"{run['run_id']:<32}  {run.get('started_at', ''):<26}  {pending:>7}  {failed:>7}")
+        raise SystemExit(0)
+
+    if args.cleanup:
+        try:
+            checkpoint.delete(args.cleanup)
+            print(f"Deleted checkpoint: {args.cleanup}")
+        except (ValueError, FileNotFoundError) as exc:
+            emit_error(str(exc), exit_code=2)
+        raise SystemExit(0)
+
+    if args.cleanup_all:
+        count = checkpoint.delete_complete()
+        print(f"Deleted {count} complete checkpoint(s).")
+        raise SystemExit(0)
+
+    # ── Resume path ───────────────────────────────────────────────────────────
+
+    if args.resume:
+        _run_resume(args)
+        return  # _run_resume raises SystemExit; this is unreachable
 
     publish_logger.info("publish-backlinks started", extra={
         "platform": args.platform,
