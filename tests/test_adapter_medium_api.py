@@ -62,9 +62,13 @@ def test_draft_mode_returns_draft_url(mock_post, mock_get):
     assert result.adapter == "medium-api"
 
 
+@patch(
+    "backlink_publisher.adapters.medium_api.verify_link_attributes",
+    return_value={"verification": "skipped", "reason": "test-mock"},
+)
 @patch("backlink_publisher.adapters.medium_api.requests.get")
 @patch("backlink_publisher.adapters.medium_api.requests.post")
-def test_publish_mode_sends_public_status(mock_post, mock_get):
+def test_publish_mode_sends_public_status(mock_post, mock_get, _mock_verify):
     mock_get.return_value = make_mock_get()
     pub_resp = {"data": {"id": "post789", "url": "https://medium.com/@testuser/live-post"}}
     mock_post.return_value = make_mock_post(json_data=pub_resp)
