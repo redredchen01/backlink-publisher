@@ -24,6 +24,7 @@ dev = ["pytest>=7", "pytest-mock", "requests", "pytest-asyncio>=0.23"]
 plan-backlinks = "backlink_publisher.cli.plan_backlinks:main"
 validate-backlinks = "backlink_publisher.cli.validate_backlinks:main"
 publish-backlinks = "backlink_publisher.cli.publish_backlinks:main"
+report-anchors = "backlink_publisher.cli.report_anchors:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
