@@ -3240,19 +3240,30 @@ def settings_schedule_save():
 
 @app.route('/ce:batch', methods=['POST'])
 def ce_batch():
-    """Batch publish: process multiple target URLs through the full pipeline."""
+    """Batch publish: process multiple target URLs through the full pipeline.
+
+    All URLs are planned and validated in a single pipeline invocation, then
+    published together (enabling checkpoint/resume if the batch fails mid-way).
+    """
     urls_text = request.form.get('batch_urls', '').strip()
     platform = request.form.get('platform', 'blogger')
     language = request.form.get('language', 'zh-CN')
     url_mode = request.form.get('url_mode', 'A')
     publish_mode = request.form.get('publish_mode', 'draft')
 
-    urls = [u.strip() for u in urls_text.split('\n') if u.strip()]
-    if not urls:
+    raw_urls = [u.strip() for u in urls_text.split('\n') if u.strip()]
+    if not raw_urls:
         return _render(HTML, error="请输入至少一个网址", batch_tab=True,
                        batch_urls=urls_text, config={})
 
-    # Pre-flight: Blogger requires blog_id mapping
+    # Normalise URLs and build seed JSONL
+    urls = []
+    for u in raw_urls:
+        if not u.startswith(('http://', 'https://')):
+            u = 'https://' + u
+        urls.append(u)
+
+    # Pre-flight: Blogger requires blog_id mapping for all domains
     if platform == 'blogger':
         try:
             from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
@@ -3269,47 +3280,86 @@ def ce_batch():
                 return _render(HTML, error=friendly, batch_tab=True,
                                batch_urls=urls_text, config={})
 
+    seed_jsonl = '\n'.join(
+        json.dumps({
+            'target_url': u,
+            'main_domain': get_main_domain(u),
+            'platform': platform,
+            'language': language,
+            'url_mode': url_mode,
+            'publish_mode': publish_mode,
+        }, ensure_ascii=False)
+        for u in urls
+    )
+
+    # Plan all URLs in one invocation
+    try:
+        plan_res = run_pipe(['plan-backlinks'], seed_jsonl)
+    except Exception as e:
+        return _render(HTML, error=f"计划阶段失败: {e}", batch_tab=True,
+                       batch_urls=urls_text, config={})
+
+    # Validate all plans in one invocation
+    try:
+        val_res = run_pipe(['validate-backlinks', '--no-check-urls'], plan_res['stdout'])
+    except Exception as e:
+        return _render(HTML, error=f"验证阶段失败: {e}", batch_tab=True,
+                       batch_urls=urls_text, config={})
+
+    # Publish all: use subprocess.run directly to handle exit-4 (partial failure)
+    pub_result = subprocess.run(
+        ['publish-backlinks', '--platform', platform, '--mode', publish_mode],
+        input=val_res['stdout'],
+        capture_output=True,
+        text=True,
+        cwd=os.path.dirname(os.path.abspath(__file__)) or os.getcwd(),
+    )
+    publish_results = _parse_publish_results(pub_result.stdout)
+
+    # Build per-URL results: map by target_url field in publish output
+    result_by_url = {r.get('target_url', ''): r for r in publish_results}
     results = []
     for url in urls:
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        try:
-            main_domain = get_main_domain(url)
-            seed = json.dumps({
-                'target_url': url,
-                'main_domain': main_domain,
-                'platform': platform,
-                'language': language,
-                'url_mode': url_mode,
-                'publish_mode': publish_mode,
-            }, ensure_ascii=False)
-
-            plan_res = run_pipe(['plan-backlinks'], seed)
-            val_res = run_pipe(['validate-backlinks', '--no-check-urls'], plan_res['stdout'])
-            cmd = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
-            pub_res = run_pipe(cmd, val_res['stdout'])
-
-            publish_results = _parse_publish_results(pub_res['stdout'])
-            article_url = ''
-            title = ''
-            if publish_results:
-                article_url = publish_results[0].get('published_url') or publish_results[0].get('draft_url', '')
-                title = publish_results[0].get('title', '')
-
-            _append_history({
-                'id': str(uuid.uuid4())[:8],
-                'target_url': url,
-                'platform': platform,
-                'language': language,
-                'status': 'drafted' if publish_mode == 'draft' else 'published',
-                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-                'article_urls': [article_url] if article_url else [],
+        r = result_by_url.get(url) or result_by_url.get(url.rstrip('/') + '/')
+        if r and not r.get('error'):
+            article_url = r.get('published_url') or r.get('draft_url', '')
+            results.append({
+                'url': url,
+                'status': 'success',
+                'article_url': article_url or '',
+                'title': r.get('title', ''),
             })
-            results.append({'url': url, 'status': 'success',
-                            'article_url': article_url, 'title': title})
-        except Exception as e:
-            results.append({'url': url, 'status': 'failed',
-                            'article_url': '', 'title': '', 'error': str(e)})
+        elif r and r.get('error'):
+            results.append({
+                'url': url,
+                'status': 'failed',
+                'article_url': '',
+                'title': r.get('title', ''),
+                'error': r.get('error', ''),
+            })
+        else:
+            # URL missing from publish output — extract from stderr if available
+            err_hint = pub_result.stderr[:200] if pub_result.stderr else 'no output'
+            results.append({
+                'url': url,
+                'status': 'failed',
+                'article_url': '',
+                'title': '',
+                'error': err_hint,
+            })
+
+    success_results = [r for r in results if r['status'] == 'success']
+    if success_results:
+        article_urls = [r['article_url'] for r in success_results if r['article_url']]
+        _append_history({
+            'id': str(uuid.uuid4())[:8],
+            'target_url': urls[0] if urls else 'batch',
+            'platform': platform,
+            'language': language,
+            'status': 'drafted' if publish_mode == 'draft' else 'published',
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'article_urls': article_urls,
+        })
 
     return _render(HTML, batch_results=results, batch_tab=True,
                    batch_urls=urls_text, config={})

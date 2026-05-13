@@ -27,6 +27,7 @@ class AdapterResult:
             "platform": self.platform,
             "status": self.status,
             "title": row.get("title", ""),
+            "target_url": row.get("target_url", ""),
             "draft_url": self.draft_url,
             "published_url": self.published_url,
             "created_at": created_at,
