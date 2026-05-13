@@ -5,10 +5,23 @@ from __future__ import annotations
 import json
 import sys
 from io import StringIO
+from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.cli.report_anchors import _build_report, _markdown_table, main
+from backlink_publisher.anchor_profile import (
+    ProfileEntry,
+    ProfileState,
+    now_iso,
+    record_article,
+)
+from backlink_publisher.cli.report_anchors import (
+    _build_profile_report,
+    _build_report,
+    _format_profile_report_markdown,
+    _markdown_table,
+    main,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -169,3 +182,205 @@ def test_cli_multiple_url_modes_show_distinct_anchors():
     data = json.loads(stdout)
     distinct = len(data["https://a.com"]["anchors"])
     assert distinct >= 3
+
+
+# ─── Unit 9: --from-profile path tests ──────────────────────────────────────
+
+
+SAFE_SEO = {"branded": 0.55, "partial": 0.25, "exact": 0.10, "lsi": 0.10}
+
+
+@pytest.fixture()
+def profile_cache(tmp_path):
+    """Redirect anchor_profile to write under tmp_path."""
+    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=tmp_path / "cache"):
+        yield tmp_path / "cache"
+
+
+def _entry(role="main", cat="home", ty="branded", text="x", degraded=False):
+    return ProfileEntry(
+        ts=now_iso(),
+        link_role=role,
+        url_category=cat,
+        anchor_type=ty,
+        anchor_text=text,
+        degraded=degraded,
+    )
+
+
+def _build_safe_seo_profile() -> ProfileState:
+    """100-entry profile matching Safe SEO exactly."""
+    entries = (
+        [_entry(ty="branded", text=f"b{i}") for i in range(55)]
+        + [_entry(ty="partial", text=f"p{i}") for i in range(25)]
+        + [_entry(ty="exact", text=f"e{i}") for i in range(10)]
+        + [_entry(ty="lsi", text=f"l{i}") for i in range(10)]
+    )
+    return ProfileState(main_domain="https://51acgs.com", entries=entries)
+
+
+# ── _build_profile_report unit tests ────────────────────────────────────────
+
+
+def test_profile_report_safe_seo_distribution_zero_deviation():
+    report = _build_profile_report(_build_safe_seo_profile(), SAFE_SEO)
+    assert report["total_entries"] == 100
+    for t, expected in [("branded", 55), ("partial", 25), ("exact", 10), ("lsi", 10)]:
+        s = report["type_stats"][t]
+        assert s["count"] == expected
+        assert abs(s["deviation_pp"]) < 0.01
+
+
+def test_profile_report_all_branded_yields_45pp_deviation():
+    entries = [_entry(ty="branded", text=f"b{i}") for i in range(100)]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    assert report["type_stats"]["branded"]["deviation_pp"] == pytest.approx(45.0)
+    assert report["type_stats"]["partial"]["deviation_pp"] == pytest.approx(-25.0)
+    assert report["type_stats"]["exact"]["deviation_pp"] == pytest.approx(-10.0)
+    assert report["type_stats"]["lsi"]["deviation_pp"] == pytest.approx(-10.0)
+
+
+def test_profile_report_degradation_rate_above_threshold():
+    """15 degraded out of 100 should be reported as 15.0."""
+    entries = [
+        _entry(ty="branded", text=f"x{i}", degraded=(i < 15)) for i in range(100)
+    ]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    assert report["degradation_rate_pct"] == pytest.approx(15.0)
+
+
+def test_profile_report_zero_degradation_rate_when_empty():
+    profile = ProfileState(main_domain="https://nothing.example")
+    report = _build_profile_report(profile, SAFE_SEO)
+    assert report["degradation_rate_pct"] == 0.0
+    assert report["total_entries"] == 0
+
+
+def test_profile_report_top_texts_counts_duplicates():
+    entries = (
+        [_entry(text="重复") for _ in range(4)]
+        + [_entry(text="单次") for _ in range(1)]
+    )
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    top = dict(report["top_texts"])
+    assert top["重复"] == 4
+    assert top["单次"] == 1
+
+
+def test_profile_report_url_category_cross_tab():
+    entries = [
+        _entry(role="main", cat="home", ty="branded"),
+        _entry(role="secondary", cat="hot", ty="exact"),
+        _entry(role="secondary", cat="hot", ty="exact"),
+        _entry(role="secondary", cat="animate", ty="lsi"),
+    ]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    cross = report["url_cat_cross"]
+    assert cross["home"]["branded"] == 1
+    assert cross["hot"]["exact"] == 2
+    assert cross["animate"]["lsi"] == 1
+
+
+# ── Markdown formatter ──────────────────────────────────────────────────────
+
+
+def test_markdown_format_includes_all_sections():
+    report = _build_profile_report(_build_safe_seo_profile(), SAFE_SEO)
+    md = _format_profile_report_markdown(report)
+    assert "Anchor Profile Report" in md
+    assert "Total entries (rolling window): **100**" in md
+    assert "Anchor Type Distribution" in md
+    assert "URL Category × Anchor Type" in md
+    assert "Top 20 Most-Used Anchor Texts" in md
+    # No sample-size warning at 100 entries
+    assert "below 50" not in md
+
+
+def test_markdown_emits_sample_size_warning_under_50():
+    entries = [_entry(text=f"e{i}") for i in range(30)]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    md = _format_profile_report_markdown(report)
+    assert "⚠️" in md
+    assert "below" in md
+
+
+def test_markdown_flags_high_degradation_rate():
+    entries = [_entry(degraded=(i < 12), text=f"e{i}") for i in range(100)]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    md = _format_profile_report_markdown(report)
+    assert "Degradation Rate" in md
+    assert "12.0%" in md
+    # Should carry the alarm marker since 12% > 10%
+    assert "⚠️" in md
+    assert "investigate" in md
+
+
+def test_markdown_no_alarm_below_threshold():
+    entries = [_entry(degraded=(i < 5), text=f"e{i}") for i in range(100)]
+    profile = ProfileState(main_domain="https://x.com", entries=entries)
+    report = _build_profile_report(profile, SAFE_SEO)
+    md = _format_profile_report_markdown(report)
+    assert "5.0%" in md
+    # No alarm marker on the degradation row
+    assert "investigate" not in md
+
+
+def test_markdown_handles_empty_profile_gracefully():
+    profile = ProfileState(main_domain="https://nothing.example")
+    report = _build_profile_report(profile, SAFE_SEO)
+    md = _format_profile_report_markdown(report)
+    assert "Total entries (rolling window): **0**" in md
+    assert "(no entries)" in md
+
+
+# ── CLI integration via --from-profile ──────────────────────────────────────
+
+
+def test_cli_from_profile_renders_markdown(profile_cache):
+    record_article("https://51acgs.com", [
+        _entry(ty="branded", text="51漫画首页"),
+        _entry(role="secondary", cat="hot", ty="exact", text="热门漫画"),
+    ])
+    # Empty stdin since --from-profile reads the file, not stdin
+    stdout, stderr, code = _run_main("", ["--from-profile", "https://51acgs.com"])
+    assert code == 0, f"stderr={stderr}"
+    assert "Anchor Profile Report" in stdout
+    assert "51漫画首页" in stdout
+    assert "热门漫画" in stdout
+
+
+def test_cli_from_profile_json(profile_cache):
+    record_article("https://51acgs.com", [
+        _entry(ty="branded", text="51漫画首页"),
+        _entry(role="secondary", cat="hot", ty="exact", text="热门漫画"),
+    ])
+    stdout, stderr, code = _run_main("", ["--from-profile", "https://51acgs.com", "--json"])
+    assert code == 0, f"stderr={stderr}"
+    data = json.loads(stdout)
+    assert data["total_entries"] == 2
+    assert "type_stats" in data
+    assert any(item[0] == "51漫画首页" for item in data["top_texts"])
+
+
+def test_cli_from_profile_missing_file_returns_empty(profile_cache):
+    """No profile file yet → empty report, not an error."""
+    stdout, stderr, code = _run_main("", ["--from-profile", "https://nothing.example"])
+    assert code == 0
+    assert "Total entries" in stdout
+    # Sample-size warning is expected for an empty profile
+    assert "⚠️" in stdout
+
+
+def test_cli_existing_jsonl_path_still_works():
+    """--from-profile must not break the original --from-jsonl behavior."""
+    rows_json = json.dumps(_payload("https://a.com"))
+    stdout, _, code = _run_main(rows_json)
+    assert code == 0
+    # The original markdown table header should be present
+    assert "| target | articles" in stdout
