@@ -287,7 +287,7 @@ def test_publish_output_schema(mock_pub, mock_verify):
     assert code == 0
     output = json.loads(stdout.strip())
 
-    for field in ["id", "platform", "status", "title", "draft_url",
+    for field in ["id", "platform", "status", "title", "target_url", "draft_url",
                   "published_url", "created_at", "adapter", "error"]:
         assert field in output, f"Missing field: {field}"
 

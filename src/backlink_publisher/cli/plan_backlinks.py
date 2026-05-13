@@ -514,6 +514,42 @@ def main(argv: list[str] | None = None) -> None:
         help="Input JSONL file (default: stdin)",
     )
     parser.add_argument(
+        "--from-csv",
+        default=None,
+        metavar="FILE",
+        help="Read target URLs from a CSV/text file (one URL per line). Use '-' for stdin.",
+    )
+    parser.add_argument(
+        "--from-sitemap",
+        default=None,
+        metavar="URL",
+        help="Fetch target URLs from a sitemap XML URL.",
+    )
+    parser.add_argument(
+        "--default-platform",
+        default="blogger",
+        choices=["blogger", "medium"],
+        help="Platform for --from-csv / --from-sitemap rows (default: blogger)",
+    )
+    parser.add_argument(
+        "--default-language",
+        default="zh-CN",
+        choices=["zh-CN", "en", "ru"],
+        help="Language for --from-csv / --from-sitemap rows (default: zh-CN)",
+    )
+    parser.add_argument(
+        "--default-url-mode",
+        default="A",
+        choices=["A", "B", "C"],
+        help="URL mode for --from-csv / --from-sitemap rows (default: A)",
+    )
+    parser.add_argument(
+        "--default-publish-mode",
+        default="draft",
+        choices=["draft", "publish"],
+        help="Publish mode for --from-csv / --from-sitemap rows (default: draft)",
+    )
+    parser.add_argument(
         "--log-level",
         default="WARN",
         choices=["DEBUG", "INFO", "WARN", "ERROR"],
@@ -524,12 +560,50 @@ def main(argv: list[str] | None = None) -> None:
     from ..logger import set_log_level
     set_log_level(args.log_level)
 
+    # Mutual exclusion: --from-csv / --from-sitemap are exclusive with --input
+    bulk_sources = [args.from_csv, args.from_sitemap]
+    if sum(bool(x) for x in bulk_sources) > 1:
+        emit_error("--from-csv and --from-sitemap are mutually exclusive", exit_code=2)
+    if (args.from_csv or args.from_sitemap) and args.input:
+        emit_error("--from-csv / --from-sitemap cannot be combined with --input", exit_code=2)
+
     plan_logger.info("plan-backlinks started", extra={"mode": "generate"})
 
-    try:
-        rows = list(read_jsonl(args.input))
-    except SystemExit as exc:
-        raise SystemExit(exc.code)
+    # ── Bulk input paths ──────────────────────────────────────────────────────
+    if args.from_csv or args.from_sitemap:
+        from ..bulk_input import parse_csv, parse_sitemap, urls_to_seed_rows
+
+        if args.from_csv:
+            try:
+                urls = parse_csv(args.from_csv)
+            except Exception as exc:
+                emit_error(f"failed to read CSV: {exc}", exit_code=2)
+                return
+        else:
+            try:
+                urls = parse_sitemap(args.from_sitemap)
+            except RuntimeError as exc:
+                emit_error(str(exc), exit_code=2)
+                return
+
+        if not urls:
+            emit_error("no URLs found in input source", exit_code=2)
+            return
+
+        rows = urls_to_seed_rows(
+            urls,
+            platform=args.default_platform,
+            language=args.default_language,
+            url_mode=args.default_url_mode,
+            publish_mode=args.default_publish_mode,
+        )
+        plan_logger.info(f"read {len(rows)} seed rows from bulk input")
+    else:
+        # ── Standard JSONL input path ─────────────────────────────────────────
+        try:
+            rows = list(read_jsonl(args.input))
+        except SystemExit as exc:
+            raise SystemExit(exc.code)
 
     plan_logger.info(f"read {len(rows)} seed rows")
 
