@@ -1905,6 +1905,62 @@ SETTINGS_HTML = '''
             </div>
         </div>
 
+        <!-- ④b SEO 锚文本关键词池 -->
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-tag me-2"></i>SEO 锚文本配置
+                <span class="text-muted" style="font-size:12px;font-weight:400;margin-left:8px;">
+                    — 每个 target 站的关键词池（一行一个关键词）
+                </span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted" style="font-size:13px;">
+                    生成的外链文章会从这里选取关键词作为锚文本，替代裸域名（如 <code>example.com</code>）。
+                    空白则回退到裸域名 + WARN 日志。建议每个 target 填写 5–10 个关键词，
+                    混合品牌词、行业词和长尾词。
+                </p>
+                {% if not all_targets %}
+                <p class="text-muted" style="font-size:13px;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    暂无已知 target 站。请先在「Blogger Blog ID」部分添加 target 站的映射，或直接手动编辑
+                    <code>{{ config_path }}</code>。
+                </p>
+                {% else %}
+                <form method="POST" action="/settings/save-target-keywords">
+                    {% for domain in all_targets %}
+                    {% set kws = target_anchor_keywords.get(domain, []) %}
+                    <details style="margin-bottom:12px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                        <summary style="padding:10px 14px;cursor:pointer;background:#f8fafc;font-size:13px;user-select:none;">
+                            <strong>{{ domain }}</strong>
+                            <span class="badge {% if kws %}bg-success{% else %}bg-warning text-dark{% endif %} ms-2" style="font-size:11px;">
+                                {% if kws %}{{ kws | length }} 个关键词{% else %}未配置{% endif %}
+                            </span>
+                        </summary>
+                        <div style="padding:12px 14px;">
+                            <label class="form-label" style="font-size:12px;color:#64748b;">
+                                关键词（每行一个）：
+                            </label>
+                            <textarea
+                                class="form-control"
+                                name="keywords_{{ loop.index }}"
+                                rows="4"
+                                style="font-size:13px;font-family:monospace;"
+                                placeholder="品牌词&#10;行业关键词&#10;长尾短语..."
+                            >{{ kws | join('\n') }}</textarea>
+                            <input type="hidden" name="domain_{{ loop.index }}" value="{{ domain }}">
+                            <div class="form-text">每行一个关键词，去除前后空白，字符长度 ≤ 60。重复项将自动去重。</div>
+                        </div>
+                    </details>
+                    {% endfor %}
+                    <input type="hidden" name="domain_count" value="{{ all_targets | length }}">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-save me-1"></i>保存所有关键词池
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- ⑤ 排程发布设定 -->
         <div class="card">
             <div class="card-header">
@@ -3081,6 +3137,53 @@ def ce_draft_delete():
     return redirect('/?tab=draft&flash_type=success&flash_msg=已删除')
 
 
+@app.route('/settings/save-target-keywords', methods=['POST'])
+def settings_save_target_keywords():
+    """Save SEO anchor keyword pools for all target domains."""
+    try:
+        count = int(request.form.get('domain_count', 0))
+        new_pools: dict[str, list[str]] = {}
+        dup_warnings: list[str] = []
+
+        for i in range(1, count + 1):
+            domain = request.form.get(f'domain_{i}', '').strip()
+            raw = request.form.get(f'keywords_{i}', '')
+            if not domain:
+                continue
+
+            lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+            # Validate length ≤ 60
+            invalid = [ln for ln in lines if len(ln) > 60]
+            if invalid:
+                return redirect(
+                    f'/settings?flash_type=danger&flash_msg='
+                    f'关键词过长（>60字符）: {invalid[0][:30]}…'
+                )
+
+            # De-duplicate while preserving order
+            seen: set[str] = set()
+            deduped: list[str] = []
+            for kw in lines:
+                if kw in seen:
+                    dup_warnings.append(domain)
+                else:
+                    seen.add(kw)
+                    deduped.append(kw)
+
+            # Empty list means "clear this target's pool"
+            new_pools[domain] = deduped
+
+        cfg = load_config()
+        save_config(cfg, target_anchor_keywords=new_pools)
+
+        msg = '关键词池已保存'
+        if dup_warnings:
+            msg += f'（自动去重 {len(dup_warnings)} 条）'
+        return redirect(f'/settings?flash_type=success&flash_msg={msg}')
+    except Exception as e:
+        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
+
+
 @app.route('/settings/schedule', methods=['POST'])
 def settings_schedule_save():
     """Save schedule interval settings."""
@@ -3279,6 +3382,11 @@ def _settings_context(flash=None):
     token = cfg.medium_integration_token or ""
     masked = ("*" * 8 + token[-4:]) if len(token) > 4 else ("*" * len(token))
 
+    # Build the union of known target domains: [blogger] map + [targets] map
+    all_targets = sorted(
+        set(cfg.blogger_blog_ids.keys()) | set(cfg.target_anchor_keywords.keys())
+    )
+
     return dict(
         flash=flash,
         blogger_token=bool(token_data),
@@ -3295,6 +3403,8 @@ def _settings_context(flash=None):
         profiles=_load_profiles(),
         plans_list=[],
         schedule_settings=_load_schedule_settings(),
+        all_targets=all_targets,
+        target_anchor_keywords=cfg.target_anchor_keywords,
     )
 
 
