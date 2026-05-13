@@ -219,7 +219,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 2: Work-page scraper module (无 cache, 安全基线)**
+- [x] **Unit 2: Work-page scraper module (无 cache, 安全基线)** ✅ shipped 2026-05-13
 
 **Goal:** 提供 work_url 元数据抓取 + list 页作品 URL 提取（sitemap 优先），带 fail-continue/fail-abort/fail-empty 三态语义与 SSRF/TLS 安全防护。
 
