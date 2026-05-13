@@ -1,9 +1,11 @@
 ---
 title: "feat: SEO-friendly anchor text from config keyword pool + target=\"_blank\" on all rendered links"
 type: feat
-status: active
+status: completed
 date: 2026-05-12
+completed: 2026-05-13
 origin: backlink-publisher/docs/brainstorms/2026-05-12-anchor-text-and-blank-target-requirements.md
+pr: https://github.com/redredchen01/backlink-publisher/pull/2
 ---
 
 # feat: 外链锚文本 SEO 化与新窗打开
