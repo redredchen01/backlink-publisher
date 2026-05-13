@@ -186,7 +186,7 @@ flowchart TB
 
 ## Implementation Units
 
-- [ ] **Unit 1: URL utility module**
+- [x] **Unit 1: URL utility module** ✅ shipped 2026-05-13 (commit c64ad4e)
 
 **Goal:** 提供共享 URL 校验工具，给 form / config parser / scraper 共用。
 
