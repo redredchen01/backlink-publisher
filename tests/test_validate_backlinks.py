@@ -27,7 +27,11 @@ def _run_validate(input_data: str, check_urls: bool = True, argv: list[str] | No
         try:
             args = []
             if not check_urls:
-                args.append("--no-check-urls")
+                # Updated 2026-05-14 per plan 2026-05-14-001 R10:
+                # --no-check-urls renamed to --no-validate-url-check (the old
+                # name still works but emits a deprecation WARN that would
+                # break the stderr-must-be-empty assertions).
+                args.append("--no-validate-url-check")
             main(argv or args)
             code = 0
         except SystemExit as exc:

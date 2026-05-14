@@ -322,7 +322,22 @@ class TestPipelineIntegration:
 
         assert validated.strip() != "", "validate-backlinks should produce output"
 
-        # Stage 3: publish dry-run
+        # Updated 2026-05-14 per plan 2026-05-14-001 R5:
+        # Under the new strict anchor codepoint gate, plan-backlinks's
+        # long-form fallback emits ASCII anchors (e.g., "example.com") for
+        # main_domain/target links. zh-CN and ru rows therefore fail R5 at
+        # validate-time because the seed config has no branded_pool entry
+        # for example.com. Only the en row survives. The pipeline still
+        # *handles* mixed languages — it just correctly rejects the rows
+        # whose anchor language can't be reconciled with the body language.
+        validated_rows = [json.loads(l) for l in validated.strip().split("\n")]
+        assert len(validated_rows) == 1, (
+            f"Expected only the en row to pass R5 (Latin anchors are fine "
+            f"for en), got {len(validated_rows)} rows"
+        )
+        assert validated_rows[0]["language"] == "en"
+
+        # Stage 3: publish dry-run — only the en row reaches publish.
         from backlink_publisher.adapters.base import AdapterResult
         mock_pub.return_value = AdapterResult(
             status="draft",
@@ -346,7 +361,7 @@ class TestPipelineIntegration:
 
         assert published.strip() != "", "publish-backlinks --dry-run should produce output"
         pub_rows = [json.loads(l) for l in published.strip().split("\n")]
-        assert len(pub_rows) == 3
+        assert len(pub_rows) == 1
         for r in pub_rows:
             assert r["status"] == "draft"
             assert r.get("error") is None

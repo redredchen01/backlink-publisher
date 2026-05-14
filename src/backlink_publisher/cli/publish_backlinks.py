@@ -13,14 +13,86 @@ from typing import Any
 _MEDIUM_ADAPTERS = {"medium-api", "medium-browser"}
 _HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
 from ..adapters import publish as adapter_publish, verify_adapter_setup
 from .. import checkpoint
 from ..config import load_config
 from ..errors import DependencyError, ExternalServiceError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
+from ..linkcheck import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
 from ..logger import publish_logger
 from ..schema import SUPPORTED_PLATFORMS, validate_publish_payload
 from ..verify_publish import verify_published
+
+#: First-run banner sentinel — written after the banner fires so subsequent
+#: runs stay quiet. Bumping the version-tag forces a re-warn on future flag
+#: changes per plan 2026-05-14-001 R10.
+_GATE_BANNER_SENTINEL = (
+    Path.home() / ".cache" / "backlink-publisher" / "v0.3-gate-banner-seen"
+)
+_GATE_BANNER_TEXT = (
+    "publish-backlinks now performs a publish-time reachability re-check "
+    "on every row before dispatch. Use --skip-publish-time-check to "
+    "restore prior behavior. This message will not repeat (sentinel: "
+    f"{_GATE_BANNER_SENTINEL})."
+)
+
+
+def _maybe_emit_gate_banner(skip_flag: bool) -> None:
+    """Emit the one-shot upgrade WARN if the gate is on and not yet shown."""
+    if skip_flag or _GATE_BANNER_SENTINEL.exists():
+        return
+    publish_logger.warn(_GATE_BANNER_TEXT)
+    try:
+        _GATE_BANNER_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
+        _GATE_BANNER_SENTINEL.touch(exist_ok=True)
+    except OSError:
+        # If we can't write the sentinel the banner fires again next run —
+        # noisy but never silent failure. Acceptable.
+        pass
+
+
+def _check_row_reachability(row: dict[str, Any]) -> tuple[bool, str | None]:
+    """Return ``(True, None)`` if every URL in the row is reachable, else
+    ``(False, failing_url)`` on the first observed failure.
+
+    Per plan 2026-05-14-001 R9: per-row URLs dispatched in parallel via
+    a ThreadPoolExecutor (reusing ``linkcheck.MAX_CONCURRENT`` budget) so
+    worst-case per-row latency stays bounded by a single ``check_url`` call
+    (~3s) rather than scaling with URL count.
+    """
+    urls = [row.get("target_url", "")]
+    for link in row.get("links", []):
+        if isinstance(link, dict):
+            url = link.get("url")
+            if url:
+                urls.append(url)
+    urls = [u for u in urls if u]
+    if not urls:
+        return True, None
+
+    workers = min(_LINKCHECK_MAX_CONCURRENT, len(urls))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(check_url, u): u for u in urls}
+        first_failure: str | None = None
+        for fut in as_completed(futures):
+            url = futures[fut]
+            try:
+                ok, _err = fut.result()
+            except Exception:  # noqa: BLE001 — treat any exception as unreachable
+                ok = False
+            if not ok and first_failure is None:
+                first_failure = url
+                # Cancel remaining pending futures; finished ones run to completion.
+                for other in futures:
+                    if not other.done():
+                        other.cancel()
+                break
+    if first_failure is not None:
+        return False, first_failure
+    return True, None
 
 
 def _error_class(exc: Exception) -> str:
@@ -95,7 +167,66 @@ def _run_resume(args: Any) -> None:
             except DependencyError as exc:
                 emit_error(str(exc), exit_code=3)
 
-    to_process = [item for item in ckpt["items"] if item["status"] in ("pending", "failed")]
+    # R13: hard re-validate each pending/failed item against the current
+    # gate (R2 body + R5 anchor) before resuming dispatch. Items whose
+    # payload was created under the buggy language_matches and are now
+    # contractually 'failed' get reclassified with a retro_* error_class
+    # and skipped from this resume run. --list-runs displays the
+    # error_class so the operator can see the reclassification.
+    # See plan 2026-05-14-001 Unit 7.
+    from .validate_backlinks import _enhance_payload  # local import to avoid cycle
+    retro_lang = 0
+    retro_anchor = 0
+    for item in ckpt["items"]:
+        if item["status"] not in ("pending", "failed"):
+            continue
+        # Skip items already classified retro_* (idempotent --resume).
+        if item.get("error_class") in (
+            checkpoint.RETRO_LANGUAGE_FAILED,
+            checkpoint.RETRO_ANCHOR_FAILED,
+        ):
+            continue
+        # Run validate-time gate against the stored payload. We pass the
+        # live config — branded_pool TOCTOU is accepted for v1 per plan
+        # Risks & Dependencies.
+        re_validated = _enhance_payload(dict(item["payload"]), config)
+        if re_validated["validation"]["status"] != "failed":
+            continue
+        errors_list = re_validated["validation"]["errors"]
+        # First error wins the classification — body language errors are
+        # listed before anchor errors per Unit 3's _enhance_payload order.
+        if errors_list and errors_list[0].startswith("body language"):
+            err_class = checkpoint.RETRO_LANGUAGE_FAILED
+            retro_lang += 1
+        else:
+            err_class = checkpoint.RETRO_ANCHOR_FAILED
+            retro_anchor += 1
+        checkpoint.update_item(
+            run_id,
+            item["id"],
+            "failed",
+            error="; ".join(errors_list),
+            error_class=err_class,
+        )
+        # Mutate the in-memory item too so the to_process filter below
+        # sees the updated error_class.
+        item["status"] = "failed"
+        item["error_class"] = err_class
+
+    if retro_lang or retro_anchor:
+        publish_logger.info(
+            f"resume: re-validated checkpoint — reclassified "
+            f"{retro_lang} retro_language_failed + {retro_anchor} retro_anchor_failed"
+        )
+
+    to_process = [
+        item for item in ckpt["items"]
+        if item["status"] in ("pending", "failed")
+        and item.get("error_class") not in (
+            checkpoint.RETRO_LANGUAGE_FAILED,
+            checkpoint.RETRO_ANCHOR_FAILED,
+        )
+    ]
 
     # warn on http_5xx items
     for item in to_process:
@@ -316,6 +447,17 @@ def main(argv: list[str] | None = None) -> None:
         default=False,
         help="Skip post-publish content verification (default: verify after each publish)",
     )
+    parser.add_argument(
+        "--skip-publish-time-check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip publish-time URL reachability re-check (default: re-check "
+            "each row's target_url and links before dispatch). Per plan "
+            "2026-05-14-001 R10: this is independent of validate-time's "
+            "--no-validate-url-check; setting one does not affect the other."
+        ),
+    )
     args = parser.parse_args(argv)
 
     from ..logger import set_log_level
@@ -369,6 +511,12 @@ def main(argv: list[str] | None = None) -> None:
         "dry_run": args.dry_run,
     })
 
+    # One-shot upgrade WARN if the new gate is active and hasn't been
+    # acknowledged yet (sentinel file). Suppressed for dry-run since
+    # dry-run skips the gate anyway.
+    if not args.dry_run:
+        _maybe_emit_gate_banner(args.skip_publish_time_check)
+
     try:
         rows = list(read_jsonl(args.input))
     except SystemExit as exc:
@@ -414,6 +562,9 @@ def main(argv: list[str] | None = None) -> None:
                 rows,
                 platform=args.platform,
                 mode=args.mode,
+                flags={
+                    "skip_publish_time_check": args.skip_publish_time_check,
+                },
             )
             print(f"publish-backlinks: run_id={run_id}", file=sys.stderr, flush=True)
         except Exception as exc:
@@ -426,6 +577,7 @@ def main(argv: list[str] | None = None) -> None:
     ts = datetime.now(timezone.utc).isoformat()
     success_count = 0
     fail_count = 0
+    skipped_unreachable_count = 0
     last_medium_success_idx: int = -1
 
     throttle_min = int(os.environ.get("MEDIUM_THROTTLE_MIN", "60"))
@@ -446,6 +598,36 @@ def main(argv: list[str] | None = None) -> None:
 
         platform = args.platform or row.get("platform", "")
         mode = args.mode or row.get("publish_mode", "draft")
+
+        # R8/R9: publish-time per-row reachability re-check immediately
+        # before adapter_publish. Skipped for dry-run (no real publish to
+        # protect) and when --skip-publish-time-check is set. On any URL
+        # failure the row is skipped (status=skipped_unreachable), the
+        # checkpoint item stays in 'pending' so --resume can retry, and
+        # the batch continues to the next row.
+        if not args.dry_run and not args.skip_publish_time_check:
+            ok, failing_url = _check_row_reachability(row)
+            if not ok:
+                row_id = row.get("id", "")
+                publish_logger.warn(
+                    f"[publish-backlinks] row_id={row_id} "
+                    f"status=skipped_unreachable url={failing_url}"
+                )
+                outputs.append({
+                    "id": row_id,
+                    "platform": platform,
+                    "status": "skipped_unreachable",
+                    "title": row.get("title", ""),
+                    "draft_url": "",
+                    "published_url": "",
+                    "created_at": ts,
+                    "adapter": "",
+                    "error": f"target unreachable at publish-time: {failing_url}",
+                    "failing_url": failing_url,
+                })
+                skipped_unreachable_count += 1
+                # Leave checkpoint item in 'pending' so --resume retries.
+                continue
 
         if platform not in SUPPORTED_PLATFORMS:
             outputs.append({
@@ -644,6 +826,11 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(5)
 
     publish_logger.info(
-        f"publish complete: {success_count} succeeded, {fail_count} failed",
-        extra={"success": success_count, "failed": fail_count},
+        f"publish complete: {success_count} succeeded, {fail_count} failed, "
+        f"{skipped_unreachable_count} skipped_unreachable",
+        extra={
+            "success": success_count,
+            "failed": fail_count,
+            "skipped_unreachable": skipped_unreachable_count,
+        },
     )
