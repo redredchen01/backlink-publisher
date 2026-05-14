@@ -316,6 +316,17 @@ def main(argv: list[str] | None = None) -> None:
         default=False,
         help="Skip post-publish content verification (default: verify after each publish)",
     )
+    parser.add_argument(
+        "--skip-publish-time-check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip publish-time URL reachability re-check (default: re-check "
+            "each row's target_url and links before dispatch). Per plan "
+            "2026-05-14-001 R10: this is independent of validate-time's "
+            "--no-validate-url-check; setting one does not affect the other."
+        ),
+    )
     args = parser.parse_args(argv)
 
     from ..logger import set_log_level
@@ -414,6 +425,9 @@ def main(argv: list[str] | None = None) -> None:
                 rows,
                 platform=args.platform,
                 mode=args.mode,
+                flags={
+                    "skip_publish_time_check": args.skip_publish_time_check,
+                },
             )
             print(f"publish-backlinks: run_id={run_id}", file=sys.stderr, flush=True)
         except Exception as exc:

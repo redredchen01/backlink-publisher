@@ -47,12 +47,25 @@ def generate_run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + os.urandom(4).hex()
 
 
+#: error_class string constants used by Unit 7 (R13 retro-revalidation) so
+#: producers, the to_process filter, and --list-runs display all agree.
+RETRO_LANGUAGE_FAILED = "retro_language_failed"
+RETRO_ANCHOR_FAILED = "retro_anchor_failed"
+
+
 def create_checkpoint(
     rows: list[dict[str, Any]],
     platform: str | None,
     mode: str,
+    flags: dict[str, Any] | None = None,
 ) -> tuple[str, Path]:
-    """Create a new checkpoint file for a batch run. Returns (run_id, path)."""
+    """Create a new checkpoint file for a batch run. Returns (run_id, path).
+
+    ``flags`` (added in plan 2026-05-14-001 Unit 6) is a top-level dict that
+    persists CLI-level posture across ``--resume``. Today's known keys:
+    ``skip_publish_time_check: bool``. Older checkpoints lacking the key are
+    safe — ``_run_resume`` reads via ``.get("flags", {})``.
+    """
     run_id = generate_run_id()
     ckpt_dir = _checkpoint_dir()
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -83,6 +96,7 @@ def create_checkpoint(
         "mode": mode,
         "status": None,
         "items": items,
+        "flags": dict(flags or {}),
     }
 
     path = _checkpoint_path(run_id)
