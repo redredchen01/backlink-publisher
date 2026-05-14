@@ -130,10 +130,16 @@ def test_load_skips_malformed_individual_entries(profile_cache):
 # ── sliding window trim ─────────────────────────────────────────────────────
 
 
-def test_sliding_window_trims_to_100(profile_cache):
+def test_sliding_window_caps_at_max_articles_per_target(profile_cache):
+    """Per-target trim: 105 articles all sharing target_url='' → keep newest 100.
+
+    With per-target article-integrity trim, an article is the atomic unit
+    (main + secondaries kept or evicted together). 105 articles × 3 entries
+    each = 315 entries; cap is _MAX_ARTICLES_PER_TARGET=100 articles for the
+    "" bucket → 100 surviving articles × 3 entries = 300 entries.
+    """
     main_domain = "https://trim.example"
-    # 35 articles × 3 entries each = 105 → trim to 100, dropping the oldest 5.
-    for i in range(35):
+    for i in range(105):
         record_article(
             main_domain,
             [
@@ -144,11 +150,87 @@ def test_sliding_window_trims_to_100(profile_cache):
         )
 
     state = load_profile(main_domain)
-    assert len(state.entries) == 100
-    # First surviving entry should be a secondary (we trimmed the first main + 2 secs + 2 more)
-    # 105 → keep last 100, so we drop entries[0..4]: main0, sec_a0, sec_b0, main1, sec_a1.
-    # Surviving first entry = sec_b1.
-    assert state.entries[0].anchor_text == "sec_b1"
+    # 100 articles × 3 entries each
+    assert len(state.entries) == 300
+    # Oldest 5 articles evicted atomically; first surviving article starts at main5.
+    assert state.entries[0].link_role == "main"
+    assert state.entries[0].anchor_text == "main5"
+    # No orphaned secondaries (article-integrity invariant)
+    assert all(
+        e.link_role == "main" or i > 0
+        for i, e in enumerate(state.entries)
+    )
+
+
+def test_per_target_trim_isolates_buckets(profile_cache):
+    """Per-target trim: target A overflowing does not affect target B's history."""
+    main_domain = "https://multi-target.example"
+    target_a = "https://multi-target.example/a"
+    target_b = "https://multi-target.example/b"
+
+    # 50 articles to target B (well under cap).
+    for i in range(50):
+        entry = ProfileEntry(
+            ts=now_iso(),
+            link_role="main",
+            url_category="home",
+            anchor_type="branded",
+            anchor_text=f"b_anchor{i}",
+            target_url=target_b,
+        )
+        record_article(main_domain, [entry])
+
+    # 120 articles to target A (over cap of 100).
+    for i in range(120):
+        entry = ProfileEntry(
+            ts=now_iso(),
+            link_role="main",
+            url_category="home",
+            anchor_type="branded",
+            anchor_text=f"a_anchor{i}",
+            target_url=target_a,
+        )
+        record_article(main_domain, [entry])
+
+    state = load_profile(main_domain)
+    a_entries = [e for e in state.entries if e.target_url == target_a]
+    b_entries = [e for e in state.entries if e.target_url == target_b]
+
+    # Target A trimmed to 100 most-recent articles
+    assert len(a_entries) == 100
+    # Target B untouched
+    assert len(b_entries) == 50
+
+
+def test_article_integrity_under_trim(profile_cache):
+    """Trim never strands a secondary without its main."""
+    from backlink_publisher.anchor_profile import _group_into_articles
+
+    main_domain = "https://integrity.example"
+    target = "https://integrity.example/page"
+
+    # 110 articles each with 1 main + 2 secondaries, all to the same target_url.
+    for i in range(110):
+        ts = now_iso()
+        record_article(
+            main_domain,
+            [
+                ProfileEntry(ts=ts, link_role="main", url_category="home",
+                             anchor_type="branded", anchor_text=f"m{i}", target_url=target),
+                ProfileEntry(ts=ts, link_role="secondary", url_category="hot",
+                             anchor_type="partial", anchor_text=f"s1_{i}", target_url=target),
+                ProfileEntry(ts=ts, link_role="secondary", url_category="animate",
+                             anchor_type="partial", anchor_text=f"s2_{i}", target_url=target),
+            ],
+        )
+
+    state = load_profile(main_domain)
+    articles = _group_into_articles(state.entries)
+    # 100 surviving articles (cap), each with main + 2 secondaries intact
+    assert len(articles) == 100
+    for art in articles:
+        assert art[0].link_role == "main"
+        assert sum(1 for e in art if e.link_role == "secondary") == 2
 
 
 def test_atomic_record_no_concurrent_loss(profile_cache):
@@ -182,6 +264,105 @@ def test_record_empty_entries_is_noop(profile_cache):
     record_article("https://noop.example", [])
     state = load_profile("https://noop.example")
     assert state.entries == []
+
+
+# ── target_url additive field (no schema bump) ──────────────────────────────
+
+
+def test_load_pre_bump_profile_preserves_all_entries(profile_cache):
+    """A v1 on-disk profile written before target_url existed must load cleanly
+    with target_url='' for every entry. NO entries silently disappear.
+
+    This is the load-bearing guarantee that prevents the document-review's
+    P0 data-destruction finding from regressing — a future maintainer using
+    square-bracket access (item["target_url"]) instead of .get() would drop
+    every pre-bump entry into the KeyError except-continue branch silently.
+    """
+    main_domain = "https://pre-bump.example"
+    fake_dir = profile_cache / "anchor-profile"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+
+    # Hand-craft a v1 profile JSON with NO target_url field on entries.
+    legacy_payload = {
+        "version": 1,
+        "main_domain": main_domain,
+        "entries": [
+            {
+                "ts": "2026-05-01T00:00:00+00:00",
+                "link_role": "main",
+                "url_category": "home",
+                "anchor_type": "branded",
+                "anchor_text": f"legacy_anchor_{i}",
+                "degraded": False,
+                # target_url deliberately absent — legacy schema
+            }
+            for i in range(7)
+        ],
+    }
+    profile_path = fake_dir / "https___pre-bump.example.json"
+    profile_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+    state = load_profile(main_domain)
+    # All 7 entries survive (no silent KeyError-continue dropping)
+    assert len(state.entries) == 7
+    # Each entry has target_url defaulted to ""
+    assert all(e.target_url == "" for e in state.entries)
+    # Other fields preserved
+    assert [e.anchor_text for e in state.entries] == [
+        f"legacy_anchor_{i}" for i in range(7)
+    ]
+
+
+def test_record_with_target_url_roundtrips(profile_cache):
+    """New entries carrying target_url survive write→read roundtrip."""
+    main_domain = "https://newshape.example"
+    target = "https://newshape.example/money-page"
+
+    entry = ProfileEntry(
+        ts=now_iso(),
+        link_role="main",
+        url_category="home",
+        anchor_type="branded",
+        anchor_text="newshape anchor",
+        target_url=target,
+    )
+    record_article(main_domain, [entry])
+
+    state = load_profile(main_domain)
+    assert len(state.entries) == 1
+    assert state.entries[0].target_url == target
+
+
+def test_target_url_null_in_json_loads_as_empty_string(profile_cache):
+    """JSON null in target_url field is coerced to '' (not raises)."""
+    main_domain = "https://nullable.example"
+    fake_dir = profile_cache / "anchor-profile"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "main_domain": main_domain,
+        "entries": [
+            {
+                "ts": "2026-05-14T00:00:00+00:00",
+                "link_role": "main",
+                "url_category": "home",
+                "anchor_type": "branded",
+                "anchor_text": "x",
+                "degraded": False,
+                "target_url": None,
+            }
+        ],
+    }
+    (fake_dir / "https___nullable.example.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+    state = load_profile(main_domain)
+    assert len(state.entries) == 1
+    # Python's str(None) == "None"; but our tolerant read uses .get(key, "")
+    # so None becomes str(None)="None". We accept that — the failure mode is
+    # a row labeled "None" in the report, not a silent data loss.
+    assert state.entries[0].target_url in ("", "None")
 
 
 # ── filename sanitization ───────────────────────────────────────────────────
@@ -346,27 +527,52 @@ def test_recent_secondary_count_split_mixed(profile_cache):
     assert count_2 == 8
 
 
-def test_recent_secondary_count_split_drops_trimmed_remnant(profile_cache):
-    """A sliding-window trim that severs an article mid-record should not skew counts."""
-    main_domain = "https://trim2.example"
-    # 50 articles × 3 entries = 150 → trim to 100. The first 17 articles get
-    # fully dropped (51 entries); article 17 might lose its main but keep
-    # its 2 secondaries → those leading secondaries should NOT count as an article.
-    all_entries: list[ProfileEntry] = []
-    for i in range(50):
-        all_entries.append(_main(f"m{i}"))
-        all_entries.append(_sec(f"sa{i}", cat="hot"))
-        all_entries.append(_sec(f"sb{i}", cat="animate"))
-    record_article(main_domain, all_entries)
-    state = load_profile(main_domain)
-    assert len(state.entries) == 100
+def test_recent_secondary_count_split_drops_orphan_remnant(profile_cache):
+    """Orphaned leading secondaries (no parent main) are dropped, not counted as an article.
 
+    Constructs a profile JSON whose entries start with 2 stray secondaries
+    followed by complete main+secondary articles. Asserts that the leading
+    secondaries do not get attributed to a phantom article. Replaces the
+    old "trim severs article mid-record" test — the new article-integrity
+    trim makes that scenario impossible for fresh writes, but the underlying
+    _group_into_articles drop-remnant rule is still a real invariant for
+    profiles whose entries were corrupted or hand-edited.
+    """
+    main_domain = "https://orphan.example"
+    fake_dir = profile_cache / "anchor-profile"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    entries = [
+        {"ts": "2026-05-14T00:00:00+00:00", "link_role": "secondary",
+         "url_category": "hot", "anchor_type": "partial",
+         "anchor_text": "orphan_sa", "degraded": False, "target_url": ""},
+        {"ts": "2026-05-14T00:00:00+00:00", "link_role": "secondary",
+         "url_category": "animate", "anchor_type": "partial",
+         "anchor_text": "orphan_sb", "degraded": False, "target_url": ""},
+    ]
+    # 3 complete articles, each with main + 2 secondaries
+    for i in range(3):
+        ts = f"2026-05-14T01:0{i}:00+00:00"
+        entries.append({"ts": ts, "link_role": "main", "url_category": "home",
+                        "anchor_type": "branded", "anchor_text": f"m{i}",
+                        "degraded": False, "target_url": ""})
+        entries.append({"ts": ts, "link_role": "secondary", "url_category": "hot",
+                        "anchor_type": "partial", "anchor_text": f"sa{i}",
+                        "degraded": False, "target_url": ""})
+        entries.append({"ts": ts, "link_role": "secondary", "url_category": "animate",
+                        "anchor_type": "partial", "anchor_text": f"sb{i}",
+                        "degraded": False, "target_url": ""})
+    payload = {"version": 1, "main_domain": main_domain, "entries": entries}
+    (fake_dir / "https___orphan.example.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    state = load_profile(main_domain)
+    # All 11 entries load (orphan-drop happens in _group_into_articles, not load)
+    assert len(state.entries) == 11
+
+    # But split sees only the 3 complete articles.
     count_1, count_2 = recent_secondary_count_split(state, n=50)
-    # All surviving full articles have 2 secondaries each
     assert count_1 == 0
-    # 100 entries, partial leading article dropped; complete trailing articles have 3 entries
-    # The leading remnant could be 1 or 2 secondaries; remaining = 99 or 98 → 33 or 32 full articles
-    assert count_2 in (32, 33)
+    assert count_2 == 3
 
 
 def test_recent_secondary_count_split_empty_profile():

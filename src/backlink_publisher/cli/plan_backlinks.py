@@ -553,14 +553,19 @@ def _extract_zh_keyword(row: dict[str, Any], main_domain: str) -> str:
 def _build_profile_entries(
     decision: ScheduleDecision,
     main_anchor: str,
-    sec_records: list[tuple[str, str, str]],
+    main_target_url: str,
+    sec_records: list[tuple[str, str, str, str]],
     *,
     degraded: bool,
 ) -> list[ProfileEntry]:
     """Pack the article's link decisions into ProfileEntry rows.
 
-    ``sec_records`` is ``[(url_category, anchor_type, anchor_text), ...]`` —
-    one tuple per secondary, ordered as rendered.
+    ``sec_records`` is ``[(url_category, anchor_type, anchor_text, target_url), ...]``
+    — one tuple per secondary, ordered as rendered. ``main_target_url`` is the
+    URL the main anchor points at (home_url for both happy and degrade paths).
+    Each entry's ``target_url`` is populated so report-anchors can compute
+    per-destination distribution metrics (anchor over-optimization is a
+    per-URL signal, not per-domain).
     """
     ts = anchor_profile.now_iso()
     entries = [
@@ -571,9 +576,10 @@ def _build_profile_entries(
             anchor_type=decision.main_link_anchor_type,
             anchor_text=main_anchor,
             degraded=degraded,
+            target_url=main_target_url,
         )
     ]
-    for url_cat, anchor_type, anchor_text in sec_records:
+    for url_cat, anchor_type, anchor_text, target_url in sec_records:
         entries.append(
             ProfileEntry(
                 ts=ts,
@@ -582,6 +588,7 @@ def _build_profile_entries(
                 anchor_type=anchor_type,
                 anchor_text=anchor_text,
                 degraded=degraded,
+                target_url=target_url,
             )
         )
     return entries
@@ -719,7 +726,7 @@ def _plan_zh_short_row(
         # Resolve each secondary, tracking already-picked anchor texts for dedup.
         running_recent = list(recent) + [main_anchor]
         sec_pairs: list[tuple[str, str]] = []
-        sec_records: list[tuple[str, str, str]] = []
+        sec_records: list[tuple[str, str, str, str]] = []
         for sec in decision.secondary_links:
             sec_url = cats_map.get(sec.url_category)
             if not sec_url:
@@ -741,7 +748,7 @@ def _plan_zh_short_row(
                 last_errors = ["secondary_anchor_resolution_failed"]
                 break
             sec_pairs.append((sec_url, sec_anchor))
-            sec_records.append((sec.url_category, sec.anchor_type, sec_anchor))
+            sec_records.append((sec.url_category, sec.anchor_type, sec_anchor, sec_url))
             running_recent.append(sec_anchor)
 
         if len(sec_pairs) != len(decision.secondary_links):
@@ -758,7 +765,7 @@ def _plan_zh_short_row(
         ok, errors_out = markdown_utils.validate_zh_short_payload(html, expected)
         if ok:
             entries = _build_profile_entries(
-                decision, main_anchor, sec_records, degraded=False,
+                decision, main_anchor, home_url, sec_records, degraded=False,
             )
             anchor_profile.record_article(main_domain, entries)
             return _build_zh_short_payload(
@@ -832,7 +839,8 @@ def _plan_zh_short_row(
     entries = _build_profile_entries(
         degrade_decision,
         main_anchor,
-        [("home", "branded", sec_anchor)],
+        home_url,
+        [("home", "branded", sec_anchor, home_url)],
         degraded=True,
     )
     anchor_profile.record_article(main_domain, entries)
