@@ -35,6 +35,52 @@ from backlink_publisher.url_utils import (
 )
 from backlink_publisher.work_scraper import fetch_work_metadata
 from backlink_publisher import checkpoint as _checkpoint_mod
+from backlink_publisher import content_fetch
+
+
+def _content_gate_enabled() -> bool:
+    """Whether the content-fetch gate should run on this form submit.
+
+    Operator dev bypass via ``BACKLINK_NO_FETCH_VERIFY=1`` env var (any
+    truthy value: ``1`` / ``true`` / ``yes`` accepted, case-insensitive).
+    Mirrors the plan-backlinks ``--no-fetch-verify`` flag — same gate,
+    same bypass shape, different surface.
+
+    Plan ref: docs/plans/2026-05-14-007-feat-url-content-fetch-gate-plan.md
+    Unit 4.
+    """
+    val = os.environ.get("BACKLINK_NO_FETCH_VERIFY", "").strip().lower()
+    return val not in {"1", "true", "yes"}
+
+
+def _verify_urls_or_error(
+    urls: list[str], field_label: str
+) -> tuple[list[str], str | None]:
+    """Batch-verify a list of URLs via content_fetch. Returns the survivor
+    list (URLs that passed) and an optional error string identifying the
+    failures by URL + reason. Skips the gate when the env bypass is set,
+    in which case all URLs pass through and the error is ``None``.
+
+    Per the form-save flow, callers feed the returned error into
+    ``errors[field_name]`` for re-render at 422.
+    """
+    if not urls:
+        return [], None
+    if not _content_gate_enabled():
+        return list(urls), None
+    results = content_fetch.verify_urls_batch(urls)
+    survivors: list[str] = []
+    failures: list[str] = []
+    for u in urls:
+        ok, reason, _title = results.get(u, (False, "missing_result", None))
+        if ok:
+            survivors.append(u)
+        else:
+            failures.append(f"{u} ({reason})")
+    if failures:
+        joined = ", ".join(failures)
+        return survivors, f"{field_label} 无可访问内容: {joined}"
+    return survivors, None
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'backlink-publisher-secret-' + str(uuid.uuid4()))
@@ -2771,7 +2817,14 @@ def ce_plan():
     
     if not url_inputs:
         return _render(HTML, error="请输入至少一个网址")
-    
+
+    # Content-fetch gate (plan 2026-05-14-007 Unit 4): every operator-pasted
+    # URL must return HTTP 200 with a non-empty <title> before the planner
+    # ingests it. Skipped when BACKLINK_NO_FETCH_VERIFY=1 is set.
+    _survivors, gate_err = _verify_urls_or_error(url_inputs, "URL")
+    if gate_err:
+        return _render(HTML, error=gate_err)
+
     urls_json = json.dumps(url_inputs)
     
     meta_info = []
@@ -4312,6 +4365,23 @@ def sites_save_three_url():
     templates = _parse_lines(raw["work_anchor_templates"]) or list(
         DEFAULT_WORK_TEMPLATES
     )
+
+    # Content-fetch gate (plan 2026-05-14-007 Unit 4): URLs that survived the
+    # structural validation above must additionally return HTTP 200 with a
+    # non-empty <title> before being persisted. Skipped when
+    # BACKLINK_NO_FETCH_VERIFY=1 is set.
+    if main_url and "main_url" not in errors:
+        _survivors, gate_err = _verify_urls_or_error([main_url], "main_url")
+        if gate_err:
+            errors["main_url"] = gate_err
+    if list_url and "list_url" not in errors:
+        _survivors, gate_err = _verify_urls_or_error([list_url], "list_url")
+        if gate_err:
+            errors["list_url"] = gate_err
+    if work_urls and "work_urls" not in errors:
+        _survivors, gate_err = _verify_urls_or_error(work_urls, "work_urls")
+        if gate_err:
+            errors["work_urls"] = gate_err
 
     if errors:
         # Re-render the form with field errors and the user's input intact.
