@@ -407,7 +407,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 5a: Pipeline integration in plan_backlinks（双路径 dispatcher）**
+- [x] **Unit 5a: Pipeline integration in plan_backlinks（双路径 dispatcher）** ✅ shipped 2026-05-14
 
 **Goal:** 在 `plan_backlinks` CLI 加 work-themed 分支；与 legacy zh-CN short-form + long-form 并存；`_scheduler_enabled_for` 保留原逻辑。
 

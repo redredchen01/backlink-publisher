@@ -1,0 +1,379 @@
+"""Tests for the work-themed dispatcher branch in plan_backlinks — Plan 2026-05-13-004 Unit 5a.
+
+Covers:
+- ``_plan_work_themed_row`` per-row iterator: happy path, count truncation,
+  sitemap fallback chain, fail-empty (returns []), fail-abort (emit_error
+  exit 4), fail-continue (per-URL metadata skip + warn).
+- Determinism: identical row + clean profile → identical output.
+- Three-path dispatcher routing: target_three_url-only / sites-only /
+  both / neither → work-themed / zh-short / work-themed (priority) / long-form.
+- ``anchor_profile.record_article`` is invoked with the right ProfileEntry
+  shape (anchor_type='work', url_category='work_themed').
+- Autouse fixtures isolate from real network/time and from the user's
+  profile cache.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+
+from backlink_publisher.anchor_profile import ProfileEntry, ProfileState
+from backlink_publisher.cli import plan_backlinks
+from backlink_publisher.cli.plan_backlinks import _plan_work_themed_row
+from backlink_publisher.config import Config, ThreeUrlConfig
+from backlink_publisher.errors import ExternalServiceError
+from backlink_publisher.work_scraper import WorkMetadata
+
+
+# ── autouse isolation fixtures ──────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _isolated_profile(tmp_path):
+    """Redirect anchor_profile cache writes into tmp."""
+    fake = tmp_path / "cache"
+    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=fake):
+        yield fake
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleep():
+    """Mock retry sleep on the off-chance a path engages the retry helper."""
+    with patch("backlink_publisher.adapters.retry.time.sleep"):
+        yield
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _row(*, main_domain="https://site.com/", target_url=None, language="zh-CN"):
+    return {
+        "target_url": target_url or main_domain.rstrip("/"),
+        "main_domain": main_domain,
+        "language": language,
+        "platform": "blogger",
+        "url_mode": "A",
+        "publish_mode": "draft",
+    }
+
+
+def _three_url_cfg(
+    *,
+    work_urls: list[str] | None = None,
+    insecure_tls: bool = False,
+) -> ThreeUrlConfig:
+    return ThreeUrlConfig(
+        main_url="https://site.com/",
+        list_url="https://site.com/list",
+        branded_pool=["品牌站", "品牌首页"],
+        partial_pool=["品牌部分关键词"],
+        exact_pool=["关键词"],
+        work_urls=work_urls if work_urls is not None else [],
+        insecure_tls=insecure_tls,
+    )
+
+
+def _meta(title: str = "夜空中最亮的星") -> WorkMetadata:
+    return WorkMetadata(title=title, description=None, h1=None)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _plan_work_themed_row — happy path + count truncation
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestWorkThemedRowHappy:
+    def test_yields_one_payload_per_work_url_with_three_anchors(self):
+        cfg = _three_url_cfg(
+            work_urls=[
+                "https://site.com/work/1",
+                "https://site.com/work/2",
+            ]
+        )
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            side_effect=lambda url, **_kw: _meta(title=f"作品-{url[-1]}"),
+        ):
+            payloads = list(_plan_work_themed_row(_row(), cfg, count=10))
+
+        assert len(payloads) == 2
+        for p in payloads:
+            assert len(p["links"]) == 3
+            kinds = {link["kind"] for link in p["links"]}
+            assert kinds == {"main_domain", "list", "work"}
+            # All three anchors render in the body
+            assert p["content_markdown"].count("<a ") == 3
+            assert 'rel="noopener"' in p["content_markdown"]
+            assert "nofollow" not in p["content_markdown"]
+
+    def test_count_truncates_provided_work_urls(self):
+        cfg = _three_url_cfg(
+            work_urls=[f"https://site.com/work/{i}" for i in range(10)],
+        )
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            return_value=_meta(),
+        ):
+            payloads = list(_plan_work_themed_row(_row(), cfg, count=3))
+        assert len(payloads) == 3
+
+    def test_payload_shape_matches_short_form_contract(self):
+        cfg = _three_url_cfg(work_urls=["https://site.com/work/1"])
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            return_value=_meta(),
+        ):
+            payload = list(_plan_work_themed_row(_row(), cfg, count=1))[0]
+        # Must satisfy the OUTPUT_REQUIRED_FIELDS contract used by validate-backlinks
+        for field in (
+            "id", "platform", "language", "publish_mode", "target_url",
+            "main_domain", "url_mode", "title", "slug", "excerpt", "tags",
+            "content_markdown", "links", "seo",
+        ):
+            assert field in payload, f"missing {field}"
+        assert payload["main_domain"] == cfg.main_url
+        assert payload["seo"]["canonical_url"] == "https://site.com/work/1"
+
+    def test_deterministic_for_same_row_and_clean_profile(self):
+        cfg = _three_url_cfg(work_urls=["https://site.com/work/1"])
+
+        def _gen():
+            with patch.object(
+                plan_backlinks.work_scraper, "fetch_work_metadata",
+                return_value=_meta(),
+            ):
+                return list(_plan_work_themed_row(_row(), cfg, count=1))
+
+        a = _gen()
+        # Reset profile cache (tmp_path autouse → fresh per test, so we patch
+        # load_profile to always return empty for this idempotency check).
+        with patch(
+            "backlink_publisher.anchor_profile.load_profile",
+            return_value=ProfileState(main_domain="https://site.com"),
+        ):
+            with patch.object(
+                plan_backlinks.work_scraper, "fetch_work_metadata",
+                return_value=_meta(),
+            ):
+                b = list(_plan_work_themed_row(_row(), cfg, count=1))
+
+        assert a[0]["content_markdown"] == b[0]["content_markdown"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _plan_work_themed_row — sitemap / HTML fallback discovery
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestWorkThemedRowDiscovery:
+    def test_empty_work_urls_invokes_scraper_and_truncates(self):
+        cfg = _three_url_cfg(work_urls=[])  # forces discovery
+        with patch.object(
+            plan_backlinks.work_scraper,
+            "fetch_work_urls_from_list",
+            return_value=[
+                "https://site.com/work/a",
+                "https://site.com/work/b",
+                "https://site.com/work/c",
+                "https://site.com/work/d",
+                "https://site.com/work/e",
+            ],
+        ) as mock_discover, patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            return_value=_meta(),
+        ):
+            payloads = list(_plan_work_themed_row(_row(), cfg, count=3))
+
+        assert len(payloads) == 3
+        mock_discover.assert_called_once()
+        # Discovery received list_url + main_url for filtering
+        kwargs = mock_discover.call_args.kwargs
+        assert kwargs.get("main_url") == cfg.main_url
+
+
+class TestWorkThemedRowFailureSemantics:
+    def test_fail_empty_returns_empty_iterator(self, caplog):
+        cfg = _three_url_cfg(work_urls=[])
+        with patch.object(
+            plan_backlinks.work_scraper,
+            "fetch_work_urls_from_list",
+            return_value=[],  # fail-empty
+        ):
+            with caplog.at_level("WARNING"):
+                payloads = list(_plan_work_themed_row(_row(), cfg, count=3))
+        assert payloads == []  # no raise; just empty
+
+    def test_fail_abort_external_service_error_raises_systemexit_4(self):
+        cfg = _three_url_cfg(work_urls=[])
+        with patch.object(
+            plan_backlinks.work_scraper,
+            "fetch_work_urls_from_list",
+            side_effect=ExternalServiceError("network down"),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                list(_plan_work_themed_row(_row(), cfg, count=3))
+        assert exc_info.value.code == 4
+
+    def test_fail_continue_skips_failed_metadata_fetches(self):
+        cfg = _three_url_cfg(work_urls=[
+            "https://site.com/work/1",
+            "https://site.com/work/2",
+            "https://site.com/work/3",
+            "https://site.com/work/4",
+            "https://site.com/work/5",
+        ])
+        # 2nd and 4th fail (return None). Other 3 succeed.
+        side = [
+            _meta(title="作品一"),
+            None,
+            _meta(title="作品三"),
+            None,
+            _meta(title="作品五"),
+        ]
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            side_effect=side,
+        ):
+            payloads = list(_plan_work_themed_row(_row(), cfg, count=10))
+        assert len(payloads) == 3
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# anchor_profile.record_article shape (real ProfileEntry signature)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestProfileRecording:
+    def test_records_one_entry_per_payload_with_correct_fields(self):
+        cfg = _three_url_cfg(work_urls=["https://site.com/work/1"])
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            return_value=_meta(title="标题甲"),
+        ), patch.object(
+            plan_backlinks.anchor_profile, "record_article",
+        ) as mock_record:
+            list(_plan_work_themed_row(_row(), cfg, count=1))
+
+        assert mock_record.call_count == 1
+        call_args = mock_record.call_args
+        main_domain_arg = call_args.args[0]
+        entries = call_args.args[1]
+        assert main_domain_arg == "https://site.com"
+        assert isinstance(entries, list) and len(entries) == 1
+        e = entries[0]
+        assert isinstance(e, ProfileEntry)
+        assert e.anchor_type == "work"
+        assert e.url_category == "work_themed"
+        # anchor_text matches the work_anchor selected by the generator
+        assert isinstance(e.anchor_text, str) and e.anchor_text
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Three-path dispatcher routing
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestDispatcherRouting:
+    def _make_cfg(
+        self, *, with_three_url: bool, with_zh_scheduler: bool
+    ) -> Config:
+        cfg = Config()
+        if with_three_url:
+            cfg.target_three_url["https://site.com"] = ThreeUrlConfig(
+                main_url="https://site.com/",
+                list_url="https://site.com/list",
+                branded_pool=["B"],
+                partial_pool=["p"],
+                exact_pool=["e"],
+                work_urls=["https://site.com/work/1"],
+            )
+        if with_zh_scheduler:
+            cfg.site_url_categories["https://site.com"] = {
+                "home": "https://site.com/",
+                "hot": "https://site.com/hot",
+            }
+            cfg.target_anchor_pools_v2["https://site.com"] = {
+                "home": {"branded": ["品牌"]},
+                "hot": {"branded": ["热门"]},
+            }
+        return cfg
+
+    def test_three_url_only_routes_to_work_themed(self):
+        cfg = self._make_cfg(with_three_url=True, with_zh_scheduler=False)
+        with patch.object(
+            plan_backlinks, "_plan_work_themed_row",
+            return_value=iter([{"id": "wt"}]),
+        ) as wt, patch.object(
+            plan_backlinks, "_plan_zh_short_row", return_value={"id": "zh"},
+        ) as zh, patch.object(
+            plan_backlinks, "_generate_payload", return_value={"id": "long"},
+        ) as lf:
+            outputs = _drive_dispatcher([_row()], cfg)
+        assert wt.called
+        assert not zh.called
+        assert not lf.called
+        assert outputs[0]["id"] == "wt"
+
+    def test_zh_scheduler_only_routes_to_zh_short(self):
+        cfg = self._make_cfg(with_three_url=False, with_zh_scheduler=True)
+        with patch.object(
+            plan_backlinks, "_plan_work_themed_row",
+            return_value=iter([{"id": "wt"}]),
+        ) as wt, patch.object(
+            plan_backlinks, "_plan_zh_short_row", return_value={"id": "zh"},
+        ) as zh, patch.object(
+            plan_backlinks, "_generate_payload", return_value={"id": "long"},
+        ) as lf:
+            outputs = _drive_dispatcher([_row()], cfg)
+        assert not wt.called
+        assert zh.called
+        assert not lf.called
+        assert outputs[0]["id"] == "zh"
+
+    def test_neither_routes_to_long_form(self):
+        cfg = self._make_cfg(with_three_url=False, with_zh_scheduler=False)
+        # Use language=en to force long-form path immediately
+        row = _row(language="en")
+        with patch.object(
+            plan_backlinks, "_plan_work_themed_row",
+            return_value=iter([{"id": "wt"}]),
+        ) as wt, patch.object(
+            plan_backlinks, "_plan_zh_short_row", return_value={"id": "zh"},
+        ) as zh, patch.object(
+            plan_backlinks, "_generate_payload", return_value={"id": "long"},
+        ) as lf:
+            outputs = _drive_dispatcher([row], cfg)
+        assert not wt.called
+        assert not zh.called
+        assert lf.called
+        assert outputs[0]["id"] == "long"
+
+    def test_both_present_prefers_work_themed(self):
+        cfg = self._make_cfg(with_three_url=True, with_zh_scheduler=True)
+        with patch.object(
+            plan_backlinks, "_plan_work_themed_row",
+            return_value=iter([{"id": "wt"}]),
+        ) as wt, patch.object(
+            plan_backlinks, "_plan_zh_short_row", return_value={"id": "zh"},
+        ) as zh:
+            outputs = _drive_dispatcher([_row()], cfg)
+        assert wt.called
+        assert not zh.called
+        assert outputs[0]["id"] == "wt"
+
+
+def _drive_dispatcher(rows: list[dict], cfg: Config) -> list[dict]:
+    """Drive plan_backlinks._dispatch_row over a list of seed rows.
+
+    Wraps the dispatcher so tests can assert which path each row took without
+    having to spin up the whole CLI argparse / IO surface.
+    """
+    out: list[dict] = []
+    for row in rows:
+        for payload in plan_backlinks._dispatch_row(
+            row, cfg, llm_provider=None, rng=None, work_count=10,
+        ):
+            out.append(payload)
+    return out
