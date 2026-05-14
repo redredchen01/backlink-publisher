@@ -494,3 +494,174 @@ class TestCoexistenceWithLegacyAnchorKeywords:
             "site", "site hub",
         ]
         assert "https://site.com" in reloaded.target_three_url
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# upgrade_target_to_threeurl (Plan 2026-05-14-009 Unit 3)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestUpgradeTargetToThreeUrl:
+    """Pure-function helper that derives a ThreeUrlConfig from current
+    Config state. Three migration paths: merge-existing, anchor_keywords,
+    bootstrap. Caller writes the result back via save_config."""
+
+    def test_domain_label_basic(self):
+        from backlink_publisher.config import _domain_label
+        assert _domain_label("https://51acgs.com/") == "51acgs"
+        assert _domain_label("https://www.51acgs.com/") == "51acgs"
+        assert _domain_label("https://a.b.c.com/") == "a"
+        assert _domain_label("https://example.com") == "example"
+
+    def test_bootstrap_no_prior_state(self, tmp_path):
+        """Unknown main_url → all pools fall back to domain_label."""
+        from backlink_publisher.config import upgrade_target_to_threeurl
+
+        cfg = load_config(tmp_path / "config.toml")
+        result = upgrade_target_to_threeurl(
+            cfg,
+            main_url="https://newsite.com/",
+            category_url="https://newsite.com/category",
+            work_url="https://newsite.com/article/1",
+        )
+
+        assert result.main_url == "https://newsite.com/"
+        assert result.list_url == "https://newsite.com/category"
+        assert result.branded_pool == ["newsite"]
+        assert result.partial_pool == ["newsite"]
+        assert result.exact_pool == ["newsite"]
+        assert result.work_urls == ["https://newsite.com/article/1"]
+
+    def test_bootstrap_only_main_url(self, tmp_path):
+        """No category / work supplied — list_url falls back to main_url,
+        work_urls is empty."""
+        from backlink_publisher.config import upgrade_target_to_threeurl
+
+        cfg = load_config(tmp_path / "config.toml")
+        result = upgrade_target_to_threeurl(
+            cfg, main_url="https://bare.com/",
+        )
+        assert result.list_url == "https://bare.com/"
+        assert result.work_urls == []
+        assert result.branded_pool == ["bare"]
+
+    def test_legacy_anchor_keywords_migrated_to_branded_pool(self, tmp_path):
+        """Pre-existing anchor_keywords (legacy schema) → branded_pool."""
+        path = tmp_path / "config.toml"
+        save_config(
+            load_config(path), path=path,
+            target_anchor_keywords={
+                "https://legacy.com": ["LegacyBrand", "legacy hub", "legacy"],
+            },
+        )
+        cfg = load_config(path)
+
+        from backlink_publisher.config import upgrade_target_to_threeurl
+        result = upgrade_target_to_threeurl(
+            cfg,
+            main_url="https://legacy.com",
+            category_url="https://legacy.com/cat",
+            work_url="https://legacy.com/work/9",
+        )
+
+        assert result.branded_pool == ["LegacyBrand", "legacy hub", "legacy"]
+        # Other pools still fall back to domain_label (schema requires non-empty)
+        assert result.partial_pool == ["legacy"]
+        assert result.exact_pool == ["legacy"]
+        assert result.list_url == "https://legacy.com/cat"
+        assert result.work_urls == ["https://legacy.com/work/9"]
+
+    def test_existing_threeurl_config_merges_only_provided_fields(self, tmp_path):
+        """If a full ThreeUrlConfig already exists, only list_url and work_urls
+        are overwritten when the corresponding kwargs are non-None. Other
+        pools / templates / flags inherit from the existing entry."""
+        path = tmp_path / "config.toml"
+        existing = ThreeUrlConfig(
+            main_url="https://full.com/",
+            list_url="https://full.com/old-list",
+            branded_pool=["FullBrand"],
+            partial_pool=["partial1"],
+            exact_pool=["exact1"],
+            work_urls=["https://full.com/old-work"],
+            insecure_tls=True,
+        )
+        save_config(
+            load_config(path), path=path,
+            target_three_url={"https://full.com": existing},
+        )
+        cfg = load_config(path)
+
+        from backlink_publisher.config import upgrade_target_to_threeurl
+        result = upgrade_target_to_threeurl(
+            cfg,
+            main_url="https://full.com/",
+            category_url="https://full.com/new-list",
+            work_url="https://full.com/new-work",
+        )
+
+        # list_url + work_urls overwritten; other fields preserved.
+        assert result.list_url == "https://full.com/new-list"
+        assert result.work_urls == ["https://full.com/new-work"]
+        assert result.branded_pool == ["FullBrand"]
+        assert result.partial_pool == ["partial1"]
+        assert result.exact_pool == ["exact1"]
+        assert result.insecure_tls is True
+
+    def test_existing_threeurl_without_new_work_url_preserves_existing_work_urls(
+        self, tmp_path,
+    ):
+        """If work_url is None, the existing entry's work_urls list is kept
+        intact (operator may have curated it via /sites)."""
+        path = tmp_path / "config.toml"
+        existing = ThreeUrlConfig(
+            main_url="https://x.com/",
+            list_url="https://x.com/list",
+            branded_pool=["X"],
+            partial_pool=["x"],
+            exact_pool=["x"],
+            work_urls=["https://x.com/a", "https://x.com/b", "https://x.com/c"],
+        )
+        save_config(
+            load_config(path), path=path,
+            target_three_url={"https://x.com": existing},
+        )
+        cfg = load_config(path)
+
+        from backlink_publisher.config import upgrade_target_to_threeurl
+        result = upgrade_target_to_threeurl(
+            cfg, main_url="https://x.com/",
+        )
+        assert result.work_urls == [
+            "https://x.com/a", "https://x.com/b", "https://x.com/c",
+        ]
+
+    def test_integration_result_passes_schema_validation_after_roundtrip(
+        self, tmp_path,
+    ):
+        """Upgrade → save_config → load_config: the upgraded ThreeUrlConfig
+        survives the round-trip without the schema enforcement (three pools
+        non-empty) stripping the entry."""
+        from backlink_publisher.config import upgrade_target_to_threeurl
+
+        path = tmp_path / "config.toml"
+        cfg = load_config(path)
+        result = upgrade_target_to_threeurl(
+            cfg,
+            main_url="https://roundtrip.com/",
+            category_url="https://roundtrip.com/cat",
+            work_url="https://roundtrip.com/w1",
+        )
+        save_config(
+            cfg, path=path,
+            target_three_url={"https://roundtrip.com": result},
+        )
+
+        reloaded = load_config(path)
+        assert "https://roundtrip.com" in reloaded.target_three_url
+        rt = reloaded.target_three_url["https://roundtrip.com"]
+        assert rt.list_url == "https://roundtrip.com/cat"
+        assert rt.work_urls == ["https://roundtrip.com/w1"]
+        # All three pools non-empty (schema invariant).
+        assert len(rt.branded_pool) >= 1
+        assert len(rt.partial_pool) >= 1
+        assert len(rt.exact_pool) >= 1

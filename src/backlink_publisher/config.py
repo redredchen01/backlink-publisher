@@ -939,6 +939,124 @@ def get_three_url_config(
     return None
 
 
+def _domain_label(url: str) -> str:
+    """Extract the leading host label from a URL, stripping ``www.``.
+
+    ``https://www.51acgs.com/`` → ``"51acgs"``;
+    ``https://a.b.c.com/`` → ``"a"``.
+
+    Used by :func:`upgrade_target_to_threeurl` as the bootstrap fallback
+    when an unknown main_url has no existing anchor_keywords to migrate
+    from. Mirrors the same heuristic the homepage form / brainstorm doc
+    use for "brand label".
+    """
+    from urllib.parse import urlparse as _urlparse
+    netloc = _urlparse(url).netloc
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    first_segment = netloc.split(".", 1)[0]
+    return first_segment or netloc or "site"
+
+
+def upgrade_target_to_threeurl(
+    config: Config,
+    main_url: str,
+    category_url: str | None = None,
+    work_url: str | None = None,
+) -> ThreeUrlConfig:
+    """Return a ThreeUrlConfig for ``main_url`` derived from current state.
+
+    Decision tree (Plan 2026-05-14-009 Unit 3):
+
+    1. **Existing ThreeUrlConfig.** Overwrite ``list_url`` (if ``category_url``
+       provided) and ``work_urls=[work_url]`` (if ``work_url`` provided).
+       Other fields kept as-is — operator already tuned them via ``/sites``.
+
+    2. **Legacy anchor_keywords.** Migrate keywords → ``branded_pool``. Fill
+       ``partial_pool`` and ``exact_pool`` with the domain label as a
+       non-empty fallback (ThreeUrlConfig schema requires all three pools
+       non-empty per ``_parse_target_three_url``). ``list_url`` = category_url
+       when provided, else main_url; ``work_urls`` = [work_url] when provided.
+
+    3. **Bootstrap.** No prior state — every pool defaults to the domain
+       label, ``list_url`` = category_url or main_url, ``work_urls`` =
+       [work_url] when provided. All ThreeUrlConfig defaults for the
+       remaining fields (work_anchor_templates, list_path_blocklist,
+       insecure_tls).
+
+    Returns a fresh ``ThreeUrlConfig`` instance; does not mutate
+    ``config``. Caller is responsible for calling ``save_config`` with
+    the upgraded entry merged into ``target_three_url``.
+
+    Always emits a ``plan_logger.recon('target_upgraded_to_threeurl', ...)``
+    event so the operator sees which migration path was taken.
+    """
+    domain_key = main_url.rstrip("/")
+    label = _domain_label(main_url)
+    new_list_url = category_url or main_url
+    new_work_urls = [work_url] if work_url else []
+
+    existing = get_three_url_config(config, main_url)
+    if existing is not None:
+        plan_logger.recon(
+            "target_upgraded_to_threeurl",
+            main=domain_key,
+            source="merge_existing",
+            category_set=bool(category_url),
+            work_set=bool(work_url),
+        )
+        return ThreeUrlConfig(
+            main_url=existing.main_url,
+            list_url=category_url or existing.list_url,
+            branded_pool=list(existing.branded_pool),
+            partial_pool=list(existing.partial_pool),
+            exact_pool=list(existing.exact_pool),
+            work_urls=new_work_urls if work_url else list(existing.work_urls),
+            work_anchor_templates=list(existing.work_anchor_templates),
+            list_path_blocklist=(
+                list(existing.list_path_blocklist)
+                if existing.list_path_blocklist is not None
+                else None
+            ),
+            insecure_tls=existing.insecure_tls,
+        )
+
+    keywords = config.target_anchor_keywords.get(domain_key, [])
+    if not keywords:
+        # Try trailing-slash variant before declaring bootstrap.
+        keywords = config.target_anchor_keywords.get(main_url.rstrip("/") + "/", [])
+
+    if keywords:
+        plan_logger.recon(
+            "target_upgraded_to_threeurl",
+            main=domain_key,
+            source="anchor_keywords",
+            n_keywords=len(keywords),
+        )
+        return ThreeUrlConfig(
+            main_url=main_url,
+            list_url=new_list_url,
+            branded_pool=list(keywords),
+            partial_pool=[label],
+            exact_pool=[label],
+            work_urls=new_work_urls,
+        )
+
+    plan_logger.recon(
+        "target_upgraded_to_threeurl",
+        main=domain_key,
+        source="bootstrap",
+    )
+    return ThreeUrlConfig(
+        main_url=main_url,
+        list_url=new_list_url,
+        branded_pool=[label],
+        partial_pool=[label],
+        exact_pool=[label],
+        work_urls=new_work_urls,
+    )
+
+
 def resolve_blog_id(config: Config, main_domain: str) -> str:
     """Return Blogger blog_id for main_domain. Raises DependencyError if not mapped."""
     # Normalise: strip trailing slash for lookup
