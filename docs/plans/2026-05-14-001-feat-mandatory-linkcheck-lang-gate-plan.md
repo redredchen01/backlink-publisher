@@ -1,9 +1,10 @@
 ---
 title: "feat: Mandatory pre-publish linkcheck + language_check gate"
 type: feat
-status: active
+status: completed
 date: 2026-05-14
 deepened: 2026-05-14
+completed: 2026-05-14
 origin: backlink-publisher/docs/brainstorms/2026-05-14-mandatory-linkcheck-lang-gate-requirements.md
 ---
 
@@ -175,7 +176,7 @@ Key boundaries this design preserves:
 
 ## Implementation Units
 
-- [ ] **Unit 1: Fix `language_matches` bug + `unknown`/non-enum handling for `row.language`**
+- [x] **Unit 1: Fix `language_matches` bug + `unknown`/non-enum handling for `row.language`**
 
 **Goal:** Make `language_matches` return `False` when `detected` is a known language ≠ `requested`. Preserve `unknown→True`. Add safe handling for `row.language` outside the supported enum (skip gating with WARN).
 
@@ -209,7 +210,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 2: New `anchor_lang.py` module — codepoint heuristic + exemption helper**
+- [x] **Unit 2: New `anchor_lang.py` module — codepoint heuristic + exemption helper**
 
 **Goal:** Pure-function helper that given `(anchor: str, row_language: str, link_kind: str, branded_pool: list[str])` returns `(ok: bool, reason: str | None)`. Encapsulates the BMP-only CJK / Cyrillic / Latin-strict rules from R4 plus the kind-scoping and branded-pool exemption.
 
@@ -251,7 +252,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 3: Wire R2 + R4/R5 + R11 into `validate-backlinks._enhance_payload`**
+- [x] **Unit 3: Wire R2 + R4/R5 + R11 into `validate-backlinks._enhance_payload`**
 
 **Goal:** Replace the always-passing `_enhance_payload` with row-level fail logic for language mismatch (R2) and anchor codepoint failures (R4/R5). Populate `validation.errors[]` and set `status="failed"` (R11). Preserve `validation.warnings` as empty list for back-compat. Add config-load at CLI startup so the branded_pool is available per row.
 
@@ -300,7 +301,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 4: Additive `linkcheck.check_url(url)` public helper**
+- [x] **Unit 4: Additive `linkcheck.check_url(url)` public helper**
 
 **Goal:** Add a per-URL public function that wraps `_check_url_with_retry` and returns `(ok: bool, error: str | None)` instead of raising. Used by Unit 5 for per-row publish-time re-check. `check_urls_strict` stays untouched (R6).
 
@@ -333,7 +334,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 5: Publish-time per-row reachability re-check (R8/R9/R12)**
+- [x] **Unit 5: Publish-time per-row reachability re-check (R8/R9/R12)**
 
 **Goal:** In `publish-backlinks` per-row loop, immediately before `adapter_publish` (line 498), call `linkcheck.check_url` on `target_url` and each `row.links[*].url`. On any failure, skip the row (no partial publish), emit a structured WARN line, write `status: "skipped_unreachable"` to output JSONL, leave checkpoint item `pending`, continue to next row. After the loop, emit an aggregate completion log line.
 
@@ -381,7 +382,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 6: `--skip-publish-time-check` flag + checkpoint flag persistence**
+- [x] **Unit 6: `--skip-publish-time-check` flag + checkpoint flag persistence**
 
 **Goal:** Add new opt-in flag on `publish-backlinks` that disables Unit 5's per-row re-check. Persist the flag value in the checkpoint metadata so `--resume` honors the original posture.
 
@@ -425,7 +426,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 7: `--resume` hard re-validates checkpoint (R13)**
+- [x] **Unit 7: `--resume` hard re-validates checkpoint (R13)**
 
 **Goal:** When `publish-backlinks --resume` reads a checkpoint, before processing `pending`/`failed` items, re-run R2 (body language) and R5 (anchor codepoint) against each item's stored payload. Reclassify failing items to `failed` with `error_class ∈ {"retro_language_failed", "retro_anchor_failed"}` and skip them from this run. Emit a one-shot INFO summary line.
 
@@ -466,7 +467,7 @@ Key boundaries this design preserves:
 
 ---
 
-- [ ] **Unit 8: Test sweep + back-compat verification**
+- [x] **Unit 8: Test sweep + back-compat verification**
 
 **Goal:** Audit existing tests for assertions that the buggy `language_matches` happened to satisfy, update them with explicit rationale comments. Confirm `pytest -q` exits 0 on the full suite (999 tests verified via `pytest --collect-only -q` at plan time). Confirm webui's `validation.warnings` reader (if any) still functions because the field is preserved as empty list.
 
