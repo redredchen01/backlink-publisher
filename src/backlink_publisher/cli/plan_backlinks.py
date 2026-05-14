@@ -155,6 +155,7 @@ def _build_links(
     url_mode: str,
     extra_urls: list[str] | None = None,
     anchors: list[str] | None = None,
+    site_url_categories: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Construct the list of links for the article (target: 6-8 links).
 
@@ -162,6 +163,15 @@ def _build_links(
     main_domain and target links — anchors[0] for main_domain, anchors[1] for
     target. When omitted or shorter than needed, falls back to the bare-domain
     label (legacy behaviour).
+
+    ``site_url_categories`` (when provided) sources mode-specific category /
+    detail URLs from ``[sites."<main_domain>".url_categories]`` config table.
+    The historical pre-2026-05-14 behaviour was to synthesise
+    ``<main_domain>/categories`` and ``<main_domain>/detail`` regardless of
+    whether those paths existed on the target site — which the PR #16
+    publish-time reachability gate then rejected with HTTP 404. New behaviour:
+    pull the URLs from config; if absent, omit the mode-specific link entirely
+    rather than emit a known-broken URL.
     """
     links: list[dict[str, Any]] = []
 
@@ -207,30 +217,45 @@ def _build_links(
                 "required": False,
             })
 
-    # 4. Mode-specific links - B adds 1, C adds 2
-    if url_mode == "B":
-        cat_url = main_domain.rstrip("/") + "/categories"
-        links.append({
-            "url": cat_url,
-            "anchor": "Categories",
-            "kind": "category",
-            "required": True,
-        })
-    elif url_mode == "C":
-        cat_url = main_domain.rstrip("/") + "/categories"
-        links.append({
-            "url": cat_url,
-            "anchor": "Categories",
-            "kind": "category",
-            "required": True,
-        })
-        detail_url = main_domain.rstrip("/") + "/detail"
-        links.append({
-            "url": detail_url,
-            "anchor": "详情页",
-            "kind": "detail",
-            "required": True,
-        })
+    # 4. Mode-specific links - B adds up to 1 (category), C adds up to 2 (category + detail).
+    # Sourced from [sites."<main>".url_categories]; omitted if config doesn't
+    # define a real reachable URL for this site. Synthesising "/categories"
+    # blindly produced HTTP 404 rows that the publish-time reachability gate
+    # rejected (see PR #16 R8/R9).
+    domain_key = main_domain.rstrip("/")
+    cats = (site_url_categories or {}).get(domain_key, {})
+    if url_mode in ("B", "C"):
+        cat_url = cats.get("category")
+        if cat_url:
+            links.append({
+                "url": cat_url.rstrip("/"),
+                "anchor": "Categories",
+                "kind": "category",
+                "required": True,
+            })
+        else:
+            plan_logger.recon(
+                "category_link_skipped_no_config",
+                main_domain=domain_key,
+                url_mode=url_mode,
+                reason="no_url_categories.category_in_config",
+            )
+    if url_mode == "C":
+        detail_url = cats.get("detail")
+        if detail_url:
+            links.append({
+                "url": detail_url.rstrip("/"),
+                "anchor": "详情页",
+                "kind": "detail",
+                "required": True,
+            })
+        else:
+            plan_logger.recon(
+                "detail_link_skipped_no_config",
+                main_domain=domain_key,
+                url_mode=url_mode,
+                reason="no_url_categories.detail_in_config",
+            )
 
     # 5. Pad with supporting links to reach 6-8
     target_min = 6
@@ -265,12 +290,18 @@ def _build_link_density_paragraph(
     url_mode: str,
     extra_url_count: int,
     anchors: list[str] | None = None,
+    site_url_categories: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """Return a short paragraph that adds missing target-site links to reach A+B+C ≥ 6.
 
     Computes the expected link count after body/excerpt/references are assembled,
     and only produces content when the count would be below 6.
-    Mode B (categories URL) and C (categories+detail) already reach 6-7 and are skipped.
+
+    Mode B's category link and Mode C's category+detail links are only counted
+    when ``site_url_categories`` provides real URLs for them. Synthesised
+    ``/categories`` / ``/detail`` URLs were removed in 2026-05-14 after the
+    publish-time reachability gate (PR #16) caught them as HTTP 404 on sites
+    that don't actually serve those paths — see _build_links.
 
     ``anchors`` (when provided) supplies SEO keywords for the two link slots in
     the paragraph; falls back to ``domain`` (bare label) otherwise.
@@ -279,10 +310,11 @@ def _build_link_density_paragraph(
     base = 4
     if target_url != main_domain:
         base += 1   # references_target entry
-    if url_mode == "B":
-        base += 1   # /categories URL
-    elif url_mode == "C":
-        base += 2   # /categories + /detail URLs
+    cats = (site_url_categories or {}).get(main_domain.rstrip("/"), {})
+    if url_mode in ("B", "C") and cats.get("category"):
+        base += 1
+    if url_mode == "C" and cats.get("detail"):
+        base += 1
     base += min(extra_url_count, 2)  # up to 2 extra_urls in references
 
     if base >= 6:
@@ -481,11 +513,19 @@ def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict
         url_mode=url_mode,
         extra_url_count=len(extra_urls) if extra_urls else 0,
         anchors=anchors,
+        site_url_categories=config.site_url_categories if config else None,
     )
     if density_para:
         body = body + density_para
 
-    links = _build_links(main_domain, target_url, url_mode, extra_urls, anchors=anchors)
+    links = _build_links(
+        main_domain,
+        target_url,
+        url_mode,
+        extra_urls,
+        anchors=anchors,
+        site_url_categories=config.site_url_categories if config else None,
+    )
 
     # Build content_markdown
     content_parts: list[str] = []

@@ -187,6 +187,47 @@ def test_plan_all_url_modes():
         assert payload["main_domain"] in payload["content_markdown"]
 
 
+def test_plan_no_synthesized_categories_url_without_config():
+    """Regression for run 20260514T084127: B/C mode must NOT emit hardcoded
+    ``<main>/categories`` (or ``<main>/detail``) URLs when config has no
+    ``[sites."<main>".url_categories]`` table for the domain.
+
+    Pre-fix: ``_build_links`` blindly appended ``main_domain + "/categories"``
+    and marked it ``required: True``. The PR #16 publish-time reachability
+    gate then rejected the row with HTTP 404 on sites that don't serve that
+    path. Post-fix: with no config, the synthesized category/detail link is
+    omitted from the payload entirely.
+    """
+    for mode in ("B", "C"):
+        seed = {
+            "target_url": "https://51acgs.com/",
+            "main_domain": "https://51acgs.com/",
+            "language": "zh-CN",
+            "platform": "blogger",
+            "url_mode": mode,
+            "publish_mode": "publish",
+        }
+        stdout, stderr, code = _run_plan(json.dumps(seed))
+        assert code == 0, f"Mode {mode} failed: {stderr}"
+        payload = json.loads(stdout.strip())
+        urls = [link["url"] for link in payload["links"]]
+        # The fictional paths must not appear without config support.
+        assert "https://51acgs.com/categories" not in urls, (
+            f"Mode {mode} re-introduced hardcoded /categories link: {urls}"
+        )
+        assert "https://51acgs.com/detail" not in urls, (
+            f"Mode {mode} re-introduced hardcoded /detail link: {urls}"
+        )
+        # Same shape check on the rendered markdown — no fictional URL leaks
+        # into the article body.
+        assert "/categories" not in payload["content_markdown"], (
+            f"Mode {mode} leaked /categories into content_markdown"
+        )
+        assert "/detail" not in payload["content_markdown"], (
+            f"Mode {mode} leaked /detail into content_markdown"
+        )
+
+
 def test_plan_all_languages():
     """All supported languages must produce valid output."""
     for lang in ("en", "zh-CN", "ru"):
