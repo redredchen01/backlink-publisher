@@ -1220,6 +1220,17 @@ def main(argv: list[str] | None = None) -> None:
                 rng=rng,
                 work_count=args.work_count,
             ):
+                # Snapshot the branded_pool so validate-backlinks can apply
+                # the R4 exemption without re-loading config (closes the
+                # validate→publish TOCTOU window per plan 2026-05-14-001 R4).
+                # validate-backlinks falls back to config-load when this
+                # metadata field is absent (older JSONL).
+                branded_pool = get_anchor_pool_v2(
+                    cfg, payload["main_domain"], "home", "branded"
+                )
+                metadata = dict(payload.get("metadata") or {})
+                metadata["branded_pool"] = list(branded_pool)
+                payload["metadata"] = metadata
                 plan_logger.debug(
                     f"generated payload: id={payload['id']} platform={payload['platform']}",
                     extra={"id": payload["id"], "platform": payload["platform"]},
