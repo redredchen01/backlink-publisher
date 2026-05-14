@@ -86,6 +86,63 @@ class _ContentGateRowFailure(Exception):
 #: All other kinds (extra, supporting, category, detail) just drop the link.
 _ROW_REQUIRED_KINDS: frozenset[str] = frozenset({"main_domain", "target"})
 
+
+#: The supporting URLs that ``_build_links`` pads to 6–8 total. Fixed list,
+#: same across every row. Prefetching them once per invocation lets a batch
+#: CSV run share a single fetch instead of paying re-validation per row.
+_SUPPORTING_URLS_FOR_PREFETCH: tuple[str, ...] = (
+    "https://en.wikipedia.org",
+    "https://developer.mozilla.org",
+    "https://stackoverflow.com",
+    "https://github.com",
+    "https://news.ycombinator.com",
+)
+
+
+def _collect_candidate_urls_for_row(
+    row: dict[str, Any], config: Config | None,
+) -> list[str]:
+    """Return the URLs ``_build_links`` would batch-verify for ``row``.
+
+    Pure-string mirror of the URL emission logic in ``_build_links`` — no
+    HTTP, no fetch, no recon side effects. Used by the cross-row prefetch
+    optimisation (plan 2026-05-14-008 Unit 2): the main loop unions these
+    across all validated rows + the fixed supporting set, then calls
+    ``content_fetch.verify_urls_batch`` ONCE up front. Subsequent per-row
+    ``_build_links`` calls hit the cache exclusively.
+
+    Skips the work-themed / zh-CN short branches (they don't go through
+    ``_build_links`` and build their own link sets — gate doesn't apply
+    in this iteration; see scope-deferred note in dispatch_row).
+    """
+    main_domain = row.get("main_domain", "").rstrip("/")
+    target_url = row.get("target_url", "").rstrip("/")
+    url_mode = row.get("url_mode", "A")
+    extra_urls = row.get("extra_urls") or []
+
+    if not main_domain:
+        return []
+
+    urls: list[str] = [main_domain]
+    if target_url and target_url != main_domain:
+        urls.append(target_url)
+    for ex in list(extra_urls)[:2]:
+        if ex:
+            urls.append(ex.rstrip("/"))
+
+    if config is not None:
+        cats = config.site_url_categories.get(main_domain, {})
+        if url_mode in ("B", "C"):
+            cat = cats.get("category")
+            if cat:
+                urls.append(cat.rstrip("/"))
+        if url_mode == "C":
+            det = cats.get("detail")
+            if det:
+                urls.append(det.rstrip("/"))
+
+    return urls
+
 _TDK_TITLE_TMPL: dict[str, str] = {
     "zh-CN": "深入了解{tdk}: {domain} 完整指南",
     "ru": "Подробнее о {tdk}: полный гид по {domain}",
@@ -1398,6 +1455,35 @@ def main(argv: list[str] | None = None) -> None:
 
     fetch_verify_enabled = not args.no_fetch_verify
 
+    # Plan 008 Unit 1: reset stats so this invocation's content_fetch_stats
+    # recon at end-of-run reports only THIS run's counters, not whatever
+    # bled in from the importing context (pytest, REPL, etc.).
+    content_fetch.reset_stats()
+
+    # Plan 008 Unit 2: cross-row URL prefetch. Walk validated rows, union
+    # their candidate URLs with the fixed supporting set, single-shot batch
+    # fetch with concurrency 10. Subsequent per-row _build_links calls hit
+    # the in-run cache exclusively — turns N sequential row-batches into
+    # 1 union batch.
+    if fetch_verify_enabled:
+        validated_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if not validate_input_payload(row, 0):
+                validated_rows.append(row)
+        prefetch_set: set[str] = set()
+        for row in validated_rows:
+            prefetch_set.update(_collect_candidate_urls_for_row(row, cfg))
+        prefetch_set.update(_SUPPORTING_URLS_FOR_PREFETCH)
+        if prefetch_set:
+            content_fetch.verify_urls_batch(
+                list(prefetch_set), max_workers=10,
+            )
+            plan_logger.recon(
+                "content_fetch_prefetch",
+                n_urls_prefetched=len(prefetch_set),
+                n_rows=len(validated_rows),
+            )
+
     for line_num, row in enumerate(rows, start=1):
         errs = validate_input_payload(row, line_num)
         if errs:
@@ -1456,6 +1542,15 @@ def main(argv: list[str] | None = None) -> None:
             "generation": generation_drops,
             "content_gate": content_gate_drops,
         },
+    )
+
+    # Plan 008 Unit 3: emit content-fetch stats snapshot at end-of-run so
+    # operators see cache-hit rate / fetch count / reason distribution
+    # without scraping per-link log lines. Operator grep target:
+    # `RECON content_fetch_stats`.
+    plan_logger.recon(
+        "content_fetch_stats",
+        **content_fetch.stats_snapshot(),
     )
 
     if all_errors:

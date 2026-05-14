@@ -4702,10 +4702,34 @@ def sites_run_result(run_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _wire_content_fetch_ttl_from_env() -> None:
+    """Read ``BACKLINK_GATE_CACHE_TTL_SECONDS`` and set the content_fetch
+    process-wide TTL (plan 2026-05-14-008 Unit 3).
+
+    Default 900s (15 min) for the webui — long-running daemon shouldn't
+    serve gate results cached at startup forever. Skipped entirely when
+    ``BACKLINK_NO_FETCH_VERIFY=1`` (gate bypassed anyway).
+
+    Idempotent — webui hot-reload re-executing this is safe.
+    """
+    bypass = os.environ.get("BACKLINK_NO_FETCH_VERIFY", "").strip().lower()
+    if bypass in {"1", "true", "yes"}:
+        return
+    raw = os.environ.get("BACKLINK_GATE_CACHE_TTL_SECONDS", "900").strip()
+    try:
+        seconds = float(raw)
+    except ValueError:
+        seconds = 900.0
+    if seconds <= 0:
+        return
+    content_fetch.set_default_max_age(seconds)
+
+
 if __name__ == '__main__':
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    _wire_content_fetch_ttl_from_env()
     _scheduler.start()
     _restore_scheduled_jobs()
 

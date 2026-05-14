@@ -762,3 +762,69 @@ class TestHomepageThreeTier:
         assert entry.branded_pool == ["BrandA", "BrandB"]
         assert entry.list_url == "https://hasanchor.example/cat"
         assert entry.work_urls == ["https://hasanchor.example/w/1"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Plan 008 Unit 3: webui TTL env wiring
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestContentFetchTTLWiring:
+    """`BACKLINK_GATE_CACHE_TTL_SECONDS` → content_fetch.set_default_max_age
+    happens at webui startup via `_wire_content_fetch_ttl_from_env`."""
+
+    def test_default_900_seconds_when_env_unset(self, monkeypatch):
+        from backlink_publisher import content_fetch
+        import webui
+
+        monkeypatch.delenv("BACKLINK_GATE_CACHE_TTL_SECONDS", raising=False)
+        monkeypatch.delenv("BACKLINK_NO_FETCH_VERIFY", raising=False)
+        content_fetch.set_default_max_age(None)
+        webui._wire_content_fetch_ttl_from_env()
+        # 900s default per plan 008 Unit 3
+        assert content_fetch._DEFAULT_MAX_AGE_S == 900.0
+        # Reset for the next test.
+        content_fetch.set_default_max_age(None)
+
+    def test_explicit_env_overrides_default(self, monkeypatch):
+        from backlink_publisher import content_fetch
+        import webui
+
+        monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", "60")
+        monkeypatch.delenv("BACKLINK_NO_FETCH_VERIFY", raising=False)
+        content_fetch.set_default_max_age(None)
+        webui._wire_content_fetch_ttl_from_env()
+        assert content_fetch._DEFAULT_MAX_AGE_S == 60.0
+
+    def test_bypass_env_skips_ttl_wiring(self, monkeypatch):
+        from backlink_publisher import content_fetch
+        import webui
+
+        monkeypatch.setenv("BACKLINK_NO_FETCH_VERIFY", "1")
+        monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", "60")
+        content_fetch.set_default_max_age(None)
+        webui._wire_content_fetch_ttl_from_env()
+        assert content_fetch._DEFAULT_MAX_AGE_S is None
+
+    def test_invalid_env_falls_back_to_900(self, monkeypatch):
+        from backlink_publisher import content_fetch
+        import webui
+
+        monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", "not-a-number")
+        monkeypatch.delenv("BACKLINK_NO_FETCH_VERIFY", raising=False)
+        content_fetch.set_default_max_age(None)
+        webui._wire_content_fetch_ttl_from_env()
+        assert content_fetch._DEFAULT_MAX_AGE_S == 900.0
+
+    def test_zero_or_negative_seconds_skips_wiring(self, monkeypatch):
+        from backlink_publisher import content_fetch
+        import webui
+
+        for value in ("0", "-5"):
+            monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", value)
+            monkeypatch.delenv("BACKLINK_NO_FETCH_VERIFY", raising=False)
+            content_fetch.set_default_max_age(None)
+            webui._wire_content_fetch_ttl_from_env()
+            assert content_fetch._DEFAULT_MAX_AGE_S is None, (
+                f"TTL={value} should leave TTL disabled"
+            )
