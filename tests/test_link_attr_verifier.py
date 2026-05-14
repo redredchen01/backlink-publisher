@@ -122,6 +122,118 @@ def test_non_html_response_does_not_crash():
 
 
 # ---------------------------------------------------------------------------
+# nofollow detection — Plan 2026-05-13-004 Unit 6
+# Critical: backlinks must be dofollow. Medium and similar platforms can
+# silently inject rel="nofollow" — when that happens, the article's
+# weight-passing value collapses to zero. The verifier surfaces this so
+# operators see the trend in publish reports.
+# ---------------------------------------------------------------------------
+
+
+def test_nofollow_clean_html_flags_nothing():
+    """Happy path — only noopener present, no nofollow detected."""
+    html = _html(
+        '<a href="https://a.com" target="_blank" rel="noopener">link</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["verification"] == "ok"
+    assert result["nofollow_detected"] is False
+    assert result["nofollow_anchors"] == 0
+
+
+def test_nofollow_injected_by_platform_is_detected():
+    """Medium-style injection: rel="nofollow noopener" → flagged."""
+    html = _html(
+        '<a href="https://a.com" target="_blank" rel="nofollow noopener">link</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["verification"] == "ok"
+    assert result["nofollow_detected"] is True
+    assert result["nofollow_anchors"] == 1
+    assert "nofollow" in result["nofollow_reason"].lower()
+
+
+def test_sponsored_rel_is_not_misclassified_as_nofollow():
+    """rel="sponsored noopener" must NOT trigger nofollow detection."""
+    html = _html(
+        '<a href="https://a.com" target="_blank" rel="sponsored noopener">link</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["nofollow_detected"] is False
+    assert result["nofollow_anchors"] == 0
+
+
+def test_any_single_nofollow_anchor_flips_detection():
+    """If even one of many anchors has nofollow, the whole publish is flagged."""
+    html = _html(
+        '<a href="https://a.com" target="_blank" rel="noopener">link a</a>',
+        '<a href="https://b.com" target="_blank" rel="noopener">link b</a>',
+        '<a href="https://c.com" target="_blank" rel="nofollow noopener">link c</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["nofollow_detected"] is True
+    assert result["nofollow_anchors"] == 1
+    assert result["total_anchors"] == 3
+
+
+def test_nofollow_substring_match_does_not_falsely_trigger():
+    """rel="nofollows" / rel="not-nofollow" / rel="ugc" — no true match."""
+    html = _html(
+        # bogus token; not the real "nofollow"
+        '<a href="https://a.com" rel="ugc">link a</a>',
+        # rel value contains "follow" but not "nofollow"
+        '<a href="https://b.com" rel="follow">link b</a>',
+        # word boundary — a token with "nofollow" as a prefix-only match
+        # is NOT the real keyword. Most parsers wouldn't see this; we still
+        # use word-boundary so a stray "nofollowed" token doesn't trip the
+        # alert.
+        '<a href="https://c.com" rel="nofollowed">link c</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["nofollow_detected"] is False
+    assert result["nofollow_anchors"] == 0
+
+
+def test_uppercase_rel_attribute_still_matches():
+    """REL="NOFOLLOW" should be detected (HTML is case-insensitive)."""
+    html = _html(
+        '<a href="https://a.com" REL="NOFOLLOW NOOPENER">link</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["nofollow_detected"] is True
+    assert result["nofollow_anchors"] == 1
+
+
+def test_multiple_nofollow_anchors_count_correctly():
+    html = _html(
+        '<a href="https://a.com" rel="nofollow">a</a>',
+        '<a href="https://b.com" rel="nofollow noopener">b</a>',
+        '<a href="https://c.com" rel="noopener">c</a>',
+    )
+    with patch("requests.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://example.com")
+    assert result["nofollow_detected"] is True
+    assert result["nofollow_anchors"] == 2
+
+
+def test_skipped_result_has_no_nofollow_keys():
+    """When verification is skipped (network error), nofollow keys must NOT
+    be present — callers reading meta['nofollow_detected'] must check the
+    verification status first."""
+    import requests as req_lib
+    with patch("requests.get", side_effect=req_lib.ConnectionError("refused")):
+        result = verify_link_attributes("http://127.0.0.1:1/x", timeout=0.1)
+    assert result["verification"] == "skipped"
+    assert "nofollow_detected" not in result
+
+
+# ---------------------------------------------------------------------------
 # medium_api integration: hook fires on publish mode only
 # ---------------------------------------------------------------------------
 

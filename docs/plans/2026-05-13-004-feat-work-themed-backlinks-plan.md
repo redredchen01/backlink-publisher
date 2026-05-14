@@ -525,7 +525,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 6: link_attr_verifier nofollow 自检扩展**
+- [x] **Unit 6: link_attr_verifier nofollow 自检扩展** ✅ shipped 2026-05-14
 
 **Goal:** 扩展 `link_attr_verifier` post-publish 检查，新增「`rel` 不含 `nofollow`」断言；防止 Medium 等平台静默注入 nofollow 导致 dofollow 链权重传递为 0 而无感知。
 
