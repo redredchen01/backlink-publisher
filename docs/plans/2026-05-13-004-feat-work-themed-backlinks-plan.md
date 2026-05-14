@@ -342,7 +342,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 4: Work-themed article generator**
+- [x] **Unit 4: Work-themed article generator** ✅ shipped 2026-05-14
 
 **Goal:** 给定一个 work_url + scraped metadata + target 配置，产出含三条 raw HTML `<a>` 的 `content_markdown` payload。
 

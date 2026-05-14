@@ -1,6 +1,10 @@
-"""Tests for render_to_html."""
+"""Tests for render_to_html + _format_anchor_html rel parameterisation."""
 
-from backlink_publisher.markdown_utils import render_to_html, select_anchor_keywords
+from backlink_publisher.markdown_utils import (
+    _format_anchor_html,
+    render_to_html,
+    select_anchor_keywords,
+)
 
 
 def test_heading_and_paragraph():
@@ -60,6 +64,36 @@ def test_raw_html_preserved():
     html = render_to_html(md)
     # markdown-it by default allows inline HTML
     assert "more text" in html
+
+
+# ---------------------------------------------------------------------------
+# _format_anchor_html — rel parameterisation (Plan 2026-05-13-004 Unit 4)
+# ---------------------------------------------------------------------------
+
+
+def test_format_anchor_html_default_rel_unchanged():
+    """Backwards-compatible default — long-form callers see noopener+noreferrer."""
+    out = _format_anchor_html("https://example.com", "anchor")
+    assert 'rel="noopener noreferrer"' in out
+    assert 'target="_blank"' in out
+    assert 'href="https://example.com"' in out
+
+
+def test_format_anchor_html_explicit_rel_noopener_only():
+    """Work-themed path opts into bare noopener so dofollow weight is preserved."""
+    out = _format_anchor_html("https://example.com", "anchor", rel="noopener")
+    assert 'rel="noopener"' in out
+    assert "noreferrer" not in out
+
+
+def test_format_anchor_html_url_attribute_escapes_apply():
+    out = _format_anchor_html(
+        'https://example.com/?q="x"&y=<z>', "anchor", rel="noopener"
+    )
+    assert "&amp;" in out
+    assert "&quot;" in out
+    assert "&lt;" in out
+    assert "&gt;" in out
 
 
 # ---------------------------------------------------------------------------
