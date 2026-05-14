@@ -16,6 +16,7 @@ from .. import (
     anchor_profile,
     anchor_resolver,
     anchor_scheduler,
+    content_fetch,
     errors,
     markdown_utils,
     work_scraper,
@@ -62,6 +63,28 @@ from ..schema import (
 )
 
 ARTICLE_LENGTH_WORDS = (100, 200)
+
+
+class _ContentGateRowFailure(Exception):
+    """Raised by ``_build_links`` when ``main_domain`` or ``target`` URL fails
+    the content gate. The row cannot be published — without its primary
+    target the article has no anchor. The main loop catches this and
+    increments the ``content_gate`` Silent-Drop Tripwire counter.
+
+    Plan ref: docs/plans/2026-05-14-007-feat-url-content-fetch-gate-plan.md
+    Unit 3.
+    """
+
+    def __init__(self, url: str, reason: str, kind: str) -> None:
+        super().__init__(f"row-failing content gate: kind={kind} url={url} reason={reason}")
+        self.url = url
+        self.reason = reason
+        self.kind = kind
+
+
+#: URL kinds whose gate failure aborts the row (article unpublishable).
+#: All other kinds (extra, supporting, category, detail) just drop the link.
+_ROW_REQUIRED_KINDS: frozenset[str] = frozenset({"main_domain", "target"})
 
 _TDK_TITLE_TMPL: dict[str, str] = {
     "zh-CN": "深入了解{tdk}: {domain} 完整指南",
@@ -156,7 +179,8 @@ def _build_links(
     extra_urls: list[str] | None = None,
     anchors: list[str] | None = None,
     site_url_categories: dict[str, dict[str, str]] | None = None,
-) -> list[dict[str, Any]]:
+    fetch_verify_enabled: bool = True,
+) -> tuple[list[dict[str, Any]], set[str]]:
     """Construct the list of links for the article (target: 6-8 links).
 
     ``anchors`` (when provided) supplies SEO-friendly keyword anchors for the
@@ -172,33 +196,48 @@ def _build_links(
     publish-time reachability gate then rejected with HTTP 404. New behaviour:
     pull the URLs from config; if absent, omit the mode-specific link entirely
     rather than emit a known-broken URL.
-    """
-    links: list[dict[str, Any]] = []
 
-    # 1. Main domain link (always present) - 1 link
+    ``fetch_verify_enabled`` (default True) gates every candidate URL through
+    :func:`content_fetch.verify_urls_batch` before appending. Links whose URL
+    returns non-200 or has no parseable ``<title>`` are dropped with a
+    ``link_dropped_no_content`` recon event. ``main_domain`` and ``target``
+    failures raise :class:`_ContentGateRowFailure` to abort the entire row;
+    other kinds (extra, supporting, category, detail) just thin the article
+    and rely on the density paragraph to compensate. Set False to bypass
+    (``plan-backlinks --no-fetch-verify``).
+
+    Returns
+    -------
+    (links, dropped_kinds)
+        ``dropped_kinds`` is the set of kinds that the gate dropped for this
+        row. ``_build_link_density_paragraph`` uses it to subtract the
+        dropped contributions when computing whether to compensate.
+    """
+    # Phase 1: collect every candidate link record. The gate runs once over
+    # the merged URL set so concurrent HTTP overlaps a single row's links.
+    candidates: list[dict[str, Any]] = []
+
     domain_label = main_domain.rstrip("/").replace("https://", "").replace("http://", "")
     main_anchor = anchors[0] if anchors and len(anchors) >= 1 else domain_label
-    links.append({
+    candidates.append({
         "url": main_domain.rstrip("/"),
         "anchor": main_anchor,
         "kind": "main_domain",
         "required": True,
     })
 
-    # 2. Target URL link - 1 link
     if target_url != main_domain:
         target_label = target_url.rstrip("/").replace("https://", "").replace("http://", "")
         target_anchor = anchors[1] if anchors and len(anchors) >= 2 else target_label
-        links.append({
+        candidates.append({
             "url": target_url,
             "anchor": target_anchor,
             "kind": "target",
             "required": True,
         })
 
-    # 3. Add extra URLs first (up to 2)
     if extra_urls:
-        for i, ex_url in enumerate(extra_urls[:2]):
+        for ex_url in extra_urls[:2]:
             parsed = urlparse(ex_url)
             path = parsed.path
             if "/page/" in path or "?page=" in ex_url:
@@ -209,25 +248,19 @@ def _build_links(
                 anchor = "归档"
             else:
                 anchor = "相关"
-            
-            links.append({
+            candidates.append({
                 "url": ex_url.rstrip("/"),
                 "anchor": anchor,
                 "kind": "extra",
                 "required": False,
             })
 
-    # 4. Mode-specific links - B adds up to 1 (category), C adds up to 2 (category + detail).
-    # Sourced from [sites."<main>".url_categories]; omitted if config doesn't
-    # define a real reachable URL for this site. Synthesising "/categories"
-    # blindly produced HTTP 404 rows that the publish-time reachability gate
-    # rejected (see PR #16 R8/R9).
     domain_key = main_domain.rstrip("/")
     cats = (site_url_categories or {}).get(domain_key, {})
     if url_mode in ("B", "C"):
         cat_url = cats.get("category")
         if cat_url:
-            links.append({
+            candidates.append({
                 "url": cat_url.rstrip("/"),
                 "anchor": "Categories",
                 "kind": "category",
@@ -243,7 +276,7 @@ def _build_links(
     if url_mode == "C":
         detail_url = cats.get("detail")
         if detail_url:
-            links.append({
+            candidates.append({
                 "url": detail_url.rstrip("/"),
                 "anchor": "详情页",
                 "kind": "detail",
@@ -257,10 +290,9 @@ def _build_links(
                 reason="no_url_categories.detail_in_config",
             )
 
-    # 5. Pad with supporting links to reach 6-8
-    target_min = 6
+    # Pad with supporting links up to 8 total (gate may drop some so we keep
+    # 5 candidates and let the gate decide how many survive).
     target_max = 8
-    
     supporting = [
         ("https://en.wikipedia.org", "Wikipedia"),
         ("https://developer.mozilla.org", "MDN"),
@@ -268,18 +300,51 @@ def _build_links(
         ("https://github.com", "GitHub"),
         ("https://news.ycombinator.com", "Hacker News"),
     ]
-    
     for surl, sanchor in supporting:
-        if len(links) >= target_max:
+        if len(candidates) >= target_max:
             break
-        links.append({
+        candidates.append({
             "url": surl,
             "anchor": sanchor,
             "kind": "supporting",
             "required": False,
         })
 
-    return links
+    # Phase 2: content-fetch gate. Batch-verify all candidate URLs, then
+    # filter the record list. Row-required failures raise; other failures
+    # drop the link and record the kind so density math knows.
+    dropped_kinds: set[str] = set()
+    if not fetch_verify_enabled:
+        return candidates, dropped_kinds
+
+    urls = [c["url"] for c in candidates]
+    results = content_fetch.verify_urls_batch(urls)
+
+    links: list[dict[str, Any]] = []
+    for cand in candidates:
+        ok, reason, _ = results.get(cand["url"], (False, "missing_result", None))
+        if ok:
+            links.append(cand)
+            continue
+        if cand["kind"] in _ROW_REQUIRED_KINDS:
+            # Row cannot be published without main_domain / target. Caller
+            # (main loop) catches and counts against the Silent-Drop Tripwire.
+            plan_logger.recon(
+                "row_dropped_content_gate",
+                url=cand["url"],
+                kind=cand["kind"],
+                reason=reason or "unknown",
+            )
+            raise _ContentGateRowFailure(cand["url"], reason or "unknown", cand["kind"])
+        dropped_kinds.add(cand["kind"])
+        plan_logger.recon(
+            "link_dropped_no_content",
+            url=cand["url"],
+            kind=cand["kind"],
+            reason=reason or "unknown",
+        )
+
+    return links, dropped_kinds
 
 
 def _build_link_density_paragraph(
@@ -291,6 +356,7 @@ def _build_link_density_paragraph(
     extra_url_count: int,
     anchors: list[str] | None = None,
     site_url_categories: dict[str, dict[str, str]] | None = None,
+    dropped_kinds: set[str] | None = None,
 ) -> str:
     """Return a short paragraph that adds missing target-site links to reach A+B+C ≥ 6.
 
@@ -302,6 +368,12 @@ def _build_link_density_paragraph(
     ``/categories`` / ``/detail`` URLs were removed in 2026-05-14 after the
     publish-time reachability gate (PR #16) caught them as HTTP 404 on sites
     that don't actually serve those paths — see _build_links.
+
+    ``dropped_kinds`` carries the set of link kinds that the content-fetch gate
+    (plan 2026-05-14-007) just removed from the row, so this paragraph's
+    base-count math doesn't over-credit links that ``_build_links`` no longer
+    emits. Without this hook a dropped ``extra`` or ``category`` link would
+    silently push the article below the 6-link density floor.
 
     ``anchors`` (when provided) supplies SEO keywords for the two link slots in
     the paragraph; falls back to ``domain`` (bare label) otherwise.
@@ -316,6 +388,19 @@ def _build_link_density_paragraph(
     if url_mode == "C" and cats.get("detail"):
         base += 1
     base += min(extra_url_count, 2)  # up to 2 extra_urls in references
+
+    # Subtract anything the content-fetch gate already dropped from this row.
+    # `extra` / `category` / `detail` were counted above but won't render.
+    # `supporting` / `main_domain` / `target` aren't part of base, so we
+    # ignore them here (main_domain / target failures raised earlier and the
+    # row never reaches this function).
+    if dropped_kinds:
+        if "extra" in dropped_kinds:
+            base -= min(extra_url_count, 2)
+        if "category" in dropped_kinds:
+            base -= 1
+        if "detail" in dropped_kinds:
+            base -= 1
 
     if base >= 6:
         return ""
@@ -381,8 +466,20 @@ def _resolve_article_anchors(
     return selected
 
 
-def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict[str, Any]:
-    """Generate a single backlink article payload from a seed row."""
+def _generate_payload(
+    row: dict[str, Any],
+    config: Config | None = None,
+    *,
+    fetch_verify_enabled: bool = True,
+) -> dict[str, Any]:
+    """Generate a single backlink article payload from a seed row.
+
+    ``fetch_verify_enabled`` (default True) gates every URL emitted into the
+    payload's ``links`` list through :mod:`content_fetch`. Raises
+    :class:`_ContentGateRowFailure` when ``main_domain`` or ``target_url`` fails
+    the gate; the caller (main loop) catches and counts the drop against the
+    Silent-Drop Tripwire ``content_gate`` bucket.
+    """
     main_domain = row["main_domain"].rstrip("/")
     target_url = row["target_url"].rstrip("/")
     url_mode = row.get("url_mode", "A")
@@ -504,7 +601,21 @@ def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict
         
         body = body + extra_section
 
-    # Inject density paragraph if target-site link count would be < 6
+    # Build links FIRST so the density paragraph can subtract anything the
+    # content-fetch gate just dropped. May raise _ContentGateRowFailure when
+    # main_domain or target fails the gate — propagates to the main loop.
+    links, dropped_kinds = _build_links(
+        main_domain,
+        target_url,
+        url_mode,
+        extra_urls,
+        anchors=anchors,
+        site_url_categories=config.site_url_categories if config else None,
+        fetch_verify_enabled=fetch_verify_enabled,
+    )
+
+    # Inject density paragraph if target-site link count would be < 6,
+    # accounting for any links the gate just removed.
     density_para = _build_link_density_paragraph(
         domain=domain_label,
         main_domain=main_domain,
@@ -514,18 +625,10 @@ def _generate_payload(row: dict[str, Any], config: Config | None = None) -> dict
         extra_url_count=len(extra_urls) if extra_urls else 0,
         anchors=anchors,
         site_url_categories=config.site_url_categories if config else None,
+        dropped_kinds=dropped_kinds,
     )
     if density_para:
         body = body + density_para
-
-    links = _build_links(
-        main_domain,
-        target_url,
-        url_mode,
-        extra_urls,
-        anchors=anchors,
-        site_url_categories=config.site_url_categories if config else None,
-    )
 
     # Build content_markdown
     content_parts: list[str] = []
@@ -1091,6 +1194,7 @@ def _dispatch_row(
     llm_provider: OpenAICompatibleProvider | None,
     rng: random.Random | None,
     work_count: int,
+    fetch_verify_enabled: bool = True,
 ) -> Iterator[dict[str, Any]]:
     """Three-path dispatch (Plan 2026-05-13-004 Unit 5a).
 
@@ -1098,6 +1202,14 @@ def _dispatch_row(
     long-form. Each branch yields its own payload(s); the caller appends.
     The middle branch returns ``None`` when the scheduler refuses (no v2
     pool, missing non-home category) — falls through to long-form.
+
+    ``fetch_verify_enabled`` propagates into the long-form branch's
+    ``_generate_payload`` so the content-fetch gate (plan 2026-05-14-007)
+    can be bypassed via ``plan-backlinks --no-fetch-verify``. The
+    work-themed and zh-CN short branches build their own link sets via
+    ``work_themed_generator`` / ``_build_zh_short_payload`` and currently
+    do not pass through ``_build_links``; the gate does not apply to those
+    branches in this iteration — tracked as deferred follow-up.
     """
     three_url_cfg = get_three_url_config(config, row["main_domain"])
     if three_url_cfg is not None:
@@ -1110,7 +1222,9 @@ def _dispatch_row(
     ):
         payload = _plan_zh_short_row(row, config, llm_provider, rng=rng)
     if payload is None:
-        payload = _generate_payload(row, config=config)
+        payload = _generate_payload(
+            row, config=config, fetch_verify_enabled=fetch_verify_enabled,
+        )
     yield payload
 
 
@@ -1179,10 +1293,29 @@ def main(argv: list[str] | None = None) -> None:
         choices=["DEBUG", "INFO", "WARN", "ERROR"],
         help="Log verbosity (default: WARN)",
     )
+    parser.add_argument(
+        "--no-fetch-verify",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip the plan-time URL content gate (default: enabled). Each row's "
+            "URLs are normally fetched via content_fetch.verify_url_has_content "
+            "and required to return HTTP 200 with a non-empty <title> or "
+            "og:title before being added to the article. Use this flag in "
+            "dev / replay / staging when target sites are intentionally offline. "
+            "Plan ref: docs/plans/2026-05-14-007-feat-url-content-fetch-gate-plan.md"
+        ),
+    )
     args = parser.parse_args(argv)
 
     from ..logger import set_log_level
     set_log_level(args.log_level)
+
+    if args.no_fetch_verify:
+        plan_logger.recon(
+            "fetch_verify_disabled",
+            reason="cli_flag",
+        )
 
     # Mutual exclusion: --from-csv / --from-sitemap are exclusive with --input
     bulk_sources = [args.from_csv, args.from_sitemap]
@@ -1257,9 +1390,13 @@ def main(argv: list[str] | None = None) -> None:
     all_errors: list[str] = []
     # Silent-Drop Tripwire: track which line each drop happened at, partitioned
     # by which gate ate it. The reconciliation log line lets the operator see
-    # "I had 20 input rows but only got 5 payloads — 12 validation, 3 generation".
+    # "I had 20 input rows but only got 5 payloads — 12 validation, 3 generation,
+    # 5 content_gate".
     validation_drops: list[int] = []
     generation_drops: list[int] = []
+    content_gate_drops: list[int] = []
+
+    fetch_verify_enabled = not args.no_fetch_verify
 
     for line_num, row in enumerate(rows, start=1):
         errs = validate_input_payload(row, line_num)
@@ -1273,6 +1410,7 @@ def main(argv: list[str] | None = None) -> None:
                 llm_provider=llm_provider,
                 rng=rng,
                 work_count=args.work_count,
+                fetch_verify_enabled=fetch_verify_enabled,
             ):
                 # Snapshot the branded_pool so validate-backlinks can apply
                 # the R4 exemption without re-loading config (closes the
@@ -1290,6 +1428,12 @@ def main(argv: list[str] | None = None) -> None:
                     extra={"id": payload["id"], "platform": payload["platform"]},
                 )
                 outputs.append(payload)
+        except _ContentGateRowFailure as exc:
+            all_errors.append(
+                f"line {line_num}: content-gate failure: kind={exc.kind} "
+                f"url={exc.url} reason={exc.reason}"
+            )
+            content_gate_drops.append(line_num)
         except Exception as exc:
             all_errors.append(f"line {line_num}: generation error: {exc}")
             generation_drops.append(line_num)
@@ -1305,10 +1449,12 @@ def main(argv: list[str] | None = None) -> None:
         dropped={
             "validation": len(validation_drops),
             "generation": len(generation_drops),
+            "content_gate": len(content_gate_drops),
         },
         dropped_line_numbers={
             "validation": validation_drops,
             "generation": generation_drops,
+            "content_gate": content_gate_drops,
         },
     )
 

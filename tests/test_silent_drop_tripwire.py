@@ -75,7 +75,7 @@ def test_plan_reconciliation_happy_path(tmp_path, capsys):
     assert e["input_rows"] == 2
     assert e["output_rows"] == 2
     assert e["delta"] == 0
-    assert e["dropped"] == {"validation": 0, "generation": 0}
+    assert e["dropped"] == {"validation": 0, "generation": 0, "content_gate": 0}
 
 
 def test_plan_reconciliation_validation_drops(tmp_path, capsys):

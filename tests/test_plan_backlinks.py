@@ -228,6 +228,214 @@ def test_plan_no_synthesized_categories_url_without_config():
         )
 
 
+class TestContentFetchGate:
+    """Plan 2026-05-14-007: URL content-fetch gate wired into _build_links."""
+
+    def test_supporting_link_gate_failure_drops_link_and_keeps_row(
+        self, monkeypatch
+    ):
+        """One supporting URL fails the gate → article emits with the
+        survivors + a density paragraph; row is NOT aborted because the
+        failing URL is `kind=supporting`, not main_domain / target.
+        """
+        def _selective_batch(urls, max_workers=5):
+            result = {}
+            for u in urls:
+                if u == "https://en.wikipedia.org":
+                    result[u] = (False, "http_200_no_title", None)
+                else:
+                    result[u] = (True, None, "mock title")
+            return result
+
+        monkeypatch.setattr(
+            "backlink_publisher.content_fetch.verify_urls_batch",
+            _selective_batch,
+        )
+
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        stdout, _, code = _run_plan(json.dumps(seed))
+        assert code == 0
+        payload = json.loads(stdout.strip())
+        urls = [link["url"] for link in payload["links"]]
+        assert "https://en.wikipedia.org" not in urls, (
+            "gate-failed supporting URL must be dropped from links"
+        )
+        # The article remains valid (≥ 5 links).
+        assert len(urls) >= 5
+
+    def test_main_domain_gate_failure_aborts_row(self, monkeypatch, capsys):
+        """main_domain fails the gate → row is dropped; tripwire records
+        the drop under the `content_gate` bucket; exit code is 2 because
+        the run ended with errors."""
+        def _fail_main(urls, max_workers=5):
+            return {
+                u: (
+                    (False, "http_404", None)
+                    if u == "https://example.com"
+                    else (True, None, "mock title")
+                )
+                for u in urls
+            }
+
+        monkeypatch.setattr(
+            "backlink_publisher.content_fetch.verify_urls_batch",
+            _fail_main,
+        )
+
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        stdout, stderr, code = _run_plan(json.dumps(seed))
+        # Row drop → exit 2 (any error during planning)
+        assert code == 2
+        assert stdout.strip() == "", "no payload should be emitted"
+        # Tripwire records the drop under content_gate
+        recon_lines = [
+            line for line in stderr.splitlines()
+            if '"msg": "plan_reconciliation"' in line
+        ]
+        assert recon_lines, "tripwire must fire even on full-row drop"
+        recon = json.loads(recon_lines[0])
+        assert recon["dropped"]["content_gate"] == 1
+        assert recon["dropped"]["validation"] == 0
+        assert recon["dropped"]["generation"] == 0
+
+    def test_target_gate_failure_aborts_row(self, monkeypatch):
+        """target_url fails the gate → row dropped under content_gate.
+        Same severity as main_domain (per _ROW_REQUIRED_KINDS)."""
+        def _fail_target(urls, max_workers=5):
+            return {
+                u: (
+                    (False, "http_404", None)
+                    if "/article" in u
+                    else (True, None, "mock title")
+                )
+                for u in urls
+            }
+
+        monkeypatch.setattr(
+            "backlink_publisher.content_fetch.verify_urls_batch",
+            _fail_target,
+        )
+
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        stdout, _, code = _run_plan(json.dumps(seed))
+        assert code == 2
+        assert stdout.strip() == ""
+
+    def test_no_fetch_verify_flag_bypasses_gate(self, monkeypatch):
+        """--no-fetch-verify skips the gate entirely — verify_urls_batch
+        is never called, all candidate URLs survive."""
+        call_count = {"n": 0}
+
+        def _tracking_batch(urls, max_workers=5):
+            call_count["n"] += 1
+            return {u: (False, "http_404", None) for u in urls}
+
+        monkeypatch.setattr(
+            "backlink_publisher.content_fetch.verify_urls_batch",
+            _tracking_batch,
+        )
+
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        stdout, stderr, code = _run_plan(
+            json.dumps(seed), argv=["--no-fetch-verify"]
+        )
+        assert code == 0
+        assert stdout.strip() != "", "with --no-fetch-verify, payload must emit"
+        assert call_count["n"] == 0, (
+            "gate must not be invoked when --no-fetch-verify is set"
+        )
+        # Recon event marks the bypass
+        recon_lines = [
+            line for line in stderr.splitlines()
+            if '"msg": "fetch_verify_disabled"' in line
+        ]
+        assert recon_lines, "expected fetch_verify_disabled recon event"
+
+    def test_b_mode_category_link_failure_drops_only_that_link(
+        self, monkeypatch, tmp_path
+    ):
+        """B-mode with a configured category URL that fails the gate →
+        category link dropped; row keeps publishing; density paragraph
+        compensates so target-site link count stays ≥ 6.
+        """
+        config_toml = (
+            '[blogger]\n'
+            '"https://example.com/" = "1111"\n\n'
+            '[sites."https://example.com".url_categories]\n'
+            'home = "https://example.com/"\n'
+            'category = "https://example.com/stale-cat"\n'
+        )
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(config_toml, encoding="utf-8")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        # config.py looks up ~/.config/backlink-publisher/config.toml so we
+        # need to mirror the path under XDG_CONFIG_HOME.
+        bp_dir = tmp_path / "backlink-publisher"
+        bp_dir.mkdir(exist_ok=True)
+        (bp_dir / "config.toml").write_text(config_toml, encoding="utf-8")
+        monkeypatch.setattr(
+            "backlink_publisher.config._config_dir",
+            lambda: bp_dir,
+        )
+
+        def _fail_category(urls, max_workers=5):
+            return {
+                u: (
+                    (False, "http_404", None)
+                    if "stale-cat" in u
+                    else (True, None, "mock title")
+                )
+                for u in urls
+            }
+
+        monkeypatch.setattr(
+            "backlink_publisher.content_fetch.verify_urls_batch",
+            _fail_category,
+        )
+
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "B",
+            "publish_mode": "draft",
+        }
+        stdout, _, code = _run_plan(json.dumps(seed))
+        assert code == 0
+        payload = json.loads(stdout.strip())
+        urls = [link["url"] for link in payload["links"]]
+        assert "https://example.com/stale-cat" not in urls
+
+
 def test_plan_all_languages():
     """All supported languages must produce valid output."""
     for lang in ("en", "zh-CN", "ru"):
