@@ -14,10 +14,12 @@ import re
 import stat
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .errors import DependencyError, InputValidationError
+from .logger import plan_logger
 
 _log = logging.getLogger(__name__)
 _UNSAFE_IN_ANCHOR = re.compile(r'[\]\[()><"\'\n\r]')
@@ -738,6 +740,148 @@ def load_blogger_token(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
 
+# Top-level TOML section roots that save_config writes from the Config
+# dataclass. Any other section on disk is preserved byte-for-byte by
+# _preserve_unknown_sections. Adding a new "known" section here means
+# save_config must also know how to write it back.
+_SAVE_CONFIG_KNOWN_ROOTS: frozenset[str] = frozenset(
+    {"blogger", "medium", "targets"}
+)
+
+# Cap on rolling config.toml snapshots kept under .config-history/.
+_CONFIG_HISTORY_MAX: int = 20
+
+# Matches a TOML top-level heading: `[section]`, `[[array.of.tables]]`,
+# `[quoted."dotted"]`. Captures the root (first dotted segment) so the caller
+# can decide whether to copy or skip. The lexer is intentionally not a full
+# TOML parser — it only needs to find section boundaries.
+_TOML_HEADING_RE = re.compile(
+    r"""
+    ^\s*\[\[?           # opening [ or [[
+    \s*
+    (?:
+        "([^"]+)"       # quoted root
+        |
+        ([^.\]\s"]+)    # bare root (no dots, brackets, whitespace)
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _toml_heading_root(line: str) -> str | None:
+    """Extract the root segment of a TOML heading line, or None if not a heading."""
+    m = _TOML_HEADING_RE.match(line)
+    if not m:
+        return None
+    return m.group(1) or m.group(2)
+
+
+def _preserve_unknown_sections(raw_text: str, known_roots: frozenset[str]) -> str:
+    """Return verbatim text of top-level sections whose root is not in ``known_roots``.
+
+    Walks the input line-by-line. When a TOML heading is encountered, the
+    section-membership state flips based on whether the root is known. Lines
+    inside an "unknown" section are appended verbatim — preserving comments,
+    key order, and whitespace. Lines before the first heading (file-level
+    comments) are dropped because save_config rewrites the file's preamble.
+
+    Edge cases:
+    - Empty input → empty output.
+    - Input with only known sections → empty output.
+    - Heading inside a string literal would fool the regex; we accept that
+      risk because TOML values rarely span lines or contain `[` at column 0,
+      and load_config would have rejected such a file at parse time anyway.
+    """
+    out: list[str] = []
+    keep_current = False  # before the first heading, drop preamble
+    for line in raw_text.splitlines():
+        root = _toml_heading_root(line)
+        if root is not None:
+            keep_current = root not in known_roots
+            if keep_current:
+                out.append(line)
+        elif keep_current:
+            out.append(line)
+    # Trailing newline keeps output well-formed when concatenated.
+    return ("\n".join(out) + "\n") if out else ""
+
+
+def _atomic_write_text(path: Path, text: str, mode: int = 0o600) -> None:
+    """Write ``text`` to ``path`` atomically via a sibling .new + replace.
+
+    Mirrors :func:`io_utils.atomic_write_json` for plain text. Readers see
+    either the old file or the fully written new one — never a torn write.
+    chmod best-effort; the rename is load-bearing.
+    """
+    tmp = path.with_name(path.name + ".new")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(tmp, mode)
+    except OSError:
+        pass
+    tmp.replace(path)
+
+
+def _snapshot_config(path: Path, max_history: int = _CONFIG_HISTORY_MAX) -> None:
+    """Best-effort: copy current ``path`` to ``.config-history/<UTC-ts>.toml``.
+
+    Pre-save snapshot for time-travel recovery. Failures (missing source,
+    unwritable dir, full disk) are logged but never raise — operator data
+    safety on the main save path dominates. Rotates oldest snapshots so the
+    directory does not grow unbounded.
+    """
+    if not path.exists():
+        return
+    snapshot_dir = path.parent / ".config-history"
+    try:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(snapshot_dir, stat.S_IRWXU)  # 0700
+        except OSError:
+            pass
+    except OSError as exc:
+        plan_logger.warn(
+            "config_snapshot_dir_failed",
+            path=str(snapshot_dir),
+            reason=type(exc).__name__,
+        )
+        return
+
+    # UTC ISO timestamp with colons replaced (Windows-safe).
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+    snap_path = snapshot_dir / f"{ts}.toml"
+    try:
+        snap_path.write_bytes(path.read_bytes())
+        try:
+            os.chmod(snap_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        except OSError:
+            pass
+    except OSError as exc:
+        plan_logger.warn(
+            "config_snapshot_write_failed",
+            path=str(snap_path),
+            reason=type(exc).__name__,
+        )
+        return
+
+    # Rotate: keep the newest `max_history` files by mtime.
+    try:
+        snapshots = sorted(
+            (p for p in snapshot_dir.glob("*.toml") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        excess = len(snapshots) - max_history
+        for old in snapshots[:max(0, excess)]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        # Rotation failure is benign — operator will see one extra file.
+        pass
+
+
 def save_config(
     config: "Config",
     path: Path | None = None,
@@ -826,7 +970,37 @@ def save_config(
             lines.append(f"anchor_keywords = [{quoted_kws}]")
             lines.append("")
 
-    config_path.write_text("\n".join(lines), encoding="utf-8")
+    # Preserve every top-level section save_config does not know how to write
+    # (e.g. [anchor.proportions], [anchor_alarm], [anchor_alarm.override],
+    # [llm.anchor_provider], [sites.*], [medium.browser], [medium.oauth]).
+    # This is the structural fix for the documented save_config data-loss bug —
+    # see feedback_config-save-overwrite-pattern.md.
+    preserved = ""
+    if config_path.exists():
+        try:
+            existing_raw = config_path.read_text(encoding="utf-8")
+            preserved = _preserve_unknown_sections(
+                existing_raw, _SAVE_CONFIG_KNOWN_ROOTS,
+            )
+        except OSError as exc:
+            plan_logger.warn(
+                "config_preserve_read_failed",
+                path=str(config_path),
+                reason=type(exc).__name__,
+            )
+
+    payload = "\n".join(lines)
+    if preserved:
+        # Single blank line separator between known sections and preserved bytes.
+        if not payload.endswith("\n"):
+            payload += "\n"
+        payload += "\n" + preserved
+
+    # Snapshot before overwrite — opportunistic, never blocks the main save.
+    _snapshot_config(config_path)
+
+    # Atomic write: .new + replace. Crash mid-write leaves original intact.
+    _atomic_write_text(config_path, payload)
 
 
 def save_blogger_token(data: dict[str, Any], path: Path | None = None) -> None:
