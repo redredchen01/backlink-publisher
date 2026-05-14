@@ -978,11 +978,17 @@ def main(argv: list[str] | None = None) -> None:
 
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
+    # Silent-Drop Tripwire: track which line each drop happened at, partitioned
+    # by which gate ate it. The reconciliation log line lets the operator see
+    # "I had 20 input rows but only got 5 payloads — 12 validation, 3 generation".
+    validation_drops: list[int] = []
+    generation_drops: list[int] = []
 
     for line_num, row in enumerate(rows, start=1):
         errs = validate_input_payload(row, line_num)
         if errs:
             all_errors.extend(errs)
+            validation_drops.append(line_num)
             continue
         try:
             payload: dict[str, Any] | None = None
@@ -1001,6 +1007,25 @@ def main(argv: list[str] | None = None) -> None:
             outputs.append(payload)
         except Exception as exc:
             all_errors.append(f"line {line_num}: generation error: {exc}")
+            generation_drops.append(line_num)
+
+    # Emit the Silent-Drop Tripwire reconciliation BEFORE the exit guard so
+    # failed runs still surface a delta summary. Operator grep target:
+    # `RECON plan_reconciliation`.
+    plan_logger.recon(
+        "plan_reconciliation",
+        input_rows=len(rows),
+        output_rows=len(outputs),
+        delta=len(rows) - len(outputs),
+        dropped={
+            "validation": len(validation_drops),
+            "generation": len(generation_drops),
+        },
+        dropped_line_numbers={
+            "validation": validation_drops,
+            "generation": generation_drops,
+        },
+    )
 
     if all_errors:
         for err in all_errors:

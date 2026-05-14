@@ -75,7 +75,9 @@ def test_validate_valid_payload():
     input_data = json.dumps(payload)
     stdout, stderr, code = _run_validate(input_data, check_urls=False)
     assert code == 0, f"Expected 0, got {code}. stderr: {stderr}"
-    assert stderr == ""
+    # Stderr contains only the always-on reconciliation line on success.
+    assert "validate_reconciliation" in stderr
+    assert "error" not in stderr.lower()
     output = json.loads(stdout.strip())
     assert output["validation"]["status"] == "passed"
     assert "checked_at" in output["validation"]
@@ -210,13 +212,19 @@ def test_validate_all_url_modes():
         assert code == 0, f"Mode {mode} failed: {stderr}"
 
 
-def test_validate_no_stderr_on_success():
-    """On success, stderr must be empty."""
+def test_validate_no_diagnostic_stderr_on_success():
+    """On success, stderr must contain only the always-on reconciliation line
+    — no error/warning diagnostics."""
     payload = _make_valid_payload()
     input_data = json.dumps(payload)
     stdout, stderr, code = _run_validate(input_data, check_urls=False)
     assert code == 0
-    assert stderr == "", f"Expected empty stderr, got: {stderr!r}"
+    lines = [line for line in stderr.splitlines() if line.strip()]
+    # Exactly one stderr line: the reconciliation event.
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["msg"] == "validate_reconciliation"
+    assert record["level"] == "RECON"
 
 
 if __name__ == "__main__":

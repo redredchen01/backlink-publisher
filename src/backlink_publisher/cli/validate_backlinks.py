@@ -97,6 +97,10 @@ def main(argv: list[str] | None = None) -> None:
 
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
+    # Silent-Drop Tripwire — partition drops by gate so the reconciliation
+    # line tells the operator exactly where each row vanished.
+    platform_drops: list[int] = []
+    validation_drops: list[int] = []
 
     for idx, row in enumerate(rows, start=1):
         # Check for unsupported platforms (linkedin)
@@ -106,13 +110,32 @@ def main(argv: list[str] | None = None) -> None:
                 f"row {idx}: platform 'linkedin' is not supported. "
                 f"Supported: {', '.join(sorted(SUPPORTED_PLATFORMS))}"
             )
+            platform_drops.append(idx)
             continue
 
         errs = validate_output_payload(row)
         if errs:
             all_errors.extend(f"row {idx}: {e}" for e in errs)
+            validation_drops.append(idx)
             continue
         outputs.append(_enhance_payload(row))
+
+    # Emit Silent-Drop Tripwire reconciliation BEFORE the exit guard so failed
+    # runs still surface a delta summary.
+    validate_logger.recon(
+        "validate_reconciliation",
+        input_rows=len(rows),
+        output_rows=len(outputs),
+        delta=len(rows) - len(outputs),
+        dropped={
+            "platform": len(platform_drops),
+            "validation": len(validation_drops),
+        },
+        dropped_row_indices={
+            "platform": platform_drops,
+            "validation": validation_drops,
+        },
+    )
 
     if all_errors:
         for err in all_errors:
