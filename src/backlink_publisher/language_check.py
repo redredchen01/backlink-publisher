@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 
+#: Languages the gate semantically distinguishes. Anything outside this set is
+#: treated as ``"unknown"`` for matching purposes (R3, see plan
+#: ``docs/plans/2026-05-14-001-feat-mandatory-linkcheck-lang-gate-plan.md``).
+SUPPORTED_LANGUAGES = frozenset({"zh-CN", "ru", "en"})
+
+
 # Simple keyword-based language hints (no external dependency)
 # This is a rough heuristic — good enough for validation purposes.
 
@@ -55,17 +61,21 @@ def detect_language(text: str) -> str:
 
 
 def language_matches(detected: str, requested: str) -> bool:
-    """Check if detected language roughly matches the requested language."""
-    if detected == "unknown":
-        return True  # Can't disprove, allow through
-    if requested == "zh-CN" and detected == "zh-CN":
+    """Check if the detected language matches the requested language.
+
+    Contract (R1, see plan 2026-05-14-001):
+    - ``"unknown"`` on either side is the escape valve — returns True (the
+      caller can't disprove a mismatch when one side is undetermined).
+    - Two known, equal languages match.
+    - Two known, different languages do NOT match — return False so the
+      validate-time gate (R2) can fail the row.
+
+    Languages outside :data:`SUPPORTED_LANGUAGES` are coerced to ``"unknown"``
+    semantics: the gate cannot speak for them, so they pass.
+    """
+    if detected == "unknown" or requested == "unknown":
         return True
-    if requested == "en" and detected == "en":
+    if detected not in SUPPORTED_LANGUAGES or requested not in SUPPORTED_LANGUAGES:
+        # Treat out-of-enum values as unknown — same "can't disprove" branch.
         return True
-    if requested == "ru" and detected == "ru":
-        return True
-    # Cross-check: if we detected something clearly different, fail
-    if detected != requested:
-        # Allow some flexibility — short texts may misdetect
-        return True
-    return True
+    return detected == requested
