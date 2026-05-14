@@ -607,3 +607,158 @@ class TestContentFetchGate:
         assert resp.status_code == 200
         body = resp.data.decode()
         assert "无可访问内容" in body or "http_404" in body
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Homepage three-tier URL form (plan 2026-05-14-009 Units 1+2+4)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestHomepageThreeTier:
+    """Homepage / form structured into main_url / category_url / work_url
+    instead of the single target_url + free-form url_new path. Backward
+    compat: target_url still accepted as fallback for main_url."""
+
+    def test_get_homepage_renders_three_tier_inputs(self, client):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # The three structured tier inputs are present with their badges.
+        assert 'name="main_url"' in body
+        assert 'name="category_url"' in body
+        assert 'name="work_url"' in body
+        assert ">主<" in body
+        assert ">类<" in body
+        assert ">漫<" in body
+        # main_url marked required.
+        assert 'name="main_url"' in body and 'required' in body
+        # Legacy url_new textbox still present for free-form extras.
+        assert 'name="url_new"' in body
+
+    def test_post_only_main_url_succeeds_no_config_write(self, client, tmp_path):
+        """Submit only main_url. No persistence (no category/work data)."""
+        resp = client.post(
+            "/ce:plan",
+            data={"main_url": "https://example.com/"},
+        )
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # Index re-rendered with config preview / no error
+        assert "请输入主网域" not in body
+
+    def test_post_three_tiers_persists_threeurl_config(
+        self, client, tmp_path, monkeypatch
+    ):
+        """Full submit: main + category + work → upgrade_target_to_threeurl
+        is called + save_config writes the ThreeUrlConfig block."""
+        # Patch fetch_url_metadata so the preview path doesn't try real HTTP.
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "x", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://example.com/",
+                "category_url": "https://example.com/cat",
+                "work_url": "https://example.com/work/1",
+            },
+        )
+        assert resp.status_code == 200, resp.data[:300]
+
+        # Reload config — ThreeUrlConfig should be written for the domain.
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        key = "https://example.com"
+        assert key in cfg.target_three_url, list(cfg.target_three_url.keys())
+        entry = cfg.target_three_url[key]
+        assert entry.list_url == "https://example.com/cat"
+        assert entry.work_urls == ["https://example.com/work/1"]
+
+    def test_post_missing_main_url_returns_error(self, client):
+        resp = client.post(
+            "/ce:plan",
+            data={"category_url": "https://example.com/cat"},
+        )
+        assert resp.status_code == 200  # re-render index with error
+        assert "请输入主网域" in resp.data.decode()
+
+    def test_post_main_url_gate_failure_renders_error(
+        self, client, monkeypatch
+    ):
+        """Plan 007 gate inherited: main_url gate fail → error rendered."""
+        def _fail(urls, max_workers=5):
+            return {u: (False, "http_404", None) for u in urls}
+
+        monkeypatch.setattr(
+            "webui.content_fetch.verify_urls_batch", _fail,
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={"main_url": "https://stale.example.com/"},
+        )
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "http_404" in body or "无可访问内容" in body
+
+    def test_post_non_https_category_url_returns_error(self, client):
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://example.com/",
+                "category_url": "http://example.com/cat",
+            },
+        )
+        body = resp.data.decode()
+        assert "分类页必须 https" in body or "category" in body.lower()
+
+    def test_post_legacy_target_url_fallback(self, client, monkeypatch):
+        """Backward compat: old target_url name still works as main_url."""
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "x", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={"target_url": "https://legacy.example/"},
+        )
+        assert resp.status_code == 200, resp.data[:300]
+        body = resp.data.decode()
+        assert "请输入主网域" not in body
+
+    def test_post_legacy_anchor_keywords_upgraded_to_threeurl(
+        self, client, monkeypatch, _isolated_config_dir
+    ):
+        """If main_url already has anchor_keywords (legacy schema), the form
+        save triggers automatic upgrade — anchor_keywords are migrated into
+        branded_pool inside the new ThreeUrlConfig."""
+        from backlink_publisher.config import load_config, save_config
+
+        save_config(
+            load_config(), target_anchor_keywords={
+                "https://hasanchor.example": ["BrandA", "BrandB"],
+            },
+        )
+
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "x", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://hasanchor.example/",
+                "category_url": "https://hasanchor.example/cat",
+                "work_url": "https://hasanchor.example/w/1",
+            },
+        )
+        assert resp.status_code == 200, resp.data[:300]
+
+        cfg = load_config()
+        key = "https://hasanchor.example"
+        assert key in cfg.target_three_url
+        entry = cfg.target_three_url[key]
+        # anchor_keywords migrated to branded_pool
+        assert entry.branded_pool == ["BrandA", "BrandB"]
+        assert entry.list_url == "https://hasanchor.example/cat"
+        assert entry.work_urls == ["https://hasanchor.example/w/1"]

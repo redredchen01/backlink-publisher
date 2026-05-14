@@ -36,6 +36,7 @@ from backlink_publisher.url_utils import (
 from backlink_publisher.work_scraper import fetch_work_metadata
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher import content_fetch
+from backlink_publisher.logger import plan_logger
 
 
 def _content_gate_enabled() -> bool:
@@ -237,10 +238,27 @@ HTML = '''
             background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
             color: white;
         }
-        
+
+        .url-badge.cat {
+            background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
+            color: white;
+        }
+
+        .url-badge.work {
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            color: white;
+        }
+
         .url-badge.extra {
             background: #e5e7eb;
             color: var(--secondary);
+        }
+
+        .url-field-help {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 4px;
+            margin-left: 56px;
         }
         
         .config-section {
@@ -806,8 +824,22 @@ HTML = '''
                     <div class="url-input-group">
                         <div class="url-item">
                             <span class="url-badge main">主</span>
-                            <input type="url" class="form-control" name="target_url" placeholder="https://example.com/main-article" value="{{ target_url }}">
+                            <input type="url" class="form-control" name="main_url" placeholder="https://example.com/" value="{{ target_url }}" required>
                         </div>
+                        <div class="url-field-help">主网域 — 要做反向链接的根目标 (必填)</div>
+
+                        <div class="url-item">
+                            <span class="url-badge cat">类</span>
+                            <input type="url" class="form-control" name="category_url" placeholder="https://example.com/category" value="{{ category_url|default('') }}">
+                        </div>
+                        <div class="url-field-help">分类页 — 站内分类/列表页 (可选；填了会自动写入 config)</div>
+
+                        <div class="url-item">
+                            <span class="url-badge work">漫</span>
+                            <input type="url" class="form-control" name="work_url" placeholder="https://example.com/article/1" value="{{ work_url|default('') }}">
+                        </div>
+                        <div class="url-field-help">漫画页 — 站内具体作品/内容页 (可选；填了会触发自动升级到 ThreeUrlConfig)</div>
+
                         {% for extra_url in extra_urls %}
                         <div class="url-item">
                             <span class="url-badge extra">附</span>
@@ -816,7 +848,7 @@ HTML = '''
                         {% endfor %}
                         <div class="url-item">
                             <span class="url-badge extra">+</span>
-                            <input type="url" class="form-control" name="url_new" placeholder="+ 添加更多连结..." style="border: 2px dashed #ccc;">
+                            <input type="url" class="form-control" name="url_new" placeholder="+ 添加更多附加连结..." style="border: 2px dashed #ccc;">
                         </div>
                     </div>
                     <button type="submit" class="btn btn-primary">
@@ -2792,48 +2824,151 @@ def ce_clear():
     session.clear()
     return _render(HTML)
 
+def _normalize_url(raw: str) -> str:
+    """Prepend https:// when scheme is missing. Empty string passes through."""
+    val = (raw or "").strip()
+    if not val:
+        return ""
+    if not val.startswith(("http://", "https://")):
+        val = "https://" + val
+    return val
+
+
+def _persist_three_tier_config(
+    main_url: str, category_url: str, work_url: str,
+) -> None:
+    """Persist the homepage form's three-tier URL data via ThreeUrlConfig.
+
+    Plan 2026-05-14-009 Unit 4: if either ``category_url`` or ``work_url`` is
+    supplied, derive a ThreeUrlConfig for ``main_url`` via
+    ``upgrade_target_to_threeurl`` and merge it into ``config.target_three_url``,
+    then write through ``save_config`` (which uses the PR #12 atomic write +
+    .config-history snapshot).
+
+    ``category_url`` becomes the entry's ``list_url``; ``work_url`` becomes
+    ``work_urls[0]``. The brainstorm Q3 separate write to
+    ``[sites.<main>.url_categories]`` (zh-CN scheduler path) is **not**
+    performed by this helper — that would require extending ``save_config`` to
+    manage the ``[sites.*]`` namespace and is deferred to a follow-up PR.
+    Operators who need the zh-CN scheduler path should set
+    ``[sites.<main>.url_categories]`` via hand-edit or the dedicated /sites
+    flow once available.
+
+    Raises whatever ``save_config`` raises (caller catches + logs).
+    """
+    from backlink_publisher.config import (
+        load_config,
+        save_config,
+        upgrade_target_to_threeurl,
+    )
+
+    cfg = load_config()
+    upgraded = upgrade_target_to_threeurl(
+        cfg,
+        main_url=main_url,
+        category_url=category_url or None,
+        work_url=work_url or None,
+    )
+    domain_key = main_url.rstrip("/")
+    merged = dict(cfg.target_three_url)
+    merged[domain_key] = upgraded
+
+    # target_anchor_keywords=None preserves whatever the operator already had
+    # there. The upgrade helper migrated keywords into branded_pool in-memory,
+    # but the raw anchor_keywords entry on disk is allowed to coexist (per
+    # tests/test_config_three_url.py::TestCoexistenceWithLegacyAnchorKeywords).
+    save_config(cfg, target_anchor_keywords=None, target_three_url=merged)
+
+    plan_logger.recon(
+        "homepage_form_persisted",
+        main=domain_key,
+        wrote_category=bool(category_url),
+        wrote_work=bool(work_url),
+    )
+
+
 @app.route('/ce:plan', methods=['POST'])
 def ce_plan():
-    url_inputs = []
-    for key in request.form.keys():
-        if key.startswith('url_'):
-            val = request.form.get(key, '').strip()
-            if val:
-                if not val.startswith(('http://', 'https://')):
-                    val = 'https://' + val
-                url_inputs.append(val)
-        elif key == 'url_new':
-            val = request.form.get(key, '').strip()
-            if val:
-                if not val.startswith(('http://', 'https://')):
-                    val = 'https://' + val
-                url_inputs.append(val)
-    
-    target_url = request.form.get('target_url', '').strip()
-    if target_url and target_url not in url_inputs:
-        if not target_url.startswith(('http://', 'https://')):
-            target_url = 'https://' + target_url
-        url_inputs = [target_url] + url_inputs
-    
-    if not url_inputs:
-        return _render(HTML, error="请输入至少一个网址")
+    # Plan 2026-05-14-009 Unit 2: read structured 3-tier fields with
+    # backward-compat fallback to legacy `target_url` name. The url_*
+    # textboxes in the "extras" area carry over verbatim.
+    main_url = _normalize_url(
+        request.form.get('main_url') or request.form.get('target_url') or ''
+    )
+    category_url = _normalize_url(request.form.get('category_url') or '')
+    work_url = _normalize_url(request.form.get('work_url') or '')
 
-    # Content-fetch gate (plan 2026-05-14-007 Unit 4): every operator-pasted
-    # URL must return HTTP 200 with a non-empty <title> before the planner
-    # ingests it. Skipped when BACKLINK_NO_FETCH_VERIFY=1 is set.
-    _survivors, gate_err = _verify_urls_or_error(url_inputs, "URL")
+    # Legacy free-form extras (`url_1`, `url_2`, ..., `url_new`).
+    extra_urls: list[str] = []
+    for key in request.form.keys():
+        if key in ('main_url', 'target_url', 'category_url', 'work_url'):
+            continue
+        if key.startswith('url_') or key == 'url_new':
+            val = _normalize_url(request.form.get(key, ''))
+            if val:
+                extra_urls.append(val)
+
+    if not main_url:
+        return _render(
+            HTML, error="请输入主网域",
+            category_url=category_url, work_url=work_url,
+        )
+
+    # Structural validation per F2.
+    field_errors: list[str] = []
+    if not main_url.startswith("https://"):
+        field_errors.append("主网域必须 https")
+    if category_url and not category_url.startswith("https://"):
+        field_errors.append("分类页必须 https")
+    if work_url and not work_url.startswith("https://"):
+        field_errors.append("漫画页必须 https")
+    if field_errors:
+        return _render(
+            HTML, error="; ".join(field_errors),
+            target_url=main_url, category_url=category_url, work_url=work_url,
+        )
+
+    # Content-fetch gate. Each tier URL plus any extras must pass HTTP 200 +
+    # non-empty <title>. _verify_urls_or_error returns the survivor list
+    # plus an aggregate error string; skipped when BACKLINK_NO_FETCH_VERIFY=1.
+    tier_urls = [u for u in (main_url, category_url, work_url) if u]
+    gate_urls = tier_urls + extra_urls
+    _survivors, gate_err = _verify_urls_or_error(gate_urls, "URL")
     if gate_err:
-        return _render(HTML, error=gate_err)
+        return _render(
+            HTML, error=gate_err,
+            target_url=main_url, category_url=category_url, work_url=work_url,
+        )
+
+    # Persistence (Unit 4). Writes [sites.<main>.url_categories] (merge in
+    # place per Q3) and triggers upgrade_target_to_threeurl when work_url is
+    # supplied (per Q2). Skipped when no category or work data to persist.
+    if category_url or work_url:
+        try:
+            _persist_three_tier_config(main_url, category_url, work_url)
+        except Exception as exc:  # noqa: BLE001
+            plan_logger.warn(
+                "homepage_form_persist_failed",
+                main=main_url,
+                reason=type(exc).__name__,
+                detail=str(exc)[:120],
+            )
+
+    # Session url_inputs is the 1-article seed (main_url). category / work
+    # live in config and get picked up by plan-backlinks at dispatch time.
+    url_inputs = [main_url] + extra_urls
+
+    # Fetch metadata for 3 tiers concurrently so the preview shows all of
+    # them. Replaces the sequential `for url in url_inputs[:5]` loop.
+    from concurrent.futures import ThreadPoolExecutor
+    preview_urls = [u for u in (main_url, category_url, work_url) if u][:5]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        meta_results = list(pool.map(fetch_url_metadata, preview_urls))
+    meta_info = [m for m in meta_results if m.get('status') == 'success']
 
     urls_json = json.dumps(url_inputs)
-    
-    meta_info = []
-    for url in url_inputs[:5]:
-        meta = fetch_url_metadata(url)
-        if meta['status'] == 'success':
-            meta_info.append(meta)
-    
-    target_url = url_inputs[0]
+
+    target_url = main_url
     target_language = request.form.get('target_language', detect_language(target_url))
     
     config = {
