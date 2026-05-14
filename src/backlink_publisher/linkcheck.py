@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import urlparse
@@ -68,10 +69,21 @@ def _check_url_with_retry(url: str) -> tuple[str, bool, str | None]:
             opencli_logger.debug(
                 f"Retry {attempt + 1}/{MAX_RETRIES} for {url}: {last_error}"
             )
-            import time
             time.sleep(RETRY_DELAY * (attempt + 1))
 
     return url, False, last_error
+
+
+def check_url(url: str) -> tuple[bool, str | None]:
+    """Check a single URL with retry; return ``(reachable, error_message)``.
+
+    Additive public wrapper around :func:`_check_url_with_retry`. Unlike
+    :func:`check_urls_strict`, this never raises — callers (e.g. the publish-
+    time per-row reachability gate in plan 2026-05-14-001 Unit 5) get a
+    tuple and decide their own continue/abort policy.
+    """
+    _, reachable, error = _check_url_with_retry(url)
+    return reachable, error
 
 
 def check_urls(urls: list[str]) -> dict[str, tuple[bool, str | None]]:
