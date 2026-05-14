@@ -31,8 +31,9 @@ from __future__ import annotations
 
 import socket
 import ssl
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -70,7 +71,28 @@ CheckResult = tuple[bool, Optional[str], Optional[str]]
 #: stable strings documented in the module docstring otherwise. ``title`` is
 #: the extracted text on success (stripped, non-empty) or ``None`` on failure.
 
-_CACHE: dict[str, CheckResult] = {}
+#: Cache entry: (result, monotonic timestamp at write). The timestamp lets
+#: callers opt into TTL-based expiry without changing the result tuple shape
+#: existing callers rely on.
+_CacheEntry = tuple[CheckResult, float]
+_CACHE: dict[str, _CacheEntry] = {}
+
+#: Process-wide default TTL for cache entries (seconds). ``None`` means "never
+#: expire" (CLI default — process is short-lived). Webui startup sets this to
+#: ``BACKLINK_GATE_CACHE_TTL_SECONDS`` (default 900) so a long-running daemon
+#: re-fetches stale results.
+_DEFAULT_MAX_AGE_S: Optional[float] = None
+
+#: Process-wide statistics counters. Updated on every
+#: :func:`verify_url_has_content` call. ``stats_snapshot()`` returns a
+#: shallow copy; ``reset_stats()`` clears for tests / per-invocation resets.
+_STATS: dict[str, Any] = {
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "fetches": 0,
+    "total_latency_ms": 0,
+    "reason_counts": {},
+}
 
 
 def reset_cache() -> None:
@@ -78,6 +100,55 @@ def reset_cache() -> None:
     code should not need it (process restart clears the cache naturally).
     """
     _CACHE.clear()
+
+
+def set_default_max_age(seconds: Optional[float]) -> None:
+    """Set the process-wide TTL for cache entries.
+
+    Passing ``None`` disables expiry (CLI default). Webui startup wires this
+    to ``BACKLINK_GATE_CACHE_TTL_SECONDS`` (default 900s = 15 min) so a daemon
+    that has been running for hours doesn't serve stale gate results.
+    Idempotent — multiple calls just replace the value.
+    """
+    global _DEFAULT_MAX_AGE_S
+    _DEFAULT_MAX_AGE_S = seconds
+
+
+def reset_stats() -> None:
+    """Reset the per-process stats counters.
+
+    Called by plan-backlinks ``main()`` so each invocation reports its own
+    cache hit rate / fetch count. Also by the autouse test fixture so
+    cross-test bleed doesn't corrupt assertions.
+    """
+    _STATS["cache_hits"] = 0
+    _STATS["cache_misses"] = 0
+    _STATS["fetches"] = 0
+    _STATS["total_latency_ms"] = 0
+    _STATS["reason_counts"] = {}
+
+
+def stats_snapshot() -> dict[str, Any]:
+    """Return a snapshot of the stats counters.
+
+    Shallow copy of the top-level dict, with ``reason_counts`` deep-copied
+    so callers can mutate without affecting the live counters. Use
+    :func:`reset_stats` to clear.
+    """
+    return {
+        "cache_hits": _STATS["cache_hits"],
+        "cache_misses": _STATS["cache_misses"],
+        "fetches": _STATS["fetches"],
+        "total_latency_ms": _STATS["total_latency_ms"],
+        "reason_counts": dict(_STATS["reason_counts"]),
+    }
+
+
+def _record_reason(reason: Optional[str], ok: bool) -> None:
+    """Increment the per-reason counter. ``ok=True`` records 'ok'."""
+    key = "ok" if ok else (reason or "unknown")
+    counts = _STATS["reason_counts"]
+    counts[key] = counts.get(key, 0) + 1
 
 
 def _is_transient(reason: str) -> bool:
@@ -180,12 +251,24 @@ def _is_valid_http_url(url: str) -> bool:
     return True
 
 
-def verify_url_has_content(url: str) -> CheckResult:
+def verify_url_has_content(
+    url: str,
+    max_age_seconds: Optional[float] = None,
+) -> CheckResult:
     """Verify ``url`` returns HTTP 200 and a parseable non-empty title.
 
     Cached: subsequent calls with the same URL return the cached result
-    (positive or negative) without re-fetching. Use :func:`reset_cache` to
-    invalidate during tests.
+    (positive or negative) without re-fetching, *subject to TTL*. Use
+    :func:`reset_cache` to invalidate during tests.
+
+    ``max_age_seconds`` (call-site override) > :data:`_DEFAULT_MAX_AGE_S`
+    (process-wide, set by :func:`set_default_max_age`) > ``None`` (never
+    expire). When a cached entry is older than the effective TTL, the entry
+    is treated as a miss and re-fetched. ``max_age_seconds=0`` forces a
+    fresh fetch every call.
+
+    Stats: every call updates :data:`_STATS` (cache hits / misses /
+    fetches / latency / reason_counts). Inspect via :func:`stats_snapshot`.
 
     Returns
     -------
@@ -196,15 +279,25 @@ def verify_url_has_content(url: str) -> CheckResult:
         on ``ok=False`` and is ``None`` on success. ``title`` is the
         extracted string on success and ``None`` otherwise.
     """
+    effective_ttl = max_age_seconds if max_age_seconds is not None else _DEFAULT_MAX_AGE_S
+
     cached = _CACHE.get(url)
     if cached is not None:
-        return cached
+        result, written_at = cached
+        if effective_ttl is None or (time.monotonic() - written_at) < effective_ttl:
+            _STATS["cache_hits"] += 1
+            return result
+        # Expired — fall through to refetch and overwrite the entry.
+
+    _STATS["cache_misses"] += 1
 
     if not _is_valid_http_url(url):
-        result: CheckResult = (False, "invalid_url", None)
-        _CACHE[url] = result
+        result = (False, "invalid_url", None)
+        _CACHE[url] = (result, time.monotonic())
+        _record_reason("invalid_url", ok=False)
         return result
 
+    started = time.monotonic()
     last_result: CheckResult = (False, "network_error", None)
     for attempt in range(MAX_RETRIES + 1):
         ok, reason, title = _check_once(url)
@@ -218,8 +311,12 @@ def verify_url_has_content(url: str) -> CheckResult:
             opencli_logger.debug(
                 f"content_fetch retry {attempt + 1}/{MAX_RETRIES} for {url}: {reason}"
             )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
 
-    _CACHE[url] = last_result
+    _STATS["fetches"] += 1
+    _STATS["total_latency_ms"] += elapsed_ms
+    _record_reason(last_result[1], ok=last_result[0])
+    _CACHE[url] = (last_result, time.monotonic())
     return last_result
 
 
@@ -254,7 +351,19 @@ def verify_urls_batch(
         return {}
 
     distinct = list(dict.fromkeys(urls))
-    misses = [u for u in distinct if u not in _CACHE]
+    # Treat URLs whose cached entry has expired (per process default TTL) as
+    # misses so the prefetch path re-fetches them too. Bare `not in` ignored
+    # TTL and surfaced stale results.
+    now = time.monotonic()
+    def _fresh(entry: _CacheEntry) -> bool:
+        if _DEFAULT_MAX_AGE_S is None:
+            return True
+        return (now - entry[1]) < _DEFAULT_MAX_AGE_S
+
+    misses = [
+        u for u in distinct
+        if u not in _CACHE or not _fresh(_CACHE[u])
+    ]
     if misses:
         workers = min(max_workers, max(1, len(misses)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -267,6 +376,8 @@ def verify_urls_batch(
                     fut.result()
                 except Exception:  # noqa: BLE001
                     url = futures[fut]
-                    _CACHE.setdefault(url, (False, "network_error", None))
+                    _CACHE.setdefault(
+                        url, ((False, "network_error", None), time.monotonic())
+                    )
 
-    return {u: _CACHE[u] for u in distinct}
+    return {u: _CACHE[u][0] for u in distinct}
