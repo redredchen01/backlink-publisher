@@ -20,6 +20,7 @@ from typing import Any
 
 from .errors import DependencyError, InputValidationError
 from .logger import plan_logger
+from .url_utils import validate_https_url, validate_main_domain_url
 
 _log = logging.getLogger(__name__)
 _UNSAFE_IN_ANCHOR = re.compile(r'[\]\[()><"\'\n\r]')
@@ -36,6 +37,18 @@ _SAFE_SEO_PROPORTIONS: dict[str, float] = {
 }
 _LLM_API_KEY_ENV_VAR = "BACKLINK_LLM_API_KEY"
 _PROPORTIONS_SUM_TOLERANCE = 1e-3
+
+# Work-themed backlinks (Plan 2026-05-13-004 Unit 3).
+# Templates for synthesising work_anchor text from scraped <title>. `{title}`
+# is substituted at render time; templates without a `{title}` placeholder are
+# rejected by the parser. Override per-target via
+# ``[targets."<domain>"].work_anchor_templates``.
+DEFAULT_WORK_TEMPLATES: tuple[str, ...] = (
+    "{title}",
+    "{title} 详情",
+    "{title} 推荐",
+    "{title} 介绍",
+)
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -69,6 +82,34 @@ class BloggerOAuthConfig:
 class MediumOAuthConfig:
     client_id: str
     client_secret: str
+
+
+@dataclass
+class ThreeUrlConfig:
+    """Three-URL target config for the work-themed backlinks path.
+
+    Required: ``main_url`` (https + host-root + trailing slash), ``list_url``,
+    and three non-empty anchor pools (``branded_pool`` / ``partial_pool`` /
+    ``exact_pool``).
+
+    Optional: ``work_urls`` (when empty, Unit 2's ``work_scraper`` discovers
+    them via sitemap / HTML fallback), ``work_anchor_templates`` (defaults to
+    :data:`DEFAULT_WORK_TEMPLATES`), ``list_path_blocklist`` (overrides the
+    scraper's default nav-path filter; ``None`` keeps the default),
+    ``insecure_tls`` (opt-in TLS bypass for a target with broken certs).
+    """
+
+    main_url: str
+    list_url: str
+    branded_pool: list[str]
+    partial_pool: list[str]
+    exact_pool: list[str]
+    work_urls: list[str] = field(default_factory=list)
+    work_anchor_templates: list[str] = field(
+        default_factory=lambda: list(DEFAULT_WORK_TEMPLATES)
+    )
+    list_path_blocklist: list[str] | None = None
+    insecure_tls: bool = False
 
 
 @dataclass
@@ -184,6 +225,13 @@ class Config:
     ``base_url`` is required to use ``https://`` — ``http://`` raises
     ``InputValidationError`` at load time. Not round-tripped by ``save_config``."""
 
+    target_three_url: dict[str, ThreeUrlConfig] = field(default_factory=dict)
+    """Three-URL target config for the work-themed backlinks path (Plan
+    2026-05-13-004 Unit 3). Keyed by main_domain with trailing slash stripped.
+    Populated from ``[targets."<main_domain>"]`` entries that carry the
+    required three-URL schema (``main_url`` + ``list_url`` + three non-empty
+    pools). Round-tripped by ``save_config(target_three_url=...)``."""
+
     anchor_alarm: AnchorAlarmConfig = field(default_factory=AnchorAlarmConfig)
     """Operator-tunable thresholds for ``report-anchors`` distribution alarm.
 
@@ -251,11 +299,24 @@ def load_config(path: Path | None = None) -> Config:
     # blogger_section now contains only main_domain → blog_id mappings
     blog_ids = {k: str(v) for k, v in blogger_section.items() if isinstance(v, (str, int))}
 
-    target_anchor_keywords = _parse_target_anchor_keywords(data.get("targets", {}))
+    targets_section = data.get("targets", {})
+    target_anchor_keywords = _parse_target_anchor_keywords(targets_section)
+    target_three_url = _parse_target_three_url(targets_section)
 
     sites_section = data.get("sites", {})
     site_url_categories = _parse_site_url_categories(sites_section)
     target_anchor_pools_v2 = _parse_target_anchor_pools_v2(sites_section)
+
+    # Maintenance-mode INFO: same domain has both legacy [sites."x"] and the
+    # new three-URL [targets."x"] schema. Inform (not alarm) — both paths
+    # continue to work; the dispatcher will prefer the work-themed flow.
+    for domain_key in target_three_url:
+        if domain_key in site_url_categories or domain_key in target_anchor_pools_v2:
+            _log.info(
+                "[sites.%r] is in maintenance mode; consider migrating to "
+                "[targets.%r] three-URL form",
+                domain_key, domain_key,
+            )
 
     anchor_proportions = _parse_anchor_proportions(data.get("anchor", {}))
 
@@ -277,6 +338,7 @@ def load_config(path: Path | None = None) -> Config:
         target_anchor_pools_v2=target_anchor_pools_v2,
         anchor_proportions=anchor_proportions,
         llm_anchor_provider=llm_anchor_provider,
+        target_three_url=target_three_url,
         anchor_alarm=anchor_alarm,
     )
 
@@ -314,6 +376,150 @@ def _parse_target_anchor_keywords(targets_section: Any) -> dict[str, list[str]]:
         key = raw_domain.rstrip("/")
         result[key] = cleaned
     return result
+
+
+def _parse_target_three_url(targets_section: Any) -> dict[str, ThreeUrlConfig]:
+    """Parse ``[targets."<main_domain>"]`` entries that carry the three-URL
+    work-themed schema. Plan 2026-05-13-004 Unit 3.
+
+    Tolerant of malformed entries — each error is logged at WARN level and the
+    offending entry is skipped rather than aborting the load. Entries that
+    only carry ``anchor_keywords`` (legacy schema) are silently ignored here;
+    they belong to ``_parse_target_anchor_keywords``.
+
+    Returns a dict keyed by ``main_url`` with trailing slash stripped (the
+    canonical key used by ``get_three_url_config``).
+    """
+    if not isinstance(targets_section, dict):
+        return {}
+    result: dict[str, ThreeUrlConfig] = {}
+    for raw_domain, entry in targets_section.items():
+        if not isinstance(entry, dict):
+            continue  # already logged by _parse_target_anchor_keywords
+        # Detection: any of main_url/list_url/*_pool present → caller intends
+        # the three-URL schema. anchor_keywords-only entries are silently ignored.
+        if not any(k in entry for k in (
+            "main_url", "list_url", "branded_pool", "partial_pool", "exact_pool",
+        )):
+            continue
+
+        main_url = validate_main_domain_url(entry.get("main_url"))
+        if not main_url:
+            _log.warning(
+                "[targets.%r].main_url must be https://<host>/ (host-root + "
+                "trailing slash), skipping",
+                raw_domain,
+            )
+            continue
+
+        list_url = validate_https_url(entry.get("list_url"))
+        if not list_url:
+            _log.warning(
+                "[targets.%r].list_url missing or not https://, skipping",
+                raw_domain,
+            )
+            continue
+
+        branded_pool = _clean_pool(entry.get("branded_pool"))
+        partial_pool = _clean_pool(entry.get("partial_pool"))
+        exact_pool = _clean_pool(entry.get("exact_pool"))
+        if not branded_pool:
+            _log.warning(
+                "[targets.%r].branded_pool is empty or invalid; target is "
+                "unusable without a branded pool, skipping",
+                raw_domain,
+            )
+            continue
+        if not partial_pool:
+            _log.warning(
+                "[targets.%r].partial_pool is empty or invalid, skipping",
+                raw_domain,
+            )
+            continue
+        if not exact_pool:
+            _log.warning(
+                "[targets.%r].exact_pool is empty or invalid, skipping",
+                raw_domain,
+            )
+            continue
+
+        # work_urls: drop non-https entries silently (already warned by url_utils
+        # consumers — log a single line per target if any get dropped).
+        raw_work_urls = entry.get("work_urls", []) or []
+        if not isinstance(raw_work_urls, list):
+            raw_work_urls = []
+        work_urls: list[str] = []
+        dropped_work = 0
+        for u in raw_work_urls:
+            if not isinstance(u, str):
+                dropped_work += 1
+                continue
+            normalized = validate_https_url(u)
+            if not normalized:
+                dropped_work += 1
+                continue
+            work_urls.append(normalized)
+        if dropped_work:
+            _log.warning(
+                "[targets.%r].work_urls: dropped %d non-https or invalid URL(s)",
+                raw_domain, dropped_work,
+            )
+
+        templates_raw = entry.get("work_anchor_templates")
+        if templates_raw is None:
+            templates = list(DEFAULT_WORK_TEMPLATES)
+        elif isinstance(templates_raw, list) and all(
+            isinstance(t, str) for t in templates_raw
+        ):
+            templates = [t.strip() for t in templates_raw if t.strip()]
+            if not templates:
+                templates = list(DEFAULT_WORK_TEMPLATES)
+        else:
+            _log.warning(
+                "[targets.%r].work_anchor_templates must be a list of strings, "
+                "using defaults",
+                raw_domain,
+            )
+            templates = list(DEFAULT_WORK_TEMPLATES)
+
+        blocklist_raw = entry.get("list_path_blocklist")
+        if blocklist_raw is None:
+            blocklist: list[str] | None = None
+        elif isinstance(blocklist_raw, list) and all(
+            isinstance(p, str) for p in blocklist_raw
+        ):
+            blocklist = [p for p in blocklist_raw if p]
+        else:
+            _log.warning(
+                "[targets.%r].list_path_blocklist must be a list of strings, "
+                "ignoring (default blocklist applies)",
+                raw_domain,
+            )
+            blocklist = None
+
+        insecure_tls = bool(entry.get("insecure_tls", False))
+
+        key = main_url.rstrip("/")
+        result[key] = ThreeUrlConfig(
+            main_url=main_url,
+            list_url=list_url,
+            branded_pool=branded_pool,
+            partial_pool=partial_pool,
+            exact_pool=exact_pool,
+            work_urls=work_urls,
+            work_anchor_templates=templates,
+            list_path_blocklist=blocklist,
+            insecure_tls=insecure_tls,
+        )
+    return result
+
+
+def _clean_pool(value: Any) -> list[str]:
+    """Strip unsafe chars + drop empties from a list-of-string pool entry."""
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return []
+    cleaned = [_UNSAFE_IN_ANCHOR.sub("", v).strip() for v in value]
+    return [v for v in cleaned if v]
 
 
 def _parse_site_url_categories(sites_section: Any) -> dict[str, dict[str, str]]:
@@ -713,6 +919,26 @@ def get_anchor_keywords(config: Config, main_domain: str) -> list[str]:
     return []
 
 
+def get_three_url_config(
+    config: Config, main_domain: str
+) -> ThreeUrlConfig | None:
+    """Return the work-themed ``ThreeUrlConfig`` for ``main_domain`` if any.
+
+    Tolerates trailing-slash variants in the lookup key — matches
+    ``get_anchor_keywords``'s scheme-tolerance contract.
+    """
+    bare = _normalize_domain_key(main_domain)
+    for candidate in (
+        main_domain.rstrip("/"),
+        "https://" + bare,
+        "http://" + bare,
+        bare,
+    ):
+        if candidate in config.target_three_url:
+            return config.target_three_url[candidate]
+    return None
+
+
 def resolve_blog_id(config: Config, main_domain: str) -> str:
     """Return Blogger blog_id for main_domain. Raises DependencyError if not mapped."""
     # Normalise: strip trailing slash for lookup
@@ -890,29 +1116,41 @@ def save_config(
     blogger_client_id: str | None = None,
     blogger_client_secret: str | None = None,
     target_anchor_keywords: dict[str, list[str]] | None = None,
+    target_three_url: dict[str, ThreeUrlConfig] | None = None,
 ) -> None:
     """Write (or update) config.toml with the supplied values.
 
     Merges new values with any existing config so that calling this
     function never silently drops keys that were already there.
 
-    ``target_anchor_keywords`` follows the same three-state semantics as
-    ``extra_blogger_ids``:
+    All round-trippable kwargs follow the same three-state semantics:
     - ``None`` (default) — preserve whatever is already on disk
-    - ``{}`` — explicitly clear the ``[targets]`` section
-    - non-empty dict — write exactly the provided pools (overrides disk)
+    - ``{}`` — explicitly clear the corresponding section
+    - non-empty dict — write exactly the provided contents (overrides disk)
+
+    Sections this function manages (and therefore rewrites):
+    ``[blogger]``, ``[blogger.oauth]``, ``[medium]``, ``[targets."<domain>"]``.
+
+    All other sections present in the existing file (``[sites.*]``,
+    ``[anchor.*]``, ``[llm.*]``, ``[medium.oauth]``, ``[medium.browser]``,
+    user-added tables, comments interleaved between unmanaged tables) are
+    preserved verbatim. This closes the P0 data-loss footgun documented in
+    feedback_config-save-overwrite-pattern.md (Plan 2026-05-13-004 Unit 3).
+
+    The write is atomic: contents go to ``<path>.tmp`` first, ``fsync``'d, then
+    ``os.replace``'d onto the target path. A mid-write crash leaves the
+    original file intact.
     """
     config_path = path or (_config_dir() / "config.toml")
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Load existing config first so we don't clobber it
+    # Load parsed config (for merge logic on managed fields).
     existing = load_config(config_path)
 
     # Build blog_ids: start from config.blogger_blog_ids (may already be pre-set by caller),
     # then overlay extra_blogger_ids on top. If extra_blogger_ids is None, merge from existing.
     blog_ids: dict[str, str] = dict(config.blogger_blog_ids)
     if extra_blogger_ids is None:
-        # No override supplied — merge from disk
         for k, v in existing.blogger_blog_ids.items():
             if k not in blog_ids:
                 blog_ids[k] = v
@@ -932,43 +1170,70 @@ def save_config(
         existing.medium_integration_token or ""
     )
 
+    # Resolve three-state for target_anchor_keywords and target_three_url.
+    if target_anchor_keywords is None:
+        kws_by_domain = dict(existing.target_anchor_keywords)
+    else:
+        kws_by_domain = dict(target_anchor_keywords)
+
+    if target_three_url is None:
+        three_url_by_domain = dict(existing.target_three_url)
+    else:
+        three_url_by_domain = dict(target_three_url)
+
     lines: list[str] = []
 
-    # [blogger] section — domain → blog_id pairs first
+    # [blogger] — domain → blog_id pairs first
     lines.append("[blogger]")
     for domain, blog_id in blog_ids.items():
-        lines.append(f'"{domain}" = "{blog_id}"')
+        lines.append(f"{_toml_str(domain)} = {_toml_str(blog_id)}")
     lines.append("")
 
     # [blogger.oauth]
     if client_id or client_secret:
         lines.append("[blogger.oauth]")
-        lines.append(f'client_id     = "{client_id}"')
-        lines.append(f'client_secret = "{client_secret}"')
+        lines.append(f"client_id     = {_toml_str(client_id)}")
+        lines.append(f"client_secret = {_toml_str(client_secret)}")
         lines.append("")
 
     # [medium]
     lines.append("[medium]")
     if token:
-        lines.append(f'integration_token = "{token}"')
+        lines.append(f"integration_token = {_toml_str(token)}")
     else:
-        lines.append("# integration_token = \"your-medium-integration-token\"")
+        lines.append('# integration_token = "your-medium-integration-token"')
     lines.append("")
 
-    # [targets] — three-state merge matching extra_blogger_ids semantics:
-    #   None → preserve existing disk contents
-    #   {}   → explicitly clear (write no [targets] section)
-    #   {...} → write exactly the provided pools
-    if target_anchor_keywords is None:
-        targets = dict(existing.target_anchor_keywords)
-    else:
-        targets = dict(target_anchor_keywords)
-    if targets:
-        for domain, keywords in targets.items():
-            quoted_kws = ", ".join(f'"{k}"' for k in keywords)
-            lines.append(f'[targets."{domain}"]')
-            lines.append(f"anchor_keywords = [{quoted_kws}]")
-            lines.append("")
+    # [targets."<domain>"] — merge anchor_keywords + three_url into one block
+    # per domain so they share a single header (TOML disallows duplicate
+    # table headers).
+    all_target_domains = sorted(
+        set(kws_by_domain) | set(three_url_by_domain)
+    )
+    for domain in all_target_domains:
+        lines.append(f"[targets.{_toml_str(domain)}]")
+        if domain in kws_by_domain:
+            kws = kws_by_domain[domain]
+            lines.append(f"anchor_keywords = {_toml_list(kws)}")
+        if domain in three_url_by_domain:
+            tu = three_url_by_domain[domain]
+            lines.append(f"main_url = {_toml_str(tu.main_url)}")
+            lines.append(f"list_url = {_toml_str(tu.list_url)}")
+            lines.append(f"work_urls = {_toml_list(tu.work_urls)}")
+            lines.append(f"branded_pool = {_toml_list(tu.branded_pool)}")
+            lines.append(f"partial_pool = {_toml_list(tu.partial_pool)}")
+            lines.append(f"exact_pool = {_toml_list(tu.exact_pool)}")
+            if tu.work_anchor_templates != list(DEFAULT_WORK_TEMPLATES):
+                lines.append(
+                    f"work_anchor_templates = {_toml_list(tu.work_anchor_templates)}"
+                )
+            if tu.list_path_blocklist is not None:
+                lines.append(
+                    f"list_path_blocklist = {_toml_list(tu.list_path_blocklist)}"
+                )
+            if tu.insecure_tls:
+                lines.append("insecure_tls = true")
+        lines.append("")
 
     # Preserve every top-level section save_config does not know how to write
     # (e.g. [anchor.proportions], [anchor_alarm], [anchor_alarm.override],
@@ -1001,6 +1266,22 @@ def save_config(
 
     # Atomic write: .new + replace. Crash mid-write leaves original intact.
     _atomic_write_text(config_path, payload)
+
+
+# ── TOML emission helpers used by save_config's [targets.<domain>] writer ──
+
+
+def _toml_str(value: str) -> str:
+    """Quote ``value`` as a TOML basic string. Escapes ``\\`` and ``"``."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _toml_list(values: list[str]) -> str:
+    """Emit a TOML list-of-strings. Empty list → ``[]``."""
+    if not values:
+        return "[]"
+    return "[" + ", ".join(_toml_str(v) for v in values) + "]"
 
 
 def save_blogger_token(data: dict[str, Any], path: Path | None = None) -> None:

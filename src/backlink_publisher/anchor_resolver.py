@@ -156,3 +156,53 @@ def _passes_filters(text: str) -> bool:
     if cjk_count / length < _MIN_CJK_RATIO:
         return False
     return True
+
+
+# ─── Work-themed anchor filter (Plan 2026-05-13-004 Unit 4) ─────────────────
+#
+# Stricter character blacklist than ``_UNSAFE_ANCHOR_CHARS`` (adds C1 controls,
+# fullwidth ASCII variants, BOM/ZWNBSP) but RELAXES the length cap to 30 chars
+# and DROPS the CJK-ratio requirement. Work titles may legitimately be ASCII
+# (English anime titles, romanised game names) and the template+title combo
+# routinely exceeds 8 chars.
+#
+# Blocks fullwidth `< > & " '` (U+FF1C/U+FF1E/U+FF06/U+FF02/U+FF07) which the
+# legacy regex misses — those would survive HTML-escape if a sanitizer only
+# normalises ASCII variants and would let an attacker inject visible content
+# that looks like markup once a downstream renderer normalises Unicode.
+
+_WORK_UNSAFE_ANCHOR_CHARS = re.compile(
+    "["
+    "\x00-\x1f\x7f-\x9f"            # C0 + C1 control chars
+    "​-‏"                 # zero-width joiners + direction marks
+    "‪-‮"                 # legacy bidi overrides (RLO/LRO)
+    "⁦-⁩"                 # isolate-direction overrides
+    "﻿"                        # BOM / ZWNBSP
+    "＜＞＆＂＇"  # fullwidth < > & " '
+    "<>\"'`\\[\\]()\\\\"            # ASCII structural punctuation
+    "\n\r"                          # raw newlines
+    "]"
+)
+
+_WORK_MIN_ANCHOR_LEN: int = 2
+_WORK_MAX_ANCHOR_LEN: int = 30
+
+
+def _passes_work_anchor_filter(text: str) -> bool:
+    """Return True iff ``text`` is publishable as a work-themed anchor.
+
+    Differences from :func:`_passes_filters`:
+    - length 2–30 (not 2–8) — accommodates `{title} 推荐`-style templates
+    - no CJK ratio (work titles may be pure ASCII)
+    - blocks the fullwidth ASCII punctuation variants too
+    """
+    if not isinstance(text, str):
+        return False
+    length = len(text)
+    if length < _WORK_MIN_ANCHOR_LEN or length > _WORK_MAX_ANCHOR_LEN:
+        return False
+    if text in FORBIDDEN_ANCHOR_TEXTS:
+        return False
+    if _WORK_UNSAFE_ANCHOR_CHARS.search(text):
+        return False
+    return True

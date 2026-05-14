@@ -373,7 +373,12 @@ weird = "not-a-url"
     assert any("weird" in r.message for r in caplog.records)
 
 
-# ── deferred behavior: save_config must not write new fields ────────────────
+# ── save_config preserves read-only sections verbatim ──────────────────────
+# Pre-Unit-3 this test asserted the inverse — that save_config silently dropped
+# [sites.*] etc. That was the P0 data-loss bug fixed in Plan 2026-05-13-004
+# Unit 3. save_config now preserves unmanaged sections verbatim from disk
+# (it still doesn't re-emit derived state from parsed Config objects, which is
+# what the original "read-only" contract was protecting).
 
 
 def test_save_config_preserves_v2_fields_verbatim(tmp_path, monkeypatch):

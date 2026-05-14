@@ -6,6 +6,7 @@ import subprocess
 import json
 import os
 import re
+import secrets
 import sys
 import requests
 import uuid
@@ -20,7 +21,19 @@ from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecut
 
 # Import config utilities
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-from backlink_publisher.config import load_config, save_config, load_blogger_token
+from backlink_publisher.config import (
+    DEFAULT_WORK_TEMPLATES,
+    ThreeUrlConfig,
+    load_config,
+    save_config,
+    load_blogger_token,
+)
+from backlink_publisher.errors import InputValidationError
+from backlink_publisher.url_utils import (
+    validate_https_url,
+    validate_main_domain_url,
+)
+from backlink_publisher.work_scraper import fetch_work_metadata
 from backlink_publisher import checkpoint as _checkpoint_mod
 
 app = Flask(__name__)
@@ -3213,7 +3226,9 @@ def settings_save_target_keywords():
             new_pools[domain] = deduped
 
         cfg = load_config()
-        save_config(cfg, target_anchor_keywords=new_pools)
+        # target_three_url=None preserves any existing work-themed config on disk
+        # (audit per Plan 2026-05-13-004 Unit 3 — defends against silent field drop).
+        save_config(cfg, target_anchor_keywords=new_pools, target_three_url=None)
 
         msg = '关键词池已保存'
         if dup_warnings:
@@ -3648,7 +3663,8 @@ def settings_save_blog_ids():
         cfg = load_config()
         # Override blog_ids completely (not merge) by setting them before calling save
         cfg.blogger_blog_ids = mapping
-        save_config(cfg, extra_blogger_ids={})  # extra_blogger_ids={} means no extra additions
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(cfg, extra_blogger_ids={}, target_three_url=None)  # extra_blogger_ids={} means no extra additions
         return redirect('/settings?flash_type=success&flash_msg=Blog ID 映射已保存')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
@@ -3658,7 +3674,8 @@ def settings_save_blog_ids():
 def settings_save_medium_token():
     token = request.form.get('medium_token', '').strip()
     try:
-        save_config(load_config(), medium_token=token)
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(load_config(), medium_token=token, target_three_url=None)
         msg = 'Medium Token 已保存' if token else 'Medium Token 已清除'
         return redirect(f'/settings?flash_type=success&flash_msg={msg}')
     except Exception as e:
@@ -3668,7 +3685,8 @@ def settings_save_medium_token():
 @app.route('/settings/clear-medium-token', methods=['POST'])
 def settings_clear_medium_token():
     try:
-        save_config(load_config(), medium_token="")
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(load_config(), medium_token="", target_three_url=None)
         return redirect('/settings?flash_type=success&flash_msg=Medium Token 已清除')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=清除失败: {e}')
@@ -3782,7 +3800,8 @@ def settings_medium_oauth_callback():
 
         cfg = load_config()
         cfg.medium_oauth = MediumOAuthConfig(client_id=client_id, client_secret=client_secret)
-        save_config(cfg)
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
+        save_config(cfg, target_three_url=None)
 
         # 清除 session 中的临时数据
         session.pop('medium_oauth_state', None)
@@ -3831,9 +3850,11 @@ def settings_save_blogger_oauth():
     if not client_id or not client_secret:
         return redirect('/settings?flash_type=warning&flash_msg=请填写 Client ID 和 Client Secret')
     try:
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
         save_config(load_config(),
                     blogger_client_id=client_id,
-                    blogger_client_secret=client_secret)
+                    blogger_client_secret=client_secret,
+                    target_three_url=None)
         return redirect('/settings?flash_type=success&flash_msg=凭据已确认绑定，可随时点击「使用 Google 帐号登入」完成授权')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
@@ -3856,9 +3877,11 @@ def settings_blogger_oauth_start():
                         + '请填写 Client ID 和 Client Secret 后再登入')
 
     try:
+        # target_three_url=None preserves work-themed config (Plan 2026-05-13-004 Unit 3 audit).
         save_config(load_config(),
                     blogger_client_id=client_id,
-                    blogger_client_secret=client_secret)
+                    blogger_client_secret=client_secret,
+                    target_three_url=None)
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=凭据保存失败: {e}')
 
@@ -3933,6 +3956,547 @@ def settings_blogger_oauth_callback():
         return redirect(f'/settings?flash_type=danger&flash_msg=授权处理失败: {exc}')
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Work-Themed Backlinks WebUI surface — Plan 2026-05-13-004 Unit 5b
+# ─────────────────────────────────────────────────────────────────────────────
+
+# In-memory store of recent /sites/run results, keyed by run_id. Trimmed at
+# 50 entries to bound memory. Only the WebUI process reads these — they are
+# not persisted (a server restart drops the history).
+_WORK_THEMED_RUNS: dict[str, dict] = {}
+_WORK_THEMED_RUNS_MAX = 50
+
+# Loopback hosts that are always safe to bind to. Anything else requires the
+# operator to set BACKLINK_PUBLISHER_ALLOW_NETWORK=1 explicitly.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _resolve_bind_host() -> str:
+    """Return the WebUI bind host, with safety opt-in for non-loopback exposure.
+
+    Default is ``127.0.0.1`` (changed from the historical ``0.0.0.0`` per
+    Plan 2026-05-13-004 Unit 5b — this WebUI has no auth beyond CSRF and
+    same-origin checks, so binding to all interfaces is dangerous by default).
+    Override via ``BIND_HOST=...``; non-loopback values require
+    ``BACKLINK_PUBLISHER_ALLOW_NETWORK=1`` so an accidental ``0.0.0.0`` can't
+    silently expose the panel.
+    """
+    host = os.environ.get("BIND_HOST", "127.0.0.1")
+    if host in _LOOPBACK_HOSTS:
+        return host
+    if os.environ.get("BACKLINK_PUBLISHER_ALLOW_NETWORK") == "1":
+        return host
+    raise RuntimeError(
+        f"refusing to bind to non-loopback host {host!r}: this WebUI has "
+        "minimal auth. Set BACKLINK_PUBLISHER_ALLOW_NETWORK=1 to opt in to "
+        "network exposure (only do this on a trusted network)."
+    )
+
+
+def _ensure_csrf_token() -> str:
+    """Return the per-session CSRF token, minting one on first use."""
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
+def _check_csrf_or_abort() -> None:
+    """Validate ``request.form['csrf_token']`` against the session token."""
+    token = request.form.get("csrf_token", "")
+    expected = session.get("csrf_token", "")
+    if not token or not expected or not secrets.compare_digest(token, expected):
+        from flask import abort
+        abort(403)
+
+
+def _parse_lines(raw: str) -> list[str]:
+    """Split a textarea value on newlines, trim each, drop empties.
+
+    Tolerates ``\\r\\n``, leading/trailing whitespace and tabs. Used for
+    ``work_urls`` / ``branded_pool`` / ``partial_pool`` / ``exact_pool`` /
+    ``work_anchor_templates`` form fields.
+    """
+    if not raw:
+        return []
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+_SITES_HTML = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Work-Themed Backlinks · 站点配置</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f7f8fa; }
+    .container { max-width: 920px; }
+    .field-error { color: #b91c1c; font-size: 0.875rem; margin-top: 0.25rem; display: block; }
+    fieldset { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem 1.25rem; margin-bottom: 1.25rem; }
+    legend { font-size: 1rem; font-weight: 600; padding: 0 0.5rem; width: auto; }
+    .help { color: #6b7280; font-size: 0.85rem; margin-top: 0.25rem; }
+    .toast-saved { background: #ecfdf5; border: 1px solid #6ee7b7; padding: 0.75rem 1rem; border-radius: 0.5rem; }
+    pre.preview { background: #1f2937; color: #f9fafb; padding: 0.75rem; border-radius: 0.5rem; font-size: 0.85rem; max-height: 200px; overflow: auto; }
+  </style>
+</head>
+<body>
+<div class="container py-4">
+  <h1 class="h3 mb-3">Work-Themed Backlinks 站点配置</h1>
+
+  {% if saved %}
+    <div class="toast-saved mb-3">✓ 已保存站点：{{ saved }}</div>
+  {% endif %}
+  {% if flash_msg %}
+    <div class="alert alert-{{ flash_type or 'info' }}">{{ flash_msg }}</div>
+  {% endif %}
+
+  <form method="post" action="/sites/save-three-url" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <fieldset>
+      <legend>① URLs</legend>
+
+      <div class="mb-3">
+        <label class="form-label" for="f-main-url">main_url（品牌权重承接）</label>
+        <input id="f-main-url" name="main_url" class="form-control"
+               aria-describedby="err-main-url"
+               value="{{ form.main_url|default('') }}"
+               placeholder="https://your-site.com/">
+        <div class="help">必须 https + host-root + 单一尾斜杠（例：https://your-site.com/）。</div>
+        {% if errors.main_url %}<span id="err-main-url" class="field-error">{{ errors.main_url }}</span>{% endif %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="f-list-url">list_url（同类作品发现源）</label>
+        <input id="f-list-url" name="list_url" class="form-control"
+               aria-describedby="err-list-url"
+               value="{{ form.list_url|default('') }}"
+               placeholder="https://your-site.com/list">
+        <div class="help">work_urls 留空时会从此页的 sitemap.xml 自动发现作品。</div>
+        {% if errors.list_url %}<span id="err-list-url" class="field-error">{{ errors.list_url }}</span>{% endif %}
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="f-work-urls">work_urls（每行一个，留空则自动发现）</label>
+        <textarea id="f-work-urls" name="work_urls" class="form-control" rows="4"
+                  aria-describedby="err-work-urls"
+                  placeholder="https://your-site.com/work/1&#10;https://your-site.com/work/2">{{ form.work_urls|default('') }}</textarea>
+        {% if errors.work_urls %}<span id="err-work-urls" class="field-error">{{ errors.work_urls }}</span>{% endif %}
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>② Anchor Pools</legend>
+
+      <div class="mb-3">
+        <label class="form-label" for="f-branded">branded_pool（每行一个，随机抽一项）</label>
+        <textarea id="f-branded" name="branded_pool" class="form-control" rows="3"
+                  aria-describedby="err-branded">{{ form.branded_pool|default('') }}</textarea>
+        {% if errors.branded_pool %}<span class="field-error" id="err-branded">{{ errors.branded_pool }}</span>{% endif %}
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="f-partial">partial_pool（每行一个，70%）</label>
+          <textarea id="f-partial" name="partial_pool" class="form-control" rows="3"
+                    aria-describedby="err-partial">{{ form.partial_pool|default('') }}</textarea>
+          {% if errors.partial_pool %}<span class="field-error" id="err-partial">{{ errors.partial_pool }}</span>{% endif %}
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label" for="f-exact">exact_pool（每行一个，30%）</label>
+          <textarea id="f-exact" name="exact_pool" class="form-control" rows="3"
+                    aria-describedby="err-exact">{{ form.exact_pool|default('') }}</textarea>
+          {% if errors.exact_pool %}<span class="field-error" id="err-exact">{{ errors.exact_pool }}</span>{% endif %}
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label" for="f-templates">work_anchor_templates（每行一个；{title} 占位符；留空使用默认）</label>
+        <textarea id="f-templates" name="work_anchor_templates" class="form-control" rows="3"
+                  placeholder="{{ default_templates }}">{{ form.work_anchor_templates|default('') }}</textarea>
+        <div class="help">默认：{{ default_templates }}</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>③ Generation Params</legend>
+      <div class="row">
+        <div class="col-sm-3 mb-3">
+          <label class="form-label" for="f-count">count（默认 10）</label>
+          <input type="number" id="f-count" name="count" class="form-control"
+                 min="1" max="100" value="{{ form.count|default('10') }}">
+        </div>
+        <div class="col-sm-9 mb-3 d-flex align-items-end">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="f-tls" name="insecure_tls"
+                   {% if form.insecure_tls %}checked{% endif %}>
+            <label class="form-check-label" for="f-tls">
+              insecure_tls（仅信任目标站 TLS 故障时启用 — 关闭证书校验）
+            </label>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">保存配置</button>
+      <a href="/" class="btn btn-link">← 返回首页</a>
+    </div>
+  </form>
+
+  <hr class="my-4">
+
+  <fieldset>
+    <legend>预览作品页元数据</legend>
+    <p class="help">先保存配置，再使用此面板验证 work_url 抓取行为。</p>
+    <form method="post" action="/sites/run">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="main_url" value="{{ form.main_url|default('') }}">
+      <button type="submit" class="btn btn-outline-primary"
+              {% if not form.main_url %}disabled{% endif %}>
+        运行（plan-backlinks）
+      </button>
+    </form>
+  </fieldset>
+</div>
+</body>
+</html>
+""".strip()
+
+
+_RESULT_HTML = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Run Result · {{ run_id }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f7f8fa; }
+    .container { max-width: 920px; }
+    .badge-success { background: #10b981; }
+    .badge-failed { background: #ef4444; }
+  </style>
+</head>
+<body>
+<div class="container py-4">
+  <h1 class="h4 mb-3">Run Result · <code>{{ run_id }}</code></h1>
+
+  {% if summary.fail_empty %}
+    <div class="alert alert-warning">
+      <strong>未发现作品</strong> — list_url 抓回 0 候选，请检查 list_url 是否正确。
+      可能原因：sitemap 不可访问、HTML 列表页结构非典型、所有候选都命中了排除规则。
+    </div>
+  {% else %}
+    <div class="alert alert-info">
+      <strong>{{ summary.generated }}/{{ summary.total }}</strong> 成功 ·
+      跳过 {{ summary.skipped }}
+    </div>
+  {% endif %}
+
+  {% if rows %}
+  <table class="table table-sm bg-white">
+    <thead>
+      <tr><th>work_url</th><th>status</th></tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><code>{{ row.work_url }}</code></td>
+        <td>
+          {% if row.status == 'success' %}
+            <span class="badge badge-success">success</span>
+          {% else %}
+            <span class="badge badge-failed">{{ row.status }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <a href="/sites?domain={{ main_url }}" class="btn btn-link">← 返回 /sites 表单</a>
+</div>
+</body>
+</html>
+""".strip()
+
+
+@app.route("/sites", methods=["GET"])
+def sites_form():
+    """Render the work-themed configuration form, optionally pre-filled."""
+    csrf_token = _ensure_csrf_token()
+    cfg = load_config()
+    domain_query = (request.args.get("domain") or "").rstrip("/")
+    saved = request.args.get("saved", "")
+
+    form: dict[str, str] = {}
+    if domain_query:
+        entry = cfg.target_three_url.get(domain_query)
+        if entry is not None:
+            form = {
+                "main_url": entry.main_url,
+                "list_url": entry.list_url,
+                "work_urls": "\n".join(entry.work_urls),
+                "branded_pool": "\n".join(entry.branded_pool),
+                "partial_pool": "\n".join(entry.partial_pool),
+                "exact_pool": "\n".join(entry.exact_pool),
+                "work_anchor_templates": "\n".join(entry.work_anchor_templates),
+                "count": "10",
+                "insecure_tls": entry.insecure_tls,
+            }
+
+    return render_template_string(
+        _SITES_HTML,
+        csrf_token=csrf_token,
+        form=form,
+        errors={},
+        saved=saved,
+        flash_type=request.args.get("flash_type"),
+        flash_msg=request.args.get("flash_msg"),
+        default_templates=", ".join(DEFAULT_WORK_TEMPLATES),
+    )
+
+
+@app.route("/sites/save-three-url", methods=["POST"])
+def sites_save_three_url():
+    """Validate the three-URL form and persist it via save_config(target_three_url=...)."""
+    _check_csrf_or_abort()
+
+    raw = {
+        "main_url": (request.form.get("main_url") or "").strip(),
+        "list_url": (request.form.get("list_url") or "").strip(),
+        "work_urls": request.form.get("work_urls") or "",
+        "branded_pool": request.form.get("branded_pool") or "",
+        "partial_pool": request.form.get("partial_pool") or "",
+        "exact_pool": request.form.get("exact_pool") or "",
+        "work_anchor_templates": request.form.get("work_anchor_templates") or "",
+        "count": (request.form.get("count") or "10").strip(),
+        "insecure_tls": bool(request.form.get("insecure_tls")),
+    }
+    errors: dict[str, str] = {}
+
+    main_url = validate_main_domain_url(raw["main_url"])
+    if not main_url:
+        errors["main_url"] = "必须 https + host-root + 单一尾斜杠（例：https://your-site.com/）"
+
+    list_url = validate_https_url(raw["list_url"])
+    if not list_url:
+        errors["list_url"] = "必须 https"
+
+    work_urls_raw = _parse_lines(raw["work_urls"])
+    work_urls: list[str] = []
+    bad_work: list[str] = []
+    for u in work_urls_raw:
+        normalized = validate_https_url(u)
+        if normalized:
+            work_urls.append(normalized)
+        else:
+            bad_work.append(u)
+    if bad_work:
+        errors["work_urls"] = f"以下 URL 必须 https：{', '.join(bad_work)}"
+
+    branded_pool = _parse_lines(raw["branded_pool"])
+    if not branded_pool:
+        errors["branded_pool"] = "至少需要一项 branded anchor"
+    partial_pool = _parse_lines(raw["partial_pool"])
+    if not partial_pool:
+        errors["partial_pool"] = "至少需要一项 partial anchor"
+    exact_pool = _parse_lines(raw["exact_pool"])
+    if not exact_pool:
+        errors["exact_pool"] = "至少需要一项 exact anchor"
+
+    templates = _parse_lines(raw["work_anchor_templates"]) or list(
+        DEFAULT_WORK_TEMPLATES
+    )
+
+    if errors:
+        # Re-render the form with field errors and the user's input intact.
+        return render_template_string(
+            _SITES_HTML,
+            csrf_token=_ensure_csrf_token(),
+            form=raw,
+            errors=errors,
+            saved="",
+            flash_type="danger",
+            flash_msg="请修正下方表单错误",
+            default_templates=", ".join(DEFAULT_WORK_TEMPLATES),
+        ), 422
+
+    entry = ThreeUrlConfig(
+        main_url=main_url,
+        list_url=list_url,
+        branded_pool=branded_pool,
+        partial_pool=partial_pool,
+        exact_pool=exact_pool,
+        work_urls=work_urls,
+        work_anchor_templates=templates,
+        insecure_tls=raw["insecure_tls"],
+    )
+    domain_key = main_url.rstrip("/")
+    cfg = load_config()
+    merged = dict(cfg.target_three_url)
+    merged[domain_key] = entry
+
+    # Explicit target_anchor_keywords=None and target_three_url=merged keeps
+    # every other section verbatim (P0 audit per Unit 3).
+    save_config(
+        cfg,
+        target_anchor_keywords=None,
+        target_three_url=merged,
+    )
+
+    return redirect(f"/sites?saved={domain_key}")
+
+
+@app.route("/sites/scrape-preview", methods=["GET"])
+def sites_scrape_preview():
+    """Synchronously fetch one work_url's metadata and return JSON."""
+    url = (request.args.get("url") or "").strip()
+    if not url:
+        return jsonify({"status": "error", "reason": "missing url param"}), 400
+
+    try:
+        meta = fetch_work_metadata(url)
+    except InputValidationError as exc:
+        return jsonify({"status": "error", "reason": str(exc)}), 200
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"status": "error", "reason": type(exc).__name__}), 200
+
+    if meta is None:
+        return jsonify({"status": "error", "reason": "no metadata extracted"}), 200
+
+    return jsonify({
+        "status": "ok",
+        "title": meta.title,
+        "description": meta.description,
+        "h1": meta.h1,
+    }), 200
+
+
+@app.route("/sites/run", methods=["POST"])
+def sites_run():
+    """Shell out to plan-backlinks for the work-themed target and stash a result summary."""
+    _check_csrf_or_abort()
+
+    main_url = (request.form.get("main_url") or "").strip().rstrip("/")
+    if not main_url:
+        from flask import abort
+        abort(400)
+
+    cfg = load_config()
+    entry = cfg.target_three_url.get(main_url)
+    if entry is None:
+        from flask import abort
+        abort(400)
+
+    seed_row = {
+        "target_url": entry.main_url.rstrip("/"),
+        "main_domain": entry.main_url,
+        "language": "zh-CN",
+        "platform": "blogger",
+        "url_mode": "A",
+        "publish_mode": "draft",
+    }
+    seed_jsonl = json.dumps(seed_row, ensure_ascii=False) + "\n"
+
+    try:
+        result = run_pipe(
+            ["plan-backlinks", "--work-count", "10"],
+            seed_jsonl,
+        )
+    except Exception as exc:
+        return redirect(
+            "/sites?flash_type=danger&flash_msg="
+            + f"plan-backlinks 失败：{exc}"
+        )
+
+    rows = _parse_run_result(result["stdout"], entry)
+    summary = {
+        "total": len(rows),
+        "generated": sum(1 for r in rows if r["status"] == "success"),
+        "skipped": sum(1 for r in rows if r["status"] != "success"),
+        "fail_empty": len(rows) == 0,
+    }
+
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + secrets.token_hex(4)
+    _WORK_THEMED_RUNS[run_id] = {
+        "main_url": main_url,
+        "summary": summary,
+        "rows": rows,
+    }
+    # Bound the in-memory store
+    if len(_WORK_THEMED_RUNS) > _WORK_THEMED_RUNS_MAX:
+        oldest = sorted(_WORK_THEMED_RUNS.keys())[: -_WORK_THEMED_RUNS_MAX]
+        for k in oldest:
+            _WORK_THEMED_RUNS.pop(k, None)
+
+    return redirect(f"/sites/run/{run_id}/result")
+
+
+def _parse_run_result(stdout: str, entry: ThreeUrlConfig) -> list[dict]:
+    """Parse plan-backlinks JSONL stdout into per-work-URL status rows.
+
+    Best-effort: every payload that mentions a work URL is recorded as a
+    success row. URLs that were attempted but didn't yield a payload (per
+    the run summary log) surface as "scrape_failed" — those don't appear in
+    stdout, so we fall back to comparing against the configured work_urls.
+    """
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        canonical = (
+            payload.get("seo", {}).get("canonical_url")
+            or payload.get("url")
+            or ""
+        )
+        if canonical and canonical not in seen:
+            seen.add(canonical)
+            rows.append({"work_url": canonical, "status": "success"})
+
+    # Fold in any pinned work_urls that the run didn't surface — they were
+    # either filtered or scrape_failed; the planner emits a warn log for the
+    # second case but the WebUI doesn't have access to the structured logs.
+    for work_url in entry.work_urls:
+        if work_url not in seen:
+            rows.append({"work_url": work_url, "status": "scrape_failed"})
+    return rows
+
+
+@app.route("/sites/run/<run_id>/result", methods=["GET"])
+def sites_run_result(run_id: str):
+    """Render the partial-failure status table for a previous /sites/run."""
+    if not _RUN_ID_RE.match(run_id):
+        from flask import abort
+        abort(400)
+    record = _WORK_THEMED_RUNS.get(run_id)
+    if record is None:
+        from flask import abort
+        abort(404)
+    return render_template_string(
+        _RESULT_HTML,
+        run_id=run_id,
+        main_url=record["main_url"],
+        summary=record["summary"],
+        rows=record["rows"],
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 if __name__ == '__main__':
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -3941,6 +4505,7 @@ if __name__ == '__main__':
     _restore_scheduled_jobs()
 
     port = int(os.environ.get('PORT', 8888))
+    bind_host = _resolve_bind_host()
     print(f"Starting Backlink Publisher Web UI...")
-    print(f"Open: http://localhost:{port}")
-    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
+    print(f"Open: http://{bind_host}:{port}")
+    app.run(host=bind_host, port=port, debug=True, use_reloader=False)

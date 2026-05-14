@@ -231,14 +231,20 @@ def render_zh_short_article(
     return body
 
 
-def _format_anchor_html(url: str, anchor: str) -> str:
-    """Return ``<a target="_blank" rel="noopener noreferrer">`` for ``anchor``.
+def _format_anchor_html(
+    url: str, anchor: str, *, rel: str = "noopener noreferrer"
+) -> str:
+    """Return ``<a target="_blank" rel="...">`` HTML for ``anchor``.
 
     Built by hand rather than via markdown-it because brainstorm R4 mandates
-    ``rel="noopener noreferrer"`` (the existing ``_link_open`` hook only emits
+    a specific ``rel`` value (the existing ``_link_open`` hook only emits
     ``noopener``). URL is HTML-attribute escaped for safety; anchor text is
     NOT escaped — the anchor_resolver's ``_passes_filters`` already rejects
     structural HTML chars so injecting raw text is safe at this layer.
+
+    ``rel`` is parameterised (Plan 2026-05-13-004 Unit 4): the work-themed
+    generator passes ``rel="noopener"`` to keep dofollow weight intact while
+    Medium/Blogger long-form callers keep the default ``noopener noreferrer``.
     """
     safe_url = (
         url.replace("&", "&amp;")
@@ -246,7 +252,7 @@ def _format_anchor_html(url: str, anchor: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
     )
-    return f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer">{anchor}</a>'
+    return f'<a href="{safe_url}" target="_blank" rel="{rel}">{anchor}</a>'
 
 
 def _strip_html(text: str) -> str:

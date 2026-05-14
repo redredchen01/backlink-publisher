@@ -10,17 +10,33 @@ import sys
 from typing import Any
 from urllib.parse import urlparse
 
-from .. import anchor_profile, anchor_resolver, anchor_scheduler, errors, markdown_utils
+from typing import Iterator
+
+from .. import (
+    anchor_profile,
+    anchor_resolver,
+    anchor_scheduler,
+    errors,
+    markdown_utils,
+    work_scraper,
+    work_themed_generator,
+)
 from ..adapters.llm_anchor_provider import OpenAICompatibleProvider
 from ..anchor_profile import ProfileEntry
 from ..anchor_scheduler import ScheduleDecision, SecondaryLink
 from ..config import (
     Config,
+    ThreeUrlConfig,
     get_anchor_keywords,
     get_anchor_pool_v2,
+    get_three_url_config,
     load_config,
 )
-from ..errors import InputValidationError, emit_error
+from ..errors import (
+    ExternalServiceError,
+    InputValidationError,
+    emit_error,
+)
 from ..jsonl import read_jsonl, write_jsonl
 from ..language_check import detect_language
 from ..logger import plan_logger
@@ -847,6 +863,217 @@ def _plan_zh_short_row(
     return _build_zh_short_payload(row, html, main_domain, main_anchor, sec_pairs)
 
 
+# ─── Work-themed three-URL dispatcher (Plan 2026-05-13-004 Unit 5a) ─────────
+
+
+def _plan_work_themed_row(
+    row: dict[str, Any],
+    three_url_cfg: ThreeUrlConfig,
+    *,
+    count: int,
+) -> Iterator[dict[str, Any]]:
+    """Yield one payload per discovered work URL for a work-themed target.
+
+    Three-state failure semantics (matches ``work_scraper`` contract):
+    - **fail-abort**: list_url unreachable when ``cfg.work_urls`` is empty
+      → :func:`emit_error` exits the whole batch with code 4.
+    - **fail-empty**: list_url returns 200 + zero candidates after filtering
+      → emit a WARN summary and yield nothing (caller treats as "0 articles").
+    - **fail-continue**: a single ``work_url``'s metadata fetch returns ``None``
+      or raises a transient error → log WARN + skip that URL.
+
+    Anchor dedup uses the per-site profile: ``recent_texts(profile, n=20)``
+    is loaded once at start and grown in-memory after each successful
+    rendering so the dedup window updates within a single batch run.
+    """
+    main_domain = row["main_domain"].rstrip("/")
+
+    # 1. Resolve work_urls — config-pinned first, scraper discovery second.
+    work_urls: list[str] = list(three_url_cfg.work_urls)
+    if not work_urls:
+        try:
+            work_urls = work_scraper.fetch_work_urls_from_list(
+                three_url_cfg.list_url,
+                main_url=three_url_cfg.main_url,
+                max_candidates=max(count * 3, 50),  # buffer for fail-continue
+                list_path_blocklist=three_url_cfg.list_path_blocklist,
+                insecure_tls=three_url_cfg.insecure_tls,
+            )
+        except ExternalServiceError as exc:
+            # fail-abort: kill the batch so the operator sees the broken target
+            emit_error(
+                f"work-themed list_url unreachable for {main_domain}: {exc}",
+                exit_code=4,
+            )
+            return  # unreachable — emit_error raises SystemExit
+
+    work_urls = work_urls[:count]
+    if not work_urls:
+        plan_logger.warn(
+            "work-themed run: 0 candidate work URLs (fail-empty)",
+            main_domain=main_domain,
+            list_url=three_url_cfg.list_url,
+        )
+        return
+
+    # 2. Initialise the per-site dedup window from disk.
+    profile = anchor_profile.load_profile(main_domain)
+    recent: list[str] = list(anchor_profile.recent_texts(profile, n=20))
+
+    generated = 0
+    skipped = 0
+    for idx, work_url in enumerate(work_urls):
+        try:
+            meta = work_scraper.fetch_work_metadata(
+                work_url, insecure_tls=three_url_cfg.insecure_tls,
+            )
+        except InputValidationError as exc:
+            # SSRF / non-https — surface but keep the batch alive
+            plan_logger.warn(
+                "work-themed: invalid work_url, skipping",
+                main_domain=main_domain, url=work_url, reason=str(exc),
+            )
+            skipped += 1
+            continue
+
+        if meta is None:
+            plan_logger.warn(
+                "work-themed: metadata fetch failed (fail-continue), skipping",
+                main_domain=main_domain, url=work_url,
+            )
+            skipped += 1
+            continue
+
+        # Stable seed per (main_domain, work_url, idx) so re-runs of the same
+        # batch produce byte-identical articles.
+        seed = abs(
+            int(hashlib.sha256(
+                f"{main_domain}:{work_url}:{idx}".encode()
+            ).hexdigest()[:8], 16)
+        )
+        anchors = work_themed_generator.select_anchors(
+            three_url_cfg, meta, seed=seed, recent_texts=recent,
+        )
+        rendered = work_themed_generator.render_work_themed_article(
+            three_url_cfg, work_url, anchors, seed=seed,
+        )
+
+        anchor_profile.record_article(main_domain, [
+            ProfileEntry(
+                ts=anchor_profile.now_iso(),
+                link_role="main",
+                url_category="work_themed",
+                anchor_type="work",
+                anchor_text=anchors.work_anchor,
+                degraded=False,
+            )
+        ])
+        recent.append(anchors.work_anchor)
+
+        yield _build_work_themed_payload(
+            row, three_url_cfg, work_url, anchors, rendered,
+        )
+        generated += 1
+
+    plan_logger.info(
+        "work-themed run summary",
+        main_domain=main_domain,
+        generated=generated,
+        skipped=skipped,
+    )
+
+
+def _build_work_themed_payload(
+    row: dict[str, Any],
+    three_url_cfg: ThreeUrlConfig,
+    work_url: str,
+    anchors: work_themed_generator.Anchors,
+    rendered: dict[str, Any],
+) -> dict[str, Any]:
+    """Wrap the generator output in the same payload schema as zh-short.
+
+    Downstream ``validate-backlinks`` / ``publish-backlinks`` then need no
+    branch — they see the same OUTPUT_REQUIRED_FIELDS contract regardless
+    of which planner produced the article.
+    """
+    target_url = row["target_url"].rstrip("/")
+    platform = row["platform"]
+    publish_mode = row.get("publish_mode", "draft")
+    language = row["language"]
+    url_mode = row.get("url_mode", "A")
+
+    main_domain = three_url_cfg.main_url
+    domain_label = _domain_label_of(main_domain)
+
+    custom_title = row.get("custom_title", "")
+    title = custom_title or anchors.work_anchor or domain_label
+    slug = (
+        markdown_utils.slugify(title)
+        or hashlib.sha256(title.encode()).hexdigest()[:12]
+    )
+    excerpt = re.sub(r"<[^>]+>", "", rendered["content_markdown"])[:100]
+
+    custom_tags = row.get("custom_tags", "")
+    tags = ["backlink", domain_label]
+    if custom_tags:
+        tags.extend(t.strip() for t in custom_tags.split(",") if t.strip())
+
+    seed_str = f"{work_url}:{main_domain}:work-themed:{platform}"
+    article_id = hashlib.sha256(seed_str.encode()).hexdigest()[:16]
+
+    return {
+        "id": article_id,
+        "platform": platform,
+        "language": language,
+        "source_language": language,
+        "publish_mode": publish_mode,
+        "target_url": target_url + "/",
+        "main_domain": main_domain,
+        "url_mode": url_mode,
+        "title": title,
+        "slug": slug,
+        "excerpt": excerpt,
+        "tags": tags,
+        "content_markdown": rendered["content_markdown"],
+        "links": rendered["links"],
+        "seo": {
+            "title": title,
+            "description": excerpt,
+            "canonical_url": work_url,
+        },
+    }
+
+
+def _dispatch_row(
+    row: dict[str, Any],
+    config: Config,
+    *,
+    llm_provider: OpenAICompatibleProvider | None,
+    rng: random.Random | None,
+    work_count: int,
+) -> Iterator[dict[str, Any]]:
+    """Three-path dispatch (Plan 2026-05-13-004 Unit 5a).
+
+    Priority: ``[targets."<domain>"]`` three-URL → zh-CN scheduler →
+    long-form. Each branch yields its own payload(s); the caller appends.
+    The middle branch returns ``None`` when the scheduler refuses (no v2
+    pool, missing non-home category) — falls through to long-form.
+    """
+    three_url_cfg = get_three_url_config(config, row["main_domain"])
+    if three_url_cfg is not None:
+        yield from _plan_work_themed_row(row, three_url_cfg, count=work_count)
+        return
+
+    payload: dict[str, Any] | None = None
+    if row["language"] == "zh-CN" and _scheduler_enabled_for(
+        config, row["main_domain"]
+    ):
+        payload = _plan_zh_short_row(row, config, llm_provider, rng=rng)
+    if payload is None:
+        payload = _generate_payload(row, config=config)
+    yield payload
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
@@ -895,6 +1122,16 @@ def main(argv: list[str] | None = None) -> None:
         default="draft",
         choices=["draft", "publish"],
         help="Publish mode for --from-csv / --from-sitemap rows (default: draft)",
+    )
+    parser.add_argument(
+        "--work-count",
+        type=int,
+        default=10,
+        metavar="N",
+        help=(
+            "Per-row article count for the work-themed dispatcher path "
+            "(default: 10). Ignored for legacy zh-short / long-form rows."
+        ),
     )
     parser.add_argument(
         "--log-level",
@@ -991,20 +1228,17 @@ def main(argv: list[str] | None = None) -> None:
             validation_drops.append(line_num)
             continue
         try:
-            payload: dict[str, Any] | None = None
-            if row["language"] == "zh-CN" and _scheduler_enabled_for(cfg, row["main_domain"]):
-                payload = _plan_zh_short_row(row, cfg, llm_provider, rng=rng)
-            if payload is None:
-                # Either zh-CN path is disabled for this site, or the scheduler
-                # refused (no non-home categories) — fall through to the
-                # legacy long-form generator. Zero-regression contract for
-                # en/ru and any zh-CN site without v2 config.
-                payload = _generate_payload(row, config=cfg)
-            plan_logger.debug(
-                f"generated payload: id={payload['id']} platform={payload['platform']}",
-                extra={"id": payload["id"], "platform": payload["platform"]},
-            )
-            outputs.append(payload)
+            for payload in _dispatch_row(
+                row, cfg,
+                llm_provider=llm_provider,
+                rng=rng,
+                work_count=args.work_count,
+            ):
+                plan_logger.debug(
+                    f"generated payload: id={payload['id']} platform={payload['platform']}",
+                    extra={"id": payload["id"], "platform": payload["platform"]},
+                )
+                outputs.append(payload)
         except Exception as exc:
             all_errors.append(f"line {line_num}: generation error: {exc}")
             generation_drops.append(line_num)
