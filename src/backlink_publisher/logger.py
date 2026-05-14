@@ -48,6 +48,23 @@ class PipelineLogger:
     def error(self, msg: str, **extra: Any) -> None:
         self._emit("ERROR", msg, extra or None)
 
+    def recon(self, msg: str, **extra: Any) -> None:
+        """Always-emit reconciliation event — bypasses the level gate.
+
+        Used by the Silent-Drop Tripwire: end-of-run input→output delta
+        summary that the operator must see regardless of --log-level.
+        Operator grep target: ``"level": "RECON"``.
+        """
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "RECON",
+            "logger": self.name,
+            "msg": msg,
+        }
+        if extra:
+            record.update(extra)
+        print(json.dumps(record, ensure_ascii=False), file=sys.stderr, flush=True)
+
 
 # Module-level singleton instances
 plan_logger = PipelineLogger("plan-backlinks")

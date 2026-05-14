@@ -422,15 +422,24 @@ def test_profile_entries_shape():
         ),
     )
     entries = _build_profile_entries(
-        decision, "51漫画", [("hot", "exact", "热门漫画"), ("animate", "lsi", "ACG动画")],
+        decision,
+        "51漫画",
+        "https://51acgs.com/",
+        [
+            ("hot", "exact", "热门漫画", "https://51acgs.com/hot"),
+            ("animate", "lsi", "ACG动画", "https://51acgs.com/animate"),
+        ],
         degraded=False,
     )
     assert len(entries) == 3
     assert entries[0].link_role == "main"
     assert entries[0].anchor_type == "branded"
+    assert entries[0].target_url == "https://51acgs.com/"
     assert entries[1].link_role == "secondary"
     assert entries[1].url_category == "hot"
     assert entries[1].anchor_text == "热门漫画"
+    assert entries[1].target_url == "https://51acgs.com/hot"
+    assert entries[2].target_url == "https://51acgs.com/animate"
 
 
 def test_profile_entries_carry_degraded_flag():
@@ -439,9 +448,15 @@ def test_profile_entries_carry_degraded_flag():
         secondary_links=(SecondaryLink(url_category="home", anchor_type="branded"),),
     )
     entries = _build_profile_entries(
-        decision, "51漫画", [("home", "branded", "首页")], degraded=True,
+        decision,
+        "51漫画",
+        "https://51acgs.com/",
+        [("home", "branded", "首页", "https://51acgs.com/")],
+        degraded=True,
     )
     assert all(e.degraded for e in entries)
+    # Degrade path: both main and secondary point at home_url
+    assert all(e.target_url == "https://51acgs.com/" for e in entries)
 
 
 # ── multi-article convergence smoke test ───────────────────────────────────

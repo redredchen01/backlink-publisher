@@ -381,8 +381,14 @@ weird = "not-a-url"
 # what the original "read-only" contract was protecting).
 
 
-def test_save_config_preserves_unmanaged_sections_verbatim(tmp_path, monkeypatch):
-    """save_config preserves [sites.*], [anchor.*], [llm.*] verbatim from disk."""
+def test_save_config_preserves_v2_fields_verbatim(tmp_path, monkeypatch):
+    """save_config must preserve unknown sections byte-for-byte (Config Safety Net).
+
+    Previously save_config silently dropped any section it didn't know how to
+    serialize, which was the documented data-loss bug class behind
+    feedback_config-save-overwrite-pattern.md. The new contract: those same
+    sections survive a save_config call verbatim (bytes copied from disk).
+    """
     monkeypatch.delenv("BACKLINK_LLM_API_KEY", raising=False)
     from backlink_publisher.config import save_config
 
@@ -391,13 +397,14 @@ def test_save_config_preserves_unmanaged_sections_verbatim(tmp_path, monkeypatch
     save_config(cfg, path=cfg_path)
 
     rewritten = cfg_path.read_text(encoding="utf-8")
-    # Sections that were ON DISK survive — round-trip is now safe
+    # Previously-dropped sections now survive
     assert "[sites." in rewritten
     assert "anchor_pools" in rewritten
     assert "[anchor.proportions]" in rewritten
     assert "[llm.anchor_provider]" in rewritten
 
-    # And the data is still parseable after the round-trip
-    reloaded = load_config(cfg_path)
-    assert reloaded.site_url_categories == cfg.site_url_categories
-    assert reloaded.target_anchor_pools_v2 == cfg.target_anchor_pools_v2
+    # And the data round-trips through load_config again
+    cfg2 = load_config(cfg_path)
+    assert cfg2.site_url_categories == cfg.site_url_categories
+    assert cfg2.target_anchor_pools_v2 == cfg.target_anchor_pools_v2
+    assert cfg2.anchor_proportions == cfg.anchor_proportions

@@ -39,8 +39,16 @@ from .logger import plan_logger
 # Schema version — bump when ProfileEntry shape changes incompatibly.
 _PROFILE_SCHEMA_VERSION = 1
 
-# Sliding window size in link records (main + secondary mixed).
-_MAX_ENTRIES = 100
+# Per-target sliding window in articles. Each target_url retains up to this
+# many recent articles' worth of entries — bounded by article-integrity, so the
+# kept set is the union of "most recent N articles touching target X" across
+# all known targets. At solo-operator scale (1-3 money URLs per domain) this
+# yields ~100-300 articles per profile = a 90d window with margin.
+_MAX_ARTICLES_PER_TARGET = 100
+
+# Legacy alias retained for backwards-compat with any external imports; not
+# used internally after the article-integrity trim landed.
+_MAX_ENTRIES = _MAX_ARTICLES_PER_TARGET
 
 # Default size of the anchor-text dedup window passed to ``recent_texts``.
 _DEFAULT_TEXT_WINDOW = 20
@@ -73,6 +81,12 @@ class ProfileEntry:
     the entry came from the validator-failure fallback path; the scheduler
     still counts these in its distribution math (they really happened) but
     Unit 9's report surfaces the degradation rate as a quality signal.
+
+    ``target_url`` is the absolute destination URL the anchor pointed at. Added
+    as a tolerant additive field (no schema-version bump) — pre-bump entries
+    read back as ``""`` and are bucketed into a virtual "domain-rollup" group
+    by report-anchors' distribution-visibility layer. Must always be populated
+    on new writes via the entry constructors at the publish-time call sites.
     """
 
     ts: str
@@ -81,6 +95,7 @@ class ProfileEntry:
     anchor_type: str  # one of ANCHOR_TYPES
     anchor_text: str
     degraded: bool = False
+    target_url: str = ""
 
 
 @dataclass
@@ -167,6 +182,7 @@ def load_profile(main_domain: str) -> ProfileState:
                     anchor_type=str(item["anchor_type"]),
                     anchor_text=str(item["anchor_text"]),
                     degraded=bool(item.get("degraded", False)),
+                    target_url=str(item.get("target_url", "")),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -206,9 +222,14 @@ def record_article(main_domain: str, new_entries: list[ProfileEntry]) -> None:
 
         existing = load_profile(main_domain)
         merged = existing.entries + list(new_entries)
-        # Trim oldest entries to keep the window bounded.
-        if len(merged) > _MAX_ENTRIES:
-            merged = merged[-_MAX_ENTRIES:]
+        # Article-integrity-preserving per-target trim:
+        # Group into articles via the same boundary rule the publish-path
+        # scheduler uses (_group_into_articles), keep the most-recent
+        # _MAX_ARTICLES_PER_TARGET articles per distinct target_url, take the
+        # UNION of those selections. Articles are never split — a main with
+        # its secondaries is always evicted together, protecting
+        # recent_secondary_count_split's invariant.
+        merged = _trim_by_target(merged, _MAX_ARTICLES_PER_TARGET)
 
         payload = {
             "version": _PROFILE_SCHEMA_VERSION,
@@ -229,6 +250,45 @@ def record_article(main_domain: str, new_entries: list[ProfileEntry]) -> None:
 def now_iso() -> str:
     """Helper to produce ``ts`` values in the canonical form used by ``ProfileEntry``."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _trim_by_target(
+    entries: list[ProfileEntry], max_articles_per_target: int
+) -> list[ProfileEntry]:
+    """Keep up to ``max_articles_per_target`` most-recent articles per target_url.
+
+    The kept set is the UNION across all distinct ``target_url`` values found
+    in the entries (including ``""`` for pre-bump entries, which all share one
+    virtual target). Articles are atomic: a main with its secondaries is kept
+    or evicted together, never split.
+
+    Article boundaries follow the same rule consumed by anchor_scheduler:
+    each ``link_role == "main"`` entry starts an article and subsequent
+    entries belong to it until the next main. Secondaries before the first
+    main are trimmed-article remnants and are dropped (matches the existing
+    ``_group_into_articles`` contract).
+    """
+    if not entries:
+        return entries
+
+    articles = _group_into_articles(entries)
+    if not articles:
+        return []
+
+    # For each distinct target_url, mark the indices of its most-recent
+    # ``max_articles_per_target`` articles.
+    keep_indices: set[int] = set()
+    targets = {e.target_url for art in articles for e in art}
+    for target in targets:
+        seen = 0
+        for i in range(len(articles) - 1, -1, -1):
+            if any(e.target_url == target for e in articles[i]):
+                keep_indices.add(i)
+                seen += 1
+                if seen >= max_articles_per_target:
+                    break
+
+    return [entry for i, art in enumerate(articles) if i in keep_indices for entry in art]
 
 
 # ── derived views (pure functions over ProfileState) ────────────────────────

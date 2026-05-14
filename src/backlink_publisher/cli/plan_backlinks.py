@@ -569,14 +569,19 @@ def _extract_zh_keyword(row: dict[str, Any], main_domain: str) -> str:
 def _build_profile_entries(
     decision: ScheduleDecision,
     main_anchor: str,
-    sec_records: list[tuple[str, str, str]],
+    main_target_url: str,
+    sec_records: list[tuple[str, str, str, str]],
     *,
     degraded: bool,
 ) -> list[ProfileEntry]:
     """Pack the article's link decisions into ProfileEntry rows.
 
-    ``sec_records`` is ``[(url_category, anchor_type, anchor_text), ...]`` —
-    one tuple per secondary, ordered as rendered.
+    ``sec_records`` is ``[(url_category, anchor_type, anchor_text, target_url), ...]``
+    — one tuple per secondary, ordered as rendered. ``main_target_url`` is the
+    URL the main anchor points at (home_url for both happy and degrade paths).
+    Each entry's ``target_url`` is populated so report-anchors can compute
+    per-destination distribution metrics (anchor over-optimization is a
+    per-URL signal, not per-domain).
     """
     ts = anchor_profile.now_iso()
     entries = [
@@ -587,9 +592,10 @@ def _build_profile_entries(
             anchor_type=decision.main_link_anchor_type,
             anchor_text=main_anchor,
             degraded=degraded,
+            target_url=main_target_url,
         )
     ]
-    for url_cat, anchor_type, anchor_text in sec_records:
+    for url_cat, anchor_type, anchor_text, target_url in sec_records:
         entries.append(
             ProfileEntry(
                 ts=ts,
@@ -598,6 +604,7 @@ def _build_profile_entries(
                 anchor_type=anchor_type,
                 anchor_text=anchor_text,
                 degraded=degraded,
+                target_url=target_url,
             )
         )
     return entries
@@ -735,7 +742,7 @@ def _plan_zh_short_row(
         # Resolve each secondary, tracking already-picked anchor texts for dedup.
         running_recent = list(recent) + [main_anchor]
         sec_pairs: list[tuple[str, str]] = []
-        sec_records: list[tuple[str, str, str]] = []
+        sec_records: list[tuple[str, str, str, str]] = []
         for sec in decision.secondary_links:
             sec_url = cats_map.get(sec.url_category)
             if not sec_url:
@@ -757,7 +764,7 @@ def _plan_zh_short_row(
                 last_errors = ["secondary_anchor_resolution_failed"]
                 break
             sec_pairs.append((sec_url, sec_anchor))
-            sec_records.append((sec.url_category, sec.anchor_type, sec_anchor))
+            sec_records.append((sec.url_category, sec.anchor_type, sec_anchor, sec_url))
             running_recent.append(sec_anchor)
 
         if len(sec_pairs) != len(decision.secondary_links):
@@ -774,7 +781,7 @@ def _plan_zh_short_row(
         ok, errors_out = markdown_utils.validate_zh_short_payload(html, expected)
         if ok:
             entries = _build_profile_entries(
-                decision, main_anchor, sec_records, degraded=False,
+                decision, main_anchor, home_url, sec_records, degraded=False,
             )
             anchor_profile.record_article(main_domain, entries)
             return _build_zh_short_payload(
@@ -848,7 +855,8 @@ def _plan_zh_short_row(
     entries = _build_profile_entries(
         degrade_decision,
         main_anchor,
-        [("home", "branded", sec_anchor)],
+        home_url,
+        [("home", "branded", sec_anchor, home_url)],
         degraded=True,
     )
     anchor_profile.record_article(main_domain, entries)
@@ -1207,11 +1215,17 @@ def main(argv: list[str] | None = None) -> None:
 
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
+    # Silent-Drop Tripwire: track which line each drop happened at, partitioned
+    # by which gate ate it. The reconciliation log line lets the operator see
+    # "I had 20 input rows but only got 5 payloads — 12 validation, 3 generation".
+    validation_drops: list[int] = []
+    generation_drops: list[int] = []
 
     for line_num, row in enumerate(rows, start=1):
         errs = validate_input_payload(row, line_num)
         if errs:
             all_errors.extend(errs)
+            validation_drops.append(line_num)
             continue
         try:
             for payload in _dispatch_row(
@@ -1227,6 +1241,25 @@ def main(argv: list[str] | None = None) -> None:
                 outputs.append(payload)
         except Exception as exc:
             all_errors.append(f"line {line_num}: generation error: {exc}")
+            generation_drops.append(line_num)
+
+    # Emit the Silent-Drop Tripwire reconciliation BEFORE the exit guard so
+    # failed runs still surface a delta summary. Operator grep target:
+    # `RECON plan_reconciliation`.
+    plan_logger.recon(
+        "plan_reconciliation",
+        input_rows=len(rows),
+        output_rows=len(outputs),
+        delta=len(rows) - len(outputs),
+        dropped={
+            "validation": len(validation_drops),
+            "generation": len(generation_drops),
+        },
+        dropped_line_numbers={
+            "validation": validation_drops,
+            "generation": generation_drops,
+        },
+    )
 
     if all_errors:
         for err in all_errors:

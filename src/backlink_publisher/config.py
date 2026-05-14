@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import stat
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .errors import DependencyError, InputValidationError
+from .logger import plan_logger
 from .url_utils import validate_https_url, validate_main_domain_url
 
 _log = logging.getLogger(__name__)
@@ -125,6 +128,46 @@ class LLMProviderConfig:
     timeout_s: float = 30.0
 
 
+@dataclass(frozen=True)
+class AnchorAlarmOverride:
+    """One override row in ``[[anchor_alarm.override]]``.
+
+    Matches a target by ``scope``: ``"url"`` matches the entry's full
+    ``target_url``; ``"domain"`` matches its ``main_domain``. ``match`` is the
+    exact string compared (no glob/regex — keep config behavior obvious).
+
+    Each threshold field is optional; ``None`` means "fall through to the next
+    precedence layer for this field". A row with all three fields ``None`` is
+    rejected as a config error (it would have no effect — almost certainly a
+    typo).
+    """
+
+    match: str
+    scope: str  # "url" | "domain"
+    entropy_floor: float | None = None
+    exact_ratio_ceiling: float | None = None
+    top3_concentration_ceiling: float | None = None
+
+
+@dataclass
+class AnchorAlarmConfig:
+    """Operator-tunable thresholds for the anchor distribution alarm.
+
+    Three global defaults plus an ordered list of overrides. Resolution
+    precedence per target (highest wins): per-target-URL > per-`main_domain` >
+    these globals > hardcoded constants in ``anchor_metrics``. Partial-field
+    overrides fall through layer-by-layer.
+
+    Defaults of ``None`` mean "use the hardcoded constants from
+    ``anchor_metrics``". Setting any value here overrides only that field.
+    """
+
+    entropy_floor: float | None = None
+    exact_ratio_ceiling: float | None = None
+    top3_concentration_ceiling: float | None = None
+    overrides: list[AnchorAlarmOverride] = field(default_factory=list)
+
+
 @dataclass
 class Config:
     blogger_blog_ids: dict[str, str] = field(default_factory=dict)
@@ -188,6 +231,13 @@ class Config:
     Populated from ``[targets."<main_domain>"]`` entries that carry the
     required three-URL schema (``main_url`` + ``list_url`` + three non-empty
     pools). Round-tripped by ``save_config(target_three_url=...)``."""
+
+    anchor_alarm: AnchorAlarmConfig = field(default_factory=AnchorAlarmConfig)
+    """Operator-tunable thresholds for ``report-anchors`` distribution alarm.
+
+    Populated from ``[anchor_alarm]`` in config.toml. Globals + per-target
+    overrides. Not round-tripped by ``save_config`` — manual edit only.
+    See ``anchor_metrics.resolve_thresholds`` for precedence rules."""
 
     @property
     def config_dir(self) -> Path:
@@ -275,6 +325,8 @@ def load_config(path: Path | None = None) -> Config:
         config_path=config_path,
     )
 
+    anchor_alarm = _parse_anchor_alarm(data.get("anchor_alarm"))
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -287,6 +339,7 @@ def load_config(path: Path | None = None) -> Config:
         anchor_proportions=anchor_proportions,
         llm_anchor_provider=llm_anchor_provider,
         target_three_url=target_three_url,
+        anchor_alarm=anchor_alarm,
     )
 
 
@@ -606,6 +659,124 @@ def _parse_anchor_proportions(anchor_section: Any) -> dict[str, float]:
     return result
 
 
+_ANCHOR_ALARM_THRESHOLD_FIELDS: tuple[str, ...] = (
+    "entropy_floor",
+    "exact_ratio_ceiling",
+    "top3_concentration_ceiling",
+)
+
+
+def _coerce_threshold(section_label: str, key: str, value: Any) -> float:
+    """Coerce a threshold scalar; raise ``InputValidationError`` on bad input.
+
+    Anchor-alarm thresholds are non-load-bearing for publish-flow correctness,
+    but silent fall-through still masks operator typos — we mirror
+    ``_parse_anchor_proportions``'s raise-loud posture. Better to surface a
+    config bug at load time than to ship with the operator's intent silently
+    ignored.
+    """
+    if isinstance(value, bool):
+        # bool is a subclass of int — reject explicitly to catch obvious typos.
+        raise InputValidationError(
+            f"[{section_label}].{key} must be a number, got bool ({value!r})"
+        )
+    if not isinstance(value, (int, float)):
+        raise InputValidationError(
+            f"[{section_label}].{key} must be a number, got {type(value).__name__}"
+        )
+    f = float(value)
+    if not math.isfinite(f):
+        raise InputValidationError(
+            f"[{section_label}].{key} must be finite, got {value!r}"
+        )
+    if key == "entropy_floor":
+        if f < 0:
+            raise InputValidationError(
+                f"[{section_label}].entropy_floor must be ≥ 0, got {f!r}"
+            )
+    else:
+        # Ratio / concentration fields are bounded to [0, 1].
+        if not (0.0 <= f <= 1.0):
+            raise InputValidationError(
+                f"[{section_label}].{key} must be in [0.0, 1.0], got {f!r}"
+            )
+    return f
+
+
+def _parse_anchor_alarm(section: Any) -> AnchorAlarmConfig:
+    """Parse ``[anchor_alarm]`` section. Missing → defaults (no overrides).
+
+    Raises ``InputValidationError`` on malformed input — typos in a threshold
+    key, non-numeric values, unknown scope, or an override row whose every
+    threshold field is absent (a row with no effect is almost certainly a
+    config mistake).
+    """
+    if section is None:
+        return AnchorAlarmConfig()
+    if not isinstance(section, dict):
+        raise InputValidationError(
+            f"[anchor_alarm] must be a table, got {type(section).__name__}"
+        )
+
+    cfg = AnchorAlarmConfig()
+    overrides_raw = section.get("override")
+
+    # Pull globals out of the section.
+    for key, value in section.items():
+        if key == "override":
+            continue
+        if key not in _ANCHOR_ALARM_THRESHOLD_FIELDS:
+            raise InputValidationError(
+                f"[anchor_alarm].{key} is not a known threshold "
+                f"(expected one of {_ANCHOR_ALARM_THRESHOLD_FIELDS} or 'override')"
+            )
+        coerced = _coerce_threshold("anchor_alarm", key, value)
+        setattr(cfg, key, coerced)
+
+    # Parse overrides. TOML maps [[anchor_alarm.override]] to a list of dicts.
+    if overrides_raw is not None:
+        if not isinstance(overrides_raw, list):
+            raise InputValidationError(
+                "[[anchor_alarm.override]] must be an array of tables"
+            )
+        parsed: list[AnchorAlarmOverride] = []
+        for i, row in enumerate(overrides_raw):
+            if not isinstance(row, dict):
+                raise InputValidationError(
+                    f"[[anchor_alarm.override]] row {i} must be a table"
+                )
+            match = row.get("match")
+            scope = row.get("scope")
+            if not isinstance(match, str) or not match:
+                raise InputValidationError(
+                    f"[[anchor_alarm.override]] row {i}: 'match' is required (non-empty string)"
+                )
+            if scope not in ("url", "domain"):
+                raise InputValidationError(
+                    f"[[anchor_alarm.override]] row {i}: 'scope' must be 'url' or 'domain', got {scope!r}"
+                )
+            kwargs: dict[str, float | None] = {}
+            for f_name in _ANCHOR_ALARM_THRESHOLD_FIELDS:
+                if f_name in row:
+                    kwargs[f_name] = _coerce_threshold(
+                        f"anchor_alarm.override[{i}]", f_name, row[f_name]
+                    )
+            if not kwargs:
+                raise InputValidationError(
+                    f"[[anchor_alarm.override]] row {i} sets no threshold fields — "
+                    f"row would have no effect. Add at least one of "
+                    f"{_ANCHOR_ALARM_THRESHOLD_FIELDS}, or delete the row."
+                )
+            for f_name in _ANCHOR_ALARM_THRESHOLD_FIELDS:
+                kwargs.setdefault(f_name, None)
+            parsed.append(
+                AnchorAlarmOverride(match=match, scope=scope, **kwargs)
+            )
+        cfg.overrides = parsed
+
+    return cfg
+
+
 def _parse_llm_anchor_provider(
     section: Any,
     *,
@@ -795,6 +966,148 @@ def load_blogger_token(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
 
+# Top-level TOML section roots that save_config writes from the Config
+# dataclass. Any other section on disk is preserved byte-for-byte by
+# _preserve_unknown_sections. Adding a new "known" section here means
+# save_config must also know how to write it back.
+_SAVE_CONFIG_KNOWN_ROOTS: frozenset[str] = frozenset(
+    {"blogger", "medium", "targets"}
+)
+
+# Cap on rolling config.toml snapshots kept under .config-history/.
+_CONFIG_HISTORY_MAX: int = 20
+
+# Matches a TOML top-level heading: `[section]`, `[[array.of.tables]]`,
+# `[quoted."dotted"]`. Captures the root (first dotted segment) so the caller
+# can decide whether to copy or skip. The lexer is intentionally not a full
+# TOML parser — it only needs to find section boundaries.
+_TOML_HEADING_RE = re.compile(
+    r"""
+    ^\s*\[\[?           # opening [ or [[
+    \s*
+    (?:
+        "([^"]+)"       # quoted root
+        |
+        ([^.\]\s"]+)    # bare root (no dots, brackets, whitespace)
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _toml_heading_root(line: str) -> str | None:
+    """Extract the root segment of a TOML heading line, or None if not a heading."""
+    m = _TOML_HEADING_RE.match(line)
+    if not m:
+        return None
+    return m.group(1) or m.group(2)
+
+
+def _preserve_unknown_sections(raw_text: str, known_roots: frozenset[str]) -> str:
+    """Return verbatim text of top-level sections whose root is not in ``known_roots``.
+
+    Walks the input line-by-line. When a TOML heading is encountered, the
+    section-membership state flips based on whether the root is known. Lines
+    inside an "unknown" section are appended verbatim — preserving comments,
+    key order, and whitespace. Lines before the first heading (file-level
+    comments) are dropped because save_config rewrites the file's preamble.
+
+    Edge cases:
+    - Empty input → empty output.
+    - Input with only known sections → empty output.
+    - Heading inside a string literal would fool the regex; we accept that
+      risk because TOML values rarely span lines or contain `[` at column 0,
+      and load_config would have rejected such a file at parse time anyway.
+    """
+    out: list[str] = []
+    keep_current = False  # before the first heading, drop preamble
+    for line in raw_text.splitlines():
+        root = _toml_heading_root(line)
+        if root is not None:
+            keep_current = root not in known_roots
+            if keep_current:
+                out.append(line)
+        elif keep_current:
+            out.append(line)
+    # Trailing newline keeps output well-formed when concatenated.
+    return ("\n".join(out) + "\n") if out else ""
+
+
+def _atomic_write_text(path: Path, text: str, mode: int = 0o600) -> None:
+    """Write ``text`` to ``path`` atomically via a sibling .new + replace.
+
+    Mirrors :func:`io_utils.atomic_write_json` for plain text. Readers see
+    either the old file or the fully written new one — never a torn write.
+    chmod best-effort; the rename is load-bearing.
+    """
+    tmp = path.with_name(path.name + ".new")
+    tmp.write_text(text, encoding="utf-8")
+    try:
+        os.chmod(tmp, mode)
+    except OSError:
+        pass
+    tmp.replace(path)
+
+
+def _snapshot_config(path: Path, max_history: int = _CONFIG_HISTORY_MAX) -> None:
+    """Best-effort: copy current ``path`` to ``.config-history/<UTC-ts>.toml``.
+
+    Pre-save snapshot for time-travel recovery. Failures (missing source,
+    unwritable dir, full disk) are logged but never raise — operator data
+    safety on the main save path dominates. Rotates oldest snapshots so the
+    directory does not grow unbounded.
+    """
+    if not path.exists():
+        return
+    snapshot_dir = path.parent / ".config-history"
+    try:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(snapshot_dir, stat.S_IRWXU)  # 0700
+        except OSError:
+            pass
+    except OSError as exc:
+        plan_logger.warn(
+            "config_snapshot_dir_failed",
+            path=str(snapshot_dir),
+            reason=type(exc).__name__,
+        )
+        return
+
+    # UTC ISO timestamp with colons replaced (Windows-safe).
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S.%fZ")
+    snap_path = snapshot_dir / f"{ts}.toml"
+    try:
+        snap_path.write_bytes(path.read_bytes())
+        try:
+            os.chmod(snap_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        except OSError:
+            pass
+    except OSError as exc:
+        plan_logger.warn(
+            "config_snapshot_write_failed",
+            path=str(snap_path),
+            reason=type(exc).__name__,
+        )
+        return
+
+    # Rotate: keep the newest `max_history` files by mtime.
+    try:
+        snapshots = sorted(
+            (p for p in snapshot_dir.glob("*.toml") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+        )
+        excess = len(snapshots) - max_history
+        for old in snapshots[:max(0, excess)]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    except OSError:
+        # Rotation failure is benign — operator will see one extra file.
+        pass
+
+
 def save_config(
     config: "Config",
     path: Path | None = None,
@@ -833,12 +1146,6 @@ def save_config(
 
     # Load parsed config (for merge logic on managed fields).
     existing = load_config(config_path)
-
-    # Capture raw section blocks so we can write back any non-managed sections
-    # verbatim. Comments inside unmanaged sections are preserved; the preamble
-    # (everything before the first table header) is dropped on purpose — we
-    # take ownership of the file header.
-    preserved_blocks = _read_unmanaged_sections(config_path)
 
     # Build blog_ids: start from config.blogger_blog_ids (may already be pre-set by caller),
     # then overlay extra_blogger_ids on top. If extra_blogger_ids is None, merge from existing.
@@ -928,17 +1235,40 @@ def save_config(
                 lines.append("insecure_tls = true")
         lines.append("")
 
-    # Append unmanaged sections verbatim (preserves comments + structure).
-    for block in preserved_blocks:
-        lines.extend(block)
+    # Preserve every top-level section save_config does not know how to write
+    # (e.g. [anchor.proportions], [anchor_alarm], [anchor_alarm.override],
+    # [llm.anchor_provider], [sites.*], [medium.browser], [medium.oauth]).
+    # This is the structural fix for the documented save_config data-loss bug —
+    # see feedback_config-save-overwrite-pattern.md.
+    preserved = ""
+    if config_path.exists():
+        try:
+            existing_raw = config_path.read_text(encoding="utf-8")
+            preserved = _preserve_unknown_sections(
+                existing_raw, _SAVE_CONFIG_KNOWN_ROOTS,
+            )
+        except OSError as exc:
+            plan_logger.warn(
+                "config_preserve_read_failed",
+                path=str(config_path),
+                reason=type(exc).__name__,
+            )
 
-    output = "\n".join(lines)
-    if not output.endswith("\n"):
-        output += "\n"
-    _atomic_write_text(config_path, output)
+    payload = "\n".join(lines)
+    if preserved:
+        # Single blank line separator between known sections and preserved bytes.
+        if not payload.endswith("\n"):
+            payload += "\n"
+        payload += "\n" + preserved
+
+    # Snapshot before overwrite — opportunistic, never blocks the main save.
+    _snapshot_config(config_path)
+
+    # Atomic write: .new + replace. Crash mid-write leaves original intact.
+    _atomic_write_text(config_path, payload)
 
 
-# ── helpers for save_config: TOML emission + raw-section preservation ───────
+# ── TOML emission helpers used by save_config's [targets.<domain>] writer ──
 
 
 def _toml_str(value: str) -> str:
@@ -952,102 +1282,6 @@ def _toml_list(values: list[str]) -> str:
     if not values:
         return "[]"
     return "[" + ", ".join(_toml_str(v) for v in values) + "]"
-
-
-# Sections this module rewrites. Anything else found in the raw file is
-# preserved verbatim by save_config so we don't silently drop user state.
-_MANAGED_SECTION_PATHS: frozenset[str] = frozenset({
-    "blogger", "blogger.oauth", "medium",
-})
-
-
-def _is_managed_section(header_line: str) -> bool:
-    """Return True if ``[header]`` is a section managed by ``save_config``."""
-    inner = header_line.strip()
-    if not (inner.startswith("[") and inner.endswith("]")):
-        return False
-    if inner.startswith("[["):
-        return False  # array-of-tables — never managed here
-    path = inner[1:-1].strip()
-    if path in _MANAGED_SECTION_PATHS:
-        return True
-    # [targets] and [targets."anything"] — always rewritten from in-memory state
-    if path == "targets" or path.startswith("targets."):
-        return True
-    return False
-
-
-def _read_unmanaged_sections(config_path: Path) -> list[list[str]]:
-    """Return raw-text blocks (each a list of lines incl. the header) for
-    sections in ``config_path`` that ``save_config`` does NOT manage.
-
-    Returns an empty list if the file does not exist or cannot be read.
-    The preamble (anything before the first ``[section]`` header) is dropped
-    — ``save_config`` takes ownership of the file head.
-    """
-    if not config_path.exists():
-        return []
-    try:
-        text = config_path.read_text(encoding="utf-8")
-    except OSError:
-        return []
-
-    blocks: list[list[str]] = []
-    current_header: str | None = None
-    current_body: list[str] = []
-
-    def _flush() -> None:
-        if current_header is None:
-            return
-        if _is_managed_section(current_header):
-            return
-        block = [current_header, *current_body]
-        # Ensure trailing blank line separates the block from what follows.
-        if not block or (block and block[-1].strip() != ""):
-            block.append("")
-        blocks.append(block)
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        is_header = (
-            stripped.startswith("[")
-            and not stripped.startswith("[[")
-            and stripped.endswith("]")
-            and not stripped.endswith("]]")
-        )
-        if is_header:
-            _flush()
-            current_header = stripped
-            current_body = []
-        else:
-            if current_header is None:
-                continue  # preamble — drop
-            current_body.append(line)
-    _flush()
-    return blocks
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write ``text`` to ``path`` atomically (tempfile → fsync → rename).
-
-    A failure between the temp-file write and the rename leaves the original
-    file intact; on rename failure we also clean up the temp file so repeated
-    saves don't leave a litter of ``.tmp`` files.
-    """
-    tmp_path = path.with_name(path.name + ".tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-    except Exception:
-        try:
-            if tmp_path.exists():
-                tmp_path.unlink()
-        except OSError:
-            pass
-        raise
 
 
 def save_blogger_token(data: dict[str, Any], path: Path | None = None) -> None:

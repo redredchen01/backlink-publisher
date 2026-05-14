@@ -15,10 +15,16 @@ from backlink_publisher.errors import InputValidationError
 
 
 def _stderr_without_warnings(stderr: str) -> str:
-    """Strip benign WARN log lines so tests can assert on real errors only."""
+    """Strip benign WARN + RECON log lines so tests can assert on real errors only.
+
+    RECON is the always-on Silent-Drop Tripwire reconciliation event emitted
+    at end-of-run regardless of --log-level. WARN lines are anchor-keyword
+    fallback notices and similar advisory signals."""
     lines = [
         line for line in stderr.splitlines()
-        if line and '"level": "WARN"' not in line
+        if line
+        and '"level": "WARN"' not in line
+        and '"level": "RECON"' not in line
     ]
     return "\n".join(lines)
 

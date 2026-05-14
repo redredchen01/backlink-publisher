@@ -605,6 +605,25 @@ def main(argv: list[str] | None = None) -> None:
     failed = [r for r in outputs if r.get("error") is not None]
     unverified = [r for r in successful if r.get("status", "").endswith("_unverified")]
 
+    # Silent-Drop Tripwire reconciliation — emitted BEFORE any exit guard so
+    # both happy and failure paths surface the input→output delta.
+    # `input_payloads` is the total payloads read; `output_rows` is rows
+    # written to stdout (= successful); other buckets count drops by reason.
+    publish_logger.recon(
+        "publish_reconciliation",
+        input_payloads=len(rows),
+        output_rows=len(successful),
+        delta=len(rows) - len(successful),
+        dropped={
+            "failed": len(failed),
+            "unverified": len(unverified),
+        },
+        dropped_ids={
+            "failed": [r.get("id", "") for r in failed],
+            "unverified": [r.get("id", "") for r in unverified],
+        },
+    )
+
     if successful:
         write_jsonl(successful)
 
