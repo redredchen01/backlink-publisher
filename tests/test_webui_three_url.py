@@ -449,3 +449,161 @@ class TestBindAssertion:
         monkeypatch.setenv("BACKLINK_PUBLISHER_ALLOW_NETWORK", "1")
         import webui
         assert webui._resolve_bind_host() == "0.0.0.0"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Content-fetch gate (plan 2026-05-14-007 Unit 4)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestContentFetchGate:
+    """The content-fetch gate runs at form-save time so the operator gets
+    field-level errors instantly rather than discovering the bad URL at
+    publish time. ``BACKLINK_NO_FETCH_VERIFY=1`` bypasses for dev.
+    """
+
+    def test_save_three_url_main_url_gate_failure_returns_422(
+        self, client, monkeypatch
+    ):
+        def _fail_main(urls, max_workers=5):
+            return {
+                u: (
+                    (False, "http_404", None)
+                    if "stale" in u
+                    else (True, None, "ok")
+                )
+                for u in urls
+            }
+
+        monkeypatch.setattr(
+            "webui.content_fetch.verify_urls_batch", _fail_main,
+        )
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://stale.example.com/",
+                "list_url": "https://other.example/list",
+                "work_urls": "",
+                "branded_pool": "B",
+                "partial_pool": "P",
+                "exact_pool": "E",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 422
+        body = resp.data.decode()
+        assert "main_url" in body
+        # Failure reason surfaces to the operator
+        assert "http_404" in body
+
+    def test_save_three_url_work_urls_partial_gate_failure(
+        self, client, monkeypatch
+    ):
+        def _fail_one(urls, max_workers=5):
+            return {
+                u: (
+                    (False, "http_200_no_title", None)
+                    if u.endswith("/bad")
+                    else (True, None, "ok")
+                )
+                for u in urls
+            }
+
+        monkeypatch.setattr(
+            "webui.content_fetch.verify_urls_batch", _fail_one,
+        )
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                "list_url": "https://x.com/list",
+                "work_urls": "https://x.com/good\nhttps://x.com/bad",
+                "branded_pool": "B",
+                "partial_pool": "P",
+                "exact_pool": "E",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 422
+        body = resp.data.decode()
+        assert "work_urls" in body
+        assert "/bad" in body
+        # The good URL should not be flagged
+        assert "http_200_no_title" in body
+
+    def test_save_three_url_all_urls_pass_gate_succeeds(
+        self, client
+    ):
+        """The autouse mock in conftest defaults everything to pass."""
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                "list_url": "https://x.com/list",
+                "work_urls": "",
+                "branded_pool": "B",
+                "partial_pool": "P",
+                "exact_pool": "E",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+
+    def test_save_three_url_env_bypass_skips_gate(
+        self, client, monkeypatch
+    ):
+        """BACKLINK_NO_FETCH_VERIFY=1 → gate is not called even when it
+        would fail. Use case: dev / staging environments with deliberately
+        unreachable URLs."""
+        call_count = {"n": 0}
+
+        def _tracking(urls, max_workers=5):
+            call_count["n"] += 1
+            return {u: (False, "http_404", None) for u in urls}
+
+        monkeypatch.setattr(
+            "webui.content_fetch.verify_urls_batch", _tracking,
+        )
+        monkeypatch.setenv("BACKLINK_NO_FETCH_VERIFY", "1")
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                "list_url": "https://x.com/list",
+                "work_urls": "",
+                "branded_pool": "B",
+                "partial_pool": "P",
+                "exact_pool": "E",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302, "bypass should let the save proceed"
+        assert call_count["n"] == 0, "gate must not be invoked under bypass"
+
+    def test_ce_plan_url_gate_failure_renders_error(
+        self, client, monkeypatch
+    ):
+        def _fail(urls, max_workers=5):
+            return {u: (False, "http_404", None) for u in urls}
+
+        monkeypatch.setattr(
+            "webui.content_fetch.verify_urls_batch", _fail,
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={"target_url": "https://stale.example/"},
+            follow_redirects=False,
+        )
+        # /ce:plan re-renders the index page with an inline error rather
+        # than 422; assert the error is surfaced
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "无可访问内容" in body or "http_404" in body
