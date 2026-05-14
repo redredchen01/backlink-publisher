@@ -167,7 +167,66 @@ def _run_resume(args: Any) -> None:
             except DependencyError as exc:
                 emit_error(str(exc), exit_code=3)
 
-    to_process = [item for item in ckpt["items"] if item["status"] in ("pending", "failed")]
+    # R13: hard re-validate each pending/failed item against the current
+    # gate (R2 body + R5 anchor) before resuming dispatch. Items whose
+    # payload was created under the buggy language_matches and are now
+    # contractually 'failed' get reclassified with a retro_* error_class
+    # and skipped from this resume run. --list-runs displays the
+    # error_class so the operator can see the reclassification.
+    # See plan 2026-05-14-001 Unit 7.
+    from .validate_backlinks import _enhance_payload  # local import to avoid cycle
+    retro_lang = 0
+    retro_anchor = 0
+    for item in ckpt["items"]:
+        if item["status"] not in ("pending", "failed"):
+            continue
+        # Skip items already classified retro_* (idempotent --resume).
+        if item.get("error_class") in (
+            checkpoint.RETRO_LANGUAGE_FAILED,
+            checkpoint.RETRO_ANCHOR_FAILED,
+        ):
+            continue
+        # Run validate-time gate against the stored payload. We pass the
+        # live config — branded_pool TOCTOU is accepted for v1 per plan
+        # Risks & Dependencies.
+        re_validated = _enhance_payload(dict(item["payload"]), config)
+        if re_validated["validation"]["status"] != "failed":
+            continue
+        errors_list = re_validated["validation"]["errors"]
+        # First error wins the classification — body language errors are
+        # listed before anchor errors per Unit 3's _enhance_payload order.
+        if errors_list and errors_list[0].startswith("body language"):
+            err_class = checkpoint.RETRO_LANGUAGE_FAILED
+            retro_lang += 1
+        else:
+            err_class = checkpoint.RETRO_ANCHOR_FAILED
+            retro_anchor += 1
+        checkpoint.update_item(
+            run_id,
+            item["id"],
+            "failed",
+            error="; ".join(errors_list),
+            error_class=err_class,
+        )
+        # Mutate the in-memory item too so the to_process filter below
+        # sees the updated error_class.
+        item["status"] = "failed"
+        item["error_class"] = err_class
+
+    if retro_lang or retro_anchor:
+        publish_logger.info(
+            f"resume: re-validated checkpoint — reclassified "
+            f"{retro_lang} retro_language_failed + {retro_anchor} retro_anchor_failed"
+        )
+
+    to_process = [
+        item for item in ckpt["items"]
+        if item["status"] in ("pending", "failed")
+        and item.get("error_class") not in (
+            checkpoint.RETRO_LANGUAGE_FAILED,
+            checkpoint.RETRO_ANCHOR_FAILED,
+        )
+    ]
 
     # warn on http_5xx items
     for item in to_process:
