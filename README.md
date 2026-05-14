@@ -217,6 +217,66 @@ attributes — behaviour on Medium is best-effort.)
 `save_config` does **not** write the `[targets]` section back. Edit
 `config.toml` by hand to add or update keyword pools.
 
+## Work-Themed Backlinks (Three-URL Form)
+
+Recommended for new projects (Plan 2026-05-13-004). Each generated article
+carries **three** backlinks pointing at the same target site:
+
+1. **`main_url`** — the brand-weight anchor (drawn from `branded_pool`).
+2. **`list_url`** — the discovery surface (anchor drawn 70% from `partial_pool`,
+   30% from `exact_pool`).
+3. **`work_url`** — one URL per article, anchor synthesised from the scraped
+   `<title>` via the `work_anchor_templates` (default templates: `{title}`,
+   `{title} 详情`, `{title} 推荐`, `{title} 介绍`).
+
+Anchor positions across the three paragraphs are permuted by a per-article
+seed (six possible orderings) so the link layout doesn't form a stable
+"main first / work last" fingerprint. All anchors render as
+`<a target="_blank" rel="noopener">` — **no `nofollow`** so dofollow weight
+transfers in full. The post-publish verifier (`link_attr_verifier`) flags
+any platform-injected `rel="nofollow"` so silent demotion (Medium and
+similar) surfaces in the publish report.
+
+### Configuring via WebUI
+
+Open `/sites` in the WebUI to fill the three-URL form. The form uses CSRF
+tokens and the page is bound to `127.0.0.1` by default — set
+`BACKLINK_PUBLISHER_ALLOW_NETWORK=1` to bind to a non-loopback address
+(only do this on a trusted network). The save button persists the
+configuration via the same `save_config` that `[blogger.oauth]` uses, so
+existing credentials and the legacy `[sites.*]` block are preserved.
+
+### Configuring via `config.toml`
+
+Equivalent TOML form:
+
+```toml
+[targets."https://your-site.com"]
+main_url = "https://your-site.com/"
+list_url = "https://your-site.com/list"
+work_urls = ["https://your-site.com/work/1", "https://your-site.com/work/2"]
+branded_pool = ["Your Site", "Your Site Hub"]
+partial_pool = ["site hub partial keyword"]
+exact_pool = ["site keyword"]
+# work_anchor_templates = ["{title}", "{title} 详情", "{title} 推荐", "{title} 介绍"]
+# list_path_blocklist = ["/tag/", "/category/", "/page/"]
+# insecure_tls = false
+```
+
+When `work_urls` is empty, the planner discovers candidates by fetching
+`/sitemap.xml` (recursing one level into `<sitemapindex>`), falling back
+to scraping `<a href>` elements off `list_url` with a default nav-path
+blocklist (`/tag/`, `/category/`, `/page/`, `/author/`, `/about`,
+`/contact`, `/search`, `/feed`).
+
+### Dual-path coexistence (no migration pressure)
+
+Sites that already have a `[sites."<domain>"]` block continue to use the
+zh-CN short-form scheduler (next section). Adding a `[targets."<domain>"]`
+three-URL block for the same domain just routes that domain through the
+work-themed planner instead — both paths are kept alive. A single INFO
+log notes the coexistence so you can decide when (or whether) to migrate.
+
 ## zh-CN Short-Form Anchor Profile Scheduler
 
 The default path above (`[targets."<domain>"].anchor_keywords`) drives en/ru

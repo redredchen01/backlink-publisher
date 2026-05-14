@@ -467,7 +467,7 @@ flowchart TB
 
 ---
 
-- [ ] **Unit 5b: WebUI form + 路由 + UX 状态 + CSRF + docs/example.toml**
+- [x] **Unit 5b: WebUI form + 路由 + UX 状态 + CSRF + docs/example.toml** ✅ shipped 2026-05-14
 
 **Goal:** WebUI 三连结表单 + scrape-preview + partial-failure 结果表 + save 确认 + 字段级验证错误；CSRF token + loopback-only bind 启动断言；同包含 README + config.example.toml 文档更新。
 
