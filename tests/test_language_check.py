@@ -96,3 +96,74 @@ def test_language_matches_unknown_requested_passes(detected: str) -> None:
 
 def test_language_matches_both_unknown() -> None:
     assert language_matches("unknown", "unknown") is True
+
+
+# --- Noise stripping: URLs, HTML tags, markdown link syntax (regression
+# for the work-themed-link-count fix that inflated en-score by appending
+# Latin-anchor "Further reading" paragraphs to zh-CN articles)
+
+
+def test_detect_zh_body_with_latin_urls_does_not_misclassify_as_en() -> None:
+    """A zh-CN body whose only Latin content is URL strings + HTML anchor
+    tags must still detect as zh-CN. Pre-fix the substring-based EN_HINTS
+    counter inflated on "a"/"i"/"in"/"on" matches inside URLs + attributes.
+    """
+    text = (
+        '在论坛上看到有人推荐 <a href="https://51acgs.com/animate/14529" '
+        'target="_blank" rel="noopener">51漫畫</a>，自己跟着看了一阵子。\n\n'
+        '<a href="https://51acgs.com/animate" target="_blank" rel="noopener">'
+        '51acgs</a> 是日常会扫一眼的页面。'
+    )
+    assert detect_language(text) == "zh-CN"
+
+
+def test_detect_zh_body_with_markdown_link_and_latin_anchors_stays_zh() -> None:
+    """zh-CN body with an appended "延伸阅读" paragraph containing markdown
+    links pointing at en.wikipedia.org / github.com etc must still detect
+    as zh-CN. This is the exact shape the work-themed branch emits.
+    """
+    text = (
+        "在论坛上看到有人推荐 51漫畫，自己跟着看了一阵子下来感觉不错。"
+        "更新频率比较稳定，整理也算细致。\n\n"
+        "延伸阅读：[Wikipedia](https://en.wikipedia.org), "
+        "[MDN](https://developer.mozilla.org), "
+        "[Stack Overflow](https://stackoverflow.com), "
+        "[GitHub](https://github.com)。"
+    )
+    assert detect_language(text) == "zh-CN"
+
+
+def test_detect_ru_body_with_latin_urls_stays_ru() -> None:
+    """Symmetric: a Russian body with Latin URLs must still detect as ru."""
+    text = (
+        "Это статья о машинном обучении, мы обсуждаем здесь детали. "
+        "<a href=\"https://github.com\">пример</a> и "
+        "[Wikipedia](https://en.wikipedia.org) — внешние ссылки."
+    )
+    assert detect_language(text) == "ru"
+
+
+def test_detect_en_body_unchanged_after_noise_strip() -> None:
+    """Stripping URLs + HTML must not break English detection — the
+    visible markdown anchor text + prose still carries the en signal."""
+    text = (
+        "This is an article about [GitHub](https://github.com) and "
+        "<a href=\"https://example.com\">how</a> you can use it. "
+        "The supporting links should not be the only signal."
+    )
+    assert detect_language(text) == "en"
+
+
+def test_detect_pure_url_only_text_returns_unknown() -> None:
+    """A body that is ENTIRELY noise (URLs + HTML, no prose) strips to
+    empty and falls into the unknown branch — not silently mis-classified.
+    """
+    text = (
+        '<a href="https://en.wikipedia.org">x</a> '
+        '<a href="https://github.com">y</a>'
+    )
+    # After stripping HTML the visible text is "x y" — both 1-char tokens
+    # match neither ZH_HINTS, RU_HINTS, nor multi-char EN_HINTS substrings
+    # → all scores zero → unknown. (The 1-char "x"/"y" don't appear as
+    # standalone hints in any list.)
+    assert detect_language(text) == "unknown"

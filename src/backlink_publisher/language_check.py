@@ -2,11 +2,49 @@
 
 from __future__ import annotations
 
+import re
+
 
 #: Languages the gate semantically distinguishes. Anything outside this set is
 #: treated as ``"unknown"`` for matching purposes (R3, see plan
 #: ``docs/plans/2026-05-14-001-feat-mandatory-linkcheck-lang-gate-plan.md``).
 SUPPORTED_LANGUAGES = frozenset({"zh-CN", "ru", "en"})
+
+
+#: Patterns removed from text BEFORE language scoring.
+#:
+#: The EN_HINTS substring-counting heuristic over-counts on URLs ("a" in
+#: "stackoverflow", "in" in "github"), HTML tag attributes (`target="_blank"`,
+#: `rel="noopener"`, `<a href`), and Latin anchor texts (Wikipedia, MDN) that
+#: are language-neutral by nature. Without stripping these, any zh-CN or ru
+#: article that embeds a few Latin-domain links can score as en. Order matters:
+#: strip markdown ``[text](url)`` first to preserve the visible anchor text,
+#: then bare URLs, then any remaining HTML tags + attributes.
+_NOISE_PATTERNS = (
+    # Markdown anchor: `[visible](https://example.com)` → keep `visible`.
+    # Must run BEFORE the HTML strip because `[...](...)` syntax isn't HTML.
+    (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),
+    # HTML tag with attributes — drop entirely (including URL-bearing
+    # attrs like `href="https://..."`, plus `target="_blank"`,
+    # `rel="noopener"`). Must run BEFORE the bare-URL strip so the greedy
+    # `\S+` URL regex doesn't eat HTML attribute closers when a URL is
+    # embedded inside an `href="..."` attribute.
+    (re.compile(r"<[^>]+>"), ""),
+    # Bare URL (http/https) outside any tag/markdown — drop entirely.
+    (re.compile(r"https?://\S+"), ""),
+)
+
+
+def _strip_noise(text: str) -> str:
+    """Remove URLs + HTML tags + markdown link syntax from ``text``.
+
+    Returns the cleaned text. Visible anchor text from markdown links is
+    preserved (it carries real language signal — Chinese anchor → Chinese
+    counts as such; Latin anchor → Latin counts).
+    """
+    for pattern, repl in _NOISE_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
 
 
 # Simple keyword-based language hints (no external dependency)
@@ -48,7 +86,12 @@ def detect_language(text: str) -> str:
     """Roughly detect the language of a text.
 
     Returns one of: 'zh-CN', 'ru', 'en', or 'unknown'.
+
+    URLs, HTML tags, and markdown link syntax are stripped before scoring —
+    they're language-neutral noise that previously inflated the en-score
+    enough to mis-classify zh-CN / ru articles containing Latin-domain links.
     """
+    text = _strip_noise(text)
     zh_score = _score_language(text, ZH_HINTS)
     ru_score = _score_language(text, RU_HINTS)
     en_score = _score_language(text, EN_HINTS)
