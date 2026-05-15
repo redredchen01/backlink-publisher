@@ -828,3 +828,284 @@ class TestContentFetchTTLWiring:
             assert content_fetch._DEFAULT_MAX_AGE_S is None, (
                 f"TTL={value} should leave TTL disabled"
             )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Plan 006: /sites form minimal-input — derivation helpers + autofilled flow
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestDeriveHelpers:
+    """Unit-level tests on _derive_*_pool helpers in webui.py.
+
+    These don't go through the Flask client; they call the helpers
+    directly to verify the fallback ladder (TDK → domain_label)."""
+
+    def test_branded_uses_tdk_title_when_present(self):
+        from webui import _derive_branded_pool
+        pool = _derive_branded_pool(
+            "https://x.com/",
+            {"title": "Real Site Name", "description": ""},
+        )
+        assert pool == ["Real Site Name"]
+
+    def test_branded_truncates_long_title(self):
+        from webui import _derive_branded_pool
+        pool = _derive_branded_pool(
+            "https://x.com/",
+            {"title": "A" * 50, "description": ""},
+        )
+        assert len(pool[0]) == 30
+        assert pool[0] == "A" * 30
+
+    def test_branded_falls_back_to_domain_label_without_tdk(self):
+        from webui import _derive_branded_pool
+        pool = _derive_branded_pool("https://51acgs.com/", None)
+        assert pool == ["51acgs"]
+
+    def test_branded_falls_back_when_title_empty(self):
+        from webui import _derive_branded_pool
+        pool = _derive_branded_pool(
+            "https://x.com/", {"title": "", "description": ""},
+        )
+        assert pool == ["x"]
+
+    def test_partial_splits_description_on_punctuation(self):
+        from webui import _derive_partial_pool
+        pool = _derive_partial_pool(
+            "https://x.com/",
+            {"title": "", "description": "免费阅读漫画。最新更新, 海量资源；ACG爱好者社区"},
+        )
+        # Should yield at most 3 phrases
+        assert len(pool) <= 3
+        # First three phrases are the punctuation-split prefix
+        assert "免费阅读漫画" in pool
+
+    def test_partial_keeps_max_3_phrases(self):
+        from webui import _derive_partial_pool, _DERIVED_PARTIAL_KEEP
+        pool = _derive_partial_pool(
+            "https://x.com/",
+            {"description": "a, b, c, d, e, f"},
+        )
+        assert len(pool) == _DERIVED_PARTIAL_KEEP
+
+    def test_partial_falls_back_to_domain_label_without_tdk(self):
+        from webui import _derive_partial_pool
+        pool = _derive_partial_pool("https://x.com/", None)
+        assert pool == ["x"]
+
+    def test_partial_falls_back_when_description_empty(self):
+        from webui import _derive_partial_pool
+        pool = _derive_partial_pool(
+            "https://x.com/", {"title": "T", "description": ""},
+        )
+        assert pool == ["x"]
+
+    def test_exact_always_domain_label(self):
+        from webui import _derive_exact_pool
+        assert _derive_exact_pool("https://51acgs.com/") == ["51acgs"]
+        assert _derive_exact_pool("https://www.51acgs.com/") == ["51acgs"]
+
+    def test_partial_truncates_long_phrase(self):
+        from webui import _derive_partial_pool, _DERIVED_PARTIAL_MAX
+        long_phrase = "X" * 100
+        pool = _derive_partial_pool(
+            "https://x.com/", {"description": long_phrase},
+        )
+        assert len(pool[0]) == _DERIVED_PARTIAL_MAX
+
+    def test_all_pools_always_non_empty(self):
+        """ThreeUrlConfig schema invariant: every derived pool is at least
+        length 1. Bottom line for all three derivers."""
+        from webui import _derive_branded_pool, _derive_partial_pool, _derive_exact_pool
+        for tdk in (None, {}, {"title": "", "description": ""}):
+            for url in ("https://a.com/", "https://b.c.d/"):
+                assert len(_derive_branded_pool(url, tdk)) >= 1
+                assert len(_derive_partial_pool(url, tdk)) >= 1
+                assert len(_derive_exact_pool(url)) >= 1
+
+
+class TestSitesMinimalInput:
+    """End-to-end through Flask client: POST /sites/save-three-url with
+    only main_url filled triggers server-side derivation + autofilled
+    redirect param. Banner renders via GET /sites?saved=...&autofilled=..."""
+
+    def test_minimal_post_succeeds_with_only_main_url(
+        self, client, monkeypatch
+    ):
+        """The plan's R1 scenario: paste main_url, leave everything else
+        empty, submit → 302 redirect, all derived fields persisted."""
+        monkeypatch.setattr(
+            "webui.fetch_full_tdk",
+            lambda url: {
+                "title": "Test Site",
+                "description": "免费内容。海量资源；专业社区",
+                "keywords": "",
+            },
+        )
+        monkeypatch.setattr(
+            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            lambda *a, **k: [
+                "https://x.com/work/1", "https://x.com/work/2",
+            ],
+        )
+
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                # Everything else empty
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302, resp.data[:500]
+
+        # Redirect URL contains saved + autofilled
+        location = resp.headers["Location"]
+        assert "saved=https://x.com" in location
+        assert "autofilled=" in location
+
+        # Disk state — all four pools non-empty + list_url + work_urls set
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        entry = cfg.target_three_url["https://x.com"]
+        assert entry.main_url == "https://x.com/"
+        assert entry.list_url == "https://x.com/"  # derived to main_url
+        assert entry.branded_pool == ["Test Site"]
+        assert len(entry.partial_pool) >= 1
+        assert entry.exact_pool == ["x"]
+        assert entry.work_urls == [
+            "https://x.com/work/1", "https://x.com/work/2",
+        ]
+
+    def test_tdk_fetch_failure_falls_back_to_domain_label(
+        self, client, monkeypatch
+    ):
+        """Network down / target unreachable → pools all fall back to
+        [domain_label]. Save still succeeds — ThreeUrlConfig schema
+        invariant (three pools non-empty) held."""
+        def _raise_tdk(url):
+            raise RuntimeError("simulated tdk fetch failure")
+
+        monkeypatch.setattr("webui.fetch_full_tdk", _raise_tdk)
+        # work_scraper also fails — empty work_urls is allowed.
+        def _raise_scraper(*a, **k):
+            raise RuntimeError("simulated scrape failure")
+        monkeypatch.setattr(
+            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            _raise_scraper,
+        )
+
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://51acgs.com/",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        entry = cfg.target_three_url["https://51acgs.com"]
+        # All three pools fall back to domain label
+        assert entry.branded_pool == ["51acgs"]
+        assert entry.partial_pool == ["51acgs"]
+        assert entry.exact_pool == ["51acgs"]
+        # work_urls allowed empty when scraper fails
+        assert entry.work_urls == []
+
+    def test_partial_fill_only_derives_missing_fields(
+        self, client, monkeypatch
+    ):
+        """Operator supplies branded_pool but leaves partial/exact empty.
+        Server derives only the empty fields; supplied values pass through."""
+        monkeypatch.setattr(
+            "webui.fetch_full_tdk",
+            lambda url: {"title": "Some Title", "description": "Some desc"},
+        )
+        monkeypatch.setattr(
+            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            lambda *a, **k: [],
+        )
+
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                "branded_pool": "MyBrand\nMyBrandAlt",
+                # partial / exact empty
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        entry = cfg.target_three_url["https://x.com"]
+        # User-supplied branded preserved verbatim
+        assert entry.branded_pool == ["MyBrand", "MyBrandAlt"]
+        # partial derived from TDK description
+        assert "Some desc" in entry.partial_pool or entry.partial_pool == ["Some desc"]
+        # exact derived
+        assert entry.exact_pool == ["x"]
+
+        # Redirect's autofilled list should NOT contain branded_pool
+        location = resp.headers["Location"]
+        assert "branded_pool" not in location
+
+    def test_get_with_autofilled_renders_banner(self, client):
+        resp = client.get("/sites?saved=https://x.com&autofilled=list_url,partial_pool")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "已自动派生" in body
+        assert "list_url" in body
+        assert "partial_pool" in body
+
+    def test_get_without_autofilled_no_banner(self, client):
+        resp = client.get("/sites")
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        assert "已自动派生" not in body
+
+    def test_full_fill_no_autofilled_param(self, client, monkeypatch):
+        """Operator fills every field — no derivation triggered, redirect
+        URL has saved=... but NOT autofilled=..."""
+        # Mocks shouldn't be reached but set them defensively.
+        monkeypatch.setattr(
+            "webui.fetch_full_tdk", lambda url: {"title": "x", "description": ""},
+        )
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={
+                "csrf_token": token,
+                "main_url": "https://x.com/",
+                "list_url": "https://x.com/list",
+                "work_urls": "https://x.com/w",
+                "branded_pool": "B",
+                "partial_pool": "P",
+                "exact_pool": "E",
+            },
+            follow_redirects=False,
+        )
+        assert resp.status_code == 302
+        location = resp.headers["Location"]
+        assert "saved=https://x.com" in location
+        assert "autofilled=" not in location
+
+    def test_invalid_main_url_still_422(self, client):
+        """Plan 006 doesn't relax main_url's required+https rule."""
+        token = _fetch_csrf(client)
+        resp = client.post(
+            "/sites/save-three-url",
+            data={"csrf_token": token, "main_url": "http://no-https/"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 422

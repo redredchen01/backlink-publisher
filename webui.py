@@ -4211,6 +4211,69 @@ def _parse_lines(raw: str) -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
+# ── Plan 2026-05-14-006: /sites form derivation helpers ────────────────────
+
+
+_DERIVED_BRANDED_MAX: int = 30
+_DERIVED_PARTIAL_MAX: int = 60
+_DERIVED_PARTIAL_KEEP: int = 3
+_DERIVED_PARTIAL_SPLIT_RE = __import__("re").compile(r"[。.；;，,、]+")
+
+
+def _derive_branded_pool(main_url: str, tdk: dict | None) -> list[str]:
+    """Derive a non-empty ``branded_pool`` for ``main_url``.
+
+    Source priority:
+    1. TDK title (trimmed, truncated to 30 chars) → 1-item list.
+    2. Domain label fallback (e.g., ``51acgs``) — always non-empty so the
+       ThreeUrlConfig schema's "three pools non-empty" invariant holds.
+
+    Plan 2026-05-14-006 Unit 1.
+    """
+    from backlink_publisher.config import _domain_label
+    if tdk and tdk.get("title"):
+        title = str(tdk["title"]).strip()
+        if title:
+            return [title[:_DERIVED_BRANDED_MAX]]
+    return [_domain_label(main_url)]
+
+
+def _derive_partial_pool(main_url: str, tdk: dict | None) -> list[str]:
+    """Derive a non-empty ``partial_pool`` for ``main_url``.
+
+    Splits TDK description on punctuation (。 . ； ; ， , 、) into phrases,
+    keeps the first 3 non-empty trimmed entries truncated to 60 chars each.
+    Falls back to ``[domain_label]`` when TDK is missing / empty / yields
+    no usable phrases.
+
+    Plan 2026-05-14-006 Unit 1.
+    """
+    from backlink_publisher.config import _domain_label
+    if tdk and tdk.get("description"):
+        desc = str(tdk["description"]).strip()
+        if desc:
+            phrases = [
+                p.strip()[:_DERIVED_PARTIAL_MAX]
+                for p in _DERIVED_PARTIAL_SPLIT_RE.split(desc)
+                if p and p.strip()
+            ]
+            if phrases:
+                return phrases[:_DERIVED_PARTIAL_KEEP]
+    return [_domain_label(main_url)]
+
+
+def _derive_exact_pool(main_url: str) -> list[str]:
+    """Always-non-empty ``exact_pool`` — single-element ``[domain_label]``.
+
+    Plan 2026-05-14-006 Unit 1. Exact-match anchor pools are operator-
+    curated; auto-derivation from TDK risks generating partial-match
+    phrases that misclassify in the anchor-distribution metrics. Keep it
+    cheap and conservative until an operator overrides.
+    """
+    from backlink_publisher.config import _domain_label
+    return [_domain_label(main_url)]
+
+
 _SITES_HTML = """
 <!doctype html>
 <html lang="zh-CN">
@@ -4236,6 +4299,16 @@ _SITES_HTML = """
   {% if saved %}
     <div class="toast-saved mb-3">✓ 已保存站点：{{ saved }}</div>
   {% endif %}
+  {% if autofilled %}
+    <div class="alert alert-info mb-3" role="status">
+      <strong>已自动派生：</strong>
+      <span class="mb-0">{{ autofilled|join('、') }}</span>
+      <div class="small text-muted mt-1">
+        系统根据 main_url 的页面元数据（title / description）+ 域名 label 派生了上述字段。
+        如需调整，回到该字段直接编辑即可（下次提交会覆盖派生值）。
+      </div>
+    </div>
+  {% endif %}
   {% if flash_msg %}
     <div class="alert alert-{{ flash_type or 'info' }}">{{ flash_msg }}</div>
   {% endif %}
@@ -4257,45 +4330,49 @@ _SITES_HTML = """
       </div>
 
       <div class="mb-3">
-        <label class="form-label" for="f-list-url">list_url（同类作品发现源）</label>
+        <label class="form-label" for="f-list-url">list_url（同类作品发现源）<span class="text-muted small">— 可选</span></label>
         <input id="f-list-url" name="list_url" class="form-control"
                aria-describedby="err-list-url"
                value="{{ form.list_url|default('') }}"
                placeholder="https://your-site.com/list">
-        <div class="help">work_urls 留空时会从此页的 sitemap.xml 自动发现作品。</div>
+        <div class="help">留空：默认用 main_url 当列表页源。work_urls 留空时会从此页的 sitemap.xml 自动发现作品。</div>
         {% if errors.list_url %}<span id="err-list-url" class="field-error">{{ errors.list_url }}</span>{% endif %}
       </div>
 
       <div class="mb-3">
-        <label class="form-label" for="f-work-urls">work_urls（每行一个，留空则自动发现）</label>
+        <label class="form-label" for="f-work-urls">work_urls（每行一个）<span class="text-muted small">— 可选</span></label>
         <textarea id="f-work-urls" name="work_urls" class="form-control" rows="4"
                   aria-describedby="err-work-urls"
                   placeholder="https://your-site.com/work/1&#10;https://your-site.com/work/2">{{ form.work_urls|default('') }}</textarea>
+        <div class="help">留空：从 list_url 的 sitemap.xml 自动发现（fallback 到 HTML 链接抓取）。失败时 work_urls 留空 list、dispatcher 再试。</div>
         {% if errors.work_urls %}<span id="err-work-urls" class="field-error">{{ errors.work_urls }}</span>{% endif %}
       </div>
     </fieldset>
 
     <fieldset>
-      <legend>② Anchor Pools</legend>
+      <legend>② Anchor Pools <span class="text-muted small" style="font-weight:400;">（任一池留空将被自动派生）</span></legend>
 
       <div class="mb-3">
-        <label class="form-label" for="f-branded">branded_pool（每行一个，随机抽一项）</label>
+        <label class="form-label" for="f-branded">branded_pool（每行一个，随机抽一项）<span class="text-muted small">— 可选</span></label>
         <textarea id="f-branded" name="branded_pool" class="form-control" rows="3"
                   aria-describedby="err-branded">{{ form.branded_pool|default('') }}</textarea>
+        <div class="help">留空：用 main_url 的 page title 派生（截断 30 字）；TDK 失败时 fallback 到域名 label。</div>
         {% if errors.branded_pool %}<span class="field-error" id="err-branded">{{ errors.branded_pool }}</span>{% endif %}
       </div>
 
       <div class="row">
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="f-partial">partial_pool（每行一个，70%）</label>
+          <label class="form-label" for="f-partial">partial_pool（每行一个，70%）<span class="text-muted small">— 可选</span></label>
           <textarea id="f-partial" name="partial_pool" class="form-control" rows="3"
                     aria-describedby="err-partial">{{ form.partial_pool|default('') }}</textarea>
+          <div class="help">留空：从 page description 按标点切句取前 3 项。</div>
           {% if errors.partial_pool %}<span class="field-error" id="err-partial">{{ errors.partial_pool }}</span>{% endif %}
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label" for="f-exact">exact_pool（每行一个，30%）</label>
+          <label class="form-label" for="f-exact">exact_pool（每行一个，30%）<span class="text-muted small">— 可选</span></label>
           <textarea id="f-exact" name="exact_pool" class="form-control" rows="3"
                     aria-describedby="err-exact">{{ form.exact_pool|default('') }}</textarea>
+          <div class="help">留空：派生为 [域名 label]。exact 锚文本建议手动设以避免分布报警。</div>
           {% if errors.exact_pool %}<span class="field-error" id="err-exact">{{ errors.exact_pool }}</span>{% endif %}
         </div>
       </div>
@@ -4420,6 +4497,10 @@ def sites_form():
     cfg = load_config()
     domain_query = (request.args.get("domain") or "").rstrip("/")
     saved = request.args.get("saved", "")
+    # Plan 006: autofilled query string (csv of derived field names) — banner
+    # in _SITES_HTML lists them so the operator sees what the server filled.
+    autofilled_raw = request.args.get("autofilled", "")
+    autofilled = [f for f in autofilled_raw.split(",") if f.strip()] if autofilled_raw else []
 
     form: dict[str, str] = {}
     if domain_query:
@@ -4443,6 +4524,7 @@ def sites_form():
         form=form,
         errors={},
         saved=saved,
+        autofilled=autofilled,
         flash_type=request.args.get("flash_type"),
         flash_msg=request.args.get("flash_msg"),
         default_templates=", ".join(DEFAULT_WORK_TEMPLATES),
@@ -4471,9 +4553,15 @@ def sites_save_three_url():
     if not main_url:
         errors["main_url"] = "必须 https + host-root + 单一尾斜杠（例：https://your-site.com/）"
 
-    list_url = validate_https_url(raw["list_url"])
-    if not list_url:
-        errors["list_url"] = "必须 https"
+    # Plan 006: list_url is now OPTIONAL. Empty stays empty — server-side
+    # derivation runs later, after main_url passes the gate.
+    list_url: str = ""
+    if raw["list_url"]:
+        validated = validate_https_url(raw["list_url"])
+        if not validated:
+            errors["list_url"] = "必须 https"
+        else:
+            list_url = validated
 
     work_urls_raw = _parse_lines(raw["work_urls"])
     work_urls: list[str] = []
@@ -4487,15 +4575,11 @@ def sites_save_three_url():
     if bad_work:
         errors["work_urls"] = f"以下 URL 必须 https：{', '.join(bad_work)}"
 
+    # Plan 006: all four pools are now OPTIONAL. Empty triggers server-side
+    # derivation after the main_url gate passes.
     branded_pool = _parse_lines(raw["branded_pool"])
-    if not branded_pool:
-        errors["branded_pool"] = "至少需要一项 branded anchor"
     partial_pool = _parse_lines(raw["partial_pool"])
-    if not partial_pool:
-        errors["partial_pool"] = "至少需要一项 partial anchor"
     exact_pool = _parse_lines(raw["exact_pool"])
-    if not exact_pool:
-        errors["exact_pool"] = "至少需要一项 exact anchor"
 
     templates = _parse_lines(raw["work_anchor_templates"]) or list(
         DEFAULT_WORK_TEMPLATES
@@ -4526,10 +4610,76 @@ def sites_save_three_url():
             form=raw,
             errors=errors,
             saved="",
+            autofilled=[],
             flash_type="danger",
             flash_msg="请修正下方表单错误",
             default_templates=", ".join(DEFAULT_WORK_TEMPLATES),
         ), 422
+
+    # ── Plan 006: server-side derivation of optional fields ─────────────────
+    #
+    # At this point: main_url passed both structural validation and the
+    # content gate. list_url / work_urls / pools may be empty — derive each
+    # in turn and record which fields were filled so the redirect banner
+    # can tell the operator.
+    fields_derived: list[str] = []
+
+    # Try one TDK fetch for branded/partial derivation. Falls back to
+    # domain-label fallbacks if fetch fails (network / 404 / parse error).
+    tdk: dict | None = None
+    if not branded_pool or not partial_pool:
+        try:
+            tdk = fetch_full_tdk(main_url)
+        except Exception as exc:  # noqa: BLE001
+            plan_logger.warn(
+                "tdk_fetch_failed",
+                url=main_url,
+                reason=type(exc).__name__,
+            )
+
+    if not list_url:
+        list_url = main_url
+        fields_derived.append("list_url")
+
+    if not branded_pool:
+        branded_pool = _derive_branded_pool(main_url, tdk)
+        fields_derived.append("branded_pool")
+    if not partial_pool:
+        partial_pool = _derive_partial_pool(main_url, tdk)
+        fields_derived.append("partial_pool")
+    if not exact_pool:
+        exact_pool = _derive_exact_pool(main_url)
+        fields_derived.append("exact_pool")
+
+    if not work_urls:
+        # Auto-discover from list_url's sitemap / HTML. Failures are
+        # tolerated — empty work_urls is a valid ThreeUrlConfig state and
+        # the dispatcher will re-try at run time.
+        try:
+            from backlink_publisher.work_scraper import fetch_work_urls_from_list
+            discovered = fetch_work_urls_from_list(
+                list_url,
+                main_url=main_url,
+                max_candidates=10,
+                insecure_tls=raw["insecure_tls"],
+            )
+            if discovered:
+                work_urls = discovered
+                fields_derived.append("work_urls")
+        except Exception as exc:  # noqa: BLE001
+            plan_logger.warn(
+                "work_urls_discovery_failed",
+                main_url=main_url,
+                list_url=list_url,
+                reason=type(exc).__name__,
+            )
+
+    if fields_derived:
+        plan_logger.recon(
+            "sites_save_autofilled",
+            main_url=main_url,
+            fields=fields_derived,
+        )
 
     entry = ThreeUrlConfig(
         main_url=main_url,
@@ -4554,7 +4704,11 @@ def sites_save_three_url():
         target_three_url=merged,
     )
 
-    return redirect(f"/sites?saved={domain_key}")
+    redirect_url = f"/sites?saved={domain_key}"
+    if fields_derived:
+        from urllib.parse import quote as _quote
+        redirect_url += f"&autofilled={_quote(','.join(fields_derived))}"
+    return redirect(redirect_url)
 
 
 @app.route("/sites/scrape-preview", methods=["GET"])
