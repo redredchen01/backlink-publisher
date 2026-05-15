@@ -665,3 +665,165 @@ class TestUpgradeTargetToThreeUrl:
         assert len(rt.branded_pool) >= 1
         assert len(rt.partial_pool) >= 1
         assert len(rt.exact_pool) >= 1
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# merge_site_url_categories — in-place TOML merge (Plan 009 deferred work)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestMergeSiteUrlCategories:
+    """In-place TOML merge for [sites."<main>".url_categories]. Closes
+    brainstorm Q3: homepage form writes category_url to BOTH
+    target_three_url.list_url AND sites.<main>.url_categories.category.
+    Existing operator-curated keys (hot, animate, topic) are preserved."""
+
+    def test_creates_new_section_when_absent(self, tmp_path):
+        from backlink_publisher.config import (
+            load_config,
+            merge_site_url_categories,
+        )
+
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            '[blogger]\n"https://x.com" = "1"\n', encoding="utf-8",
+        )
+        merge_site_url_categories(
+            "https://x.com/",
+            {"home": "https://x.com/", "category": "https://x.com/cat"},
+            path=cfg_path,
+        )
+        content = cfg_path.read_text(encoding="utf-8")
+        assert '[sites."https://x.com".url_categories]' in content
+        assert 'home = "https://x.com/"' in content
+        assert 'category = "https://x.com/cat"' in content
+
+    def test_preserves_existing_unrelated_keys(self, tmp_path):
+        from backlink_publisher.config import merge_site_url_categories
+
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            '[blogger]\n"https://x.com" = "1"\n\n'
+            '[sites."https://x.com".url_categories]\n'
+            'home = "https://x.com/"\n'
+            'hot = "https://x.com/hot"\n'
+            'animate = "https://x.com/animate"\n'
+            'topic = "https://x.com/topic"\n',
+            encoding="utf-8",
+        )
+        merge_site_url_categories(
+            "https://x.com/",
+            {"category": "https://x.com/cat"},
+            path=cfg_path,
+        )
+        content = cfg_path.read_text(encoding="utf-8")
+        # hot/animate/topic preserved verbatim
+        assert 'hot = "https://x.com/hot"' in content
+        assert 'animate = "https://x.com/animate"' in content
+        assert 'topic = "https://x.com/topic"' in content
+        # new key appended
+        assert 'category = "https://x.com/cat"' in content
+
+    def test_overwrites_existing_same_key(self, tmp_path):
+        from backlink_publisher.config import merge_site_url_categories
+
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            '[sites."https://x.com".url_categories]\n'
+            'category = "https://x.com/old-cat"\n'
+            'hot = "https://x.com/hot"\n',
+            encoding="utf-8",
+        )
+        merge_site_url_categories(
+            "https://x.com/",
+            {"category": "https://x.com/NEW-cat"},
+            path=cfg_path,
+        )
+        content = cfg_path.read_text(encoding="utf-8")
+        assert 'category = "https://x.com/NEW-cat"' in content
+        assert 'category = "https://x.com/old-cat"' not in content
+        # Unrelated key still present
+        assert 'hot = "https://x.com/hot"' in content
+
+    def test_load_config_round_trip(self, tmp_path):
+        """After the merge, load_config can parse the section back into
+        Config.site_url_categories with all keys present."""
+        from backlink_publisher.config import (
+            load_config,
+            merge_site_url_categories,
+        )
+
+        cfg_path = tmp_path / "config.toml"
+        merge_site_url_categories(
+            "https://x.com/",
+            {"home": "https://x.com/", "category": "https://x.com/cat"},
+            path=cfg_path,
+        )
+        cfg = load_config(cfg_path)
+        cats = cfg.site_url_categories.get("https://x.com", {})
+        assert cats.get("home") == "https://x.com/"
+        assert cats.get("category") == "https://x.com/cat"
+
+    def test_empty_additions_is_noop(self, tmp_path):
+        from backlink_publisher.config import merge_site_url_categories
+
+        cfg_path = tmp_path / "config.toml"
+        original = '[blogger]\n"https://x.com" = "1"\n'
+        cfg_path.write_text(original, encoding="utf-8")
+        merge_site_url_categories(
+            "https://x.com/", {}, path=cfg_path,
+        )
+        assert cfg_path.read_text(encoding="utf-8") == original
+
+    def test_writes_to_nonexistent_file(self, tmp_path):
+        """Operator may not have a config.toml yet — first write should
+        create one rather than fail."""
+        from backlink_publisher.config import merge_site_url_categories
+
+        cfg_path = tmp_path / "fresh-config.toml"
+        assert not cfg_path.exists()
+        merge_site_url_categories(
+            "https://x.com/",
+            {"home": "https://x.com/"},
+            path=cfg_path,
+        )
+        assert cfg_path.exists()
+        content = cfg_path.read_text(encoding="utf-8")
+        assert "[sites." in content
+        assert 'home = "https://x.com/"' in content
+
+    def test_snapshot_taken_before_overwrite(self, tmp_path):
+        """When the file exists, _snapshot_config copies it into
+        .config-history/ before our merge writes. Mirrors save_config's
+        safety net."""
+        from backlink_publisher.config import merge_site_url_categories
+
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            '[sites."https://x.com".url_categories]\nold_key = "old"\n',
+            encoding="utf-8",
+        )
+        merge_site_url_categories(
+            "https://x.com/",
+            {"category": "https://x.com/cat"},
+            path=cfg_path,
+        )
+        history = (tmp_path / ".config-history")
+        assert history.exists() and history.is_dir()
+        snapshots = list(history.iterdir())
+        assert len(snapshots) >= 1, "expected at least one snapshot"
+
+    def test_control_char_in_main_url_rejected(self, tmp_path):
+        """Defence against malformed main_url that would break the TOML
+        basic string quoting. The webui handler validates main_url
+        upstream, but defensive rejection at this layer is cheap."""
+        from backlink_publisher.config import merge_site_url_categories
+        from backlink_publisher.errors import InputValidationError
+
+        cfg_path = tmp_path / "config.toml"
+        with pytest.raises(InputValidationError):
+            merge_site_url_categories(
+                "https://x.com/\nmalicious=true",
+                {"home": "x"},
+                path=cfg_path,
+            )

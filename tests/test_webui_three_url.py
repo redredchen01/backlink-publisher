@@ -1109,3 +1109,112 @@ class TestSitesMinimalInput:
             follow_redirects=False,
         )
         assert resp.status_code == 422
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Plan 009 deferred: url_categories write on homepage submit
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestHomepageWritesUrlCategories:
+    """Plan 009 deferred work: homepage `/ce:plan` submit triggers BOTH
+    target_three_url.list_url write AND sites.<main>.url_categories.category
+    write — so the zh-CN scheduler path can pick up the configured category
+    without a manual /sites visit."""
+
+    def test_post_with_category_writes_url_categories_table(
+        self, client, monkeypatch, _isolated_config_dir,
+    ):
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "T", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://example.com/",
+                "category_url": "https://example.com/cat",
+            },
+        )
+        assert resp.status_code == 200, resp.data[:300]
+
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        cats = cfg.site_url_categories.get("https://example.com", {})
+        assert cats.get("home") == "https://example.com/"
+        assert cats.get("category") == "https://example.com/cat"
+
+    def test_post_without_category_still_writes_home(
+        self, client, monkeypatch, _isolated_config_dir,
+    ):
+        """Even when operator only fills main_url + work_url, home gets
+        written automatically. (The Q3 contract says home = main_url is
+        always auto-filled when the form persists anything.)
+
+        Note: a POST with no category and no work hits the no-persist
+        early-return so url_categories isn't touched — that's expected."""
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "T", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://only-work.example/",
+                "work_url": "https://only-work.example/article/1",
+            },
+        )
+        assert resp.status_code == 200
+
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        cats = cfg.site_url_categories.get("https://only-work.example", {})
+        # home auto-set even when only work_url is supplied
+        assert cats.get("home") == "https://only-work.example/"
+        # category absent because operator didn't fill it
+        assert "category" not in cats
+
+    def test_post_preserves_existing_hot_animate_topic(
+        self, client, monkeypatch, _isolated_config_dir,
+    ):
+        """If the operator previously hand-edited url_categories with
+        hot/animate/topic keys, a homepage submit must NOT clobber them."""
+        from backlink_publisher.config import (
+            load_config,
+            merge_site_url_categories,
+        )
+
+        # Pre-existing operator config.
+        cfg_path = _isolated_config_dir / "config.toml"
+        merge_site_url_categories(
+            "https://x.com/",
+            {
+                "home": "https://x.com/",
+                "hot": "https://x.com/hot",
+                "animate": "https://x.com/animate",
+                "topic": "https://x.com/topic",
+            },
+            path=cfg_path,
+        )
+
+        monkeypatch.setattr(
+            "webui.fetch_url_metadata",
+            lambda url: {"url": url, "title": "T", "description": "", "status": "success"},
+        )
+        resp = client.post(
+            "/ce:plan",
+            data={
+                "main_url": "https://x.com/",
+                "category_url": "https://x.com/cat",
+            },
+        )
+        assert resp.status_code == 200
+
+        cfg = load_config()
+        cats = cfg.site_url_categories["https://x.com"]
+        # All four operator-set keys preserved + new category added
+        assert cats["home"] == "https://x.com/"
+        assert cats["hot"] == "https://x.com/hot"
+        assert cats["animate"] == "https://x.com/animate"
+        assert cats["topic"] == "https://x.com/topic"
+        assert cats["category"] == "https://x.com/cat"
