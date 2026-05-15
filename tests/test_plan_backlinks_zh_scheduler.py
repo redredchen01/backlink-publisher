@@ -207,9 +207,19 @@ def test_links_list_has_correct_kinds(profile_cache):
     payload = _plan_zh_short_row(_zh_row(), cfg, None, rng=random.Random(0))
     assert payload is not None
     links = payload["links"]
+    # First link: main_domain. Remaining: all kind=supporting (regardless
+    # of whether they come from config-categories or the shared
+    # _SUPPORTING_POOL padding — both use kind="supporting" by design).
     assert links[0]["kind"] == "main_domain"
     for link in links[1:]:
         assert link["kind"] == "supporting"
+    # Every link MUST carry `required` (schema.py validator demands it).
+    assert all("required" in link for link in links)
+    assert links[0]["required"] is True
+    assert all(link["required"] is False for link in links[1:])
+    # Padded to _TARGET_PADDED_LINK_COUNT so the row clears schema's 6-8 gate.
+    from backlink_publisher.cli.plan_backlinks import _TARGET_PADDED_LINK_COUNT
+    assert len(links) == _TARGET_PADDED_LINK_COUNT
 
 
 def test_secondary_urls_come_from_config_categories(profile_cache):
@@ -218,7 +228,18 @@ def test_secondary_urls_come_from_config_categories(profile_cache):
     assert payload is not None
     declared_urls = set(cfg.site_url_categories["https://51acgs.com"].values())
     home_url = "https://51acgs.com/"
-    for link in payload["links"][1:]:
+    # The scheduler-decided secondaries (first len(decision.secondary_links)
+    # records after links[0]) must come from config categories. Trailing
+    # _SUPPORTING_POOL padding is unscoped — those URLs are from the shared
+    # Wikipedia/MDN/Stack Overflow/GitHub/HN pool, NOT from config. Test
+    # the config-sourced range only.
+    from backlink_publisher.cli.plan_backlinks import _SUPPORTING_POOL
+    pool_urls = {url for url, _anchor in _SUPPORTING_POOL}
+    config_sourced = [
+        link for link in payload["links"][1:]
+        if link["url"] not in pool_urls
+    ]
+    for link in config_sourced:
         assert link["url"] in declared_urls or link["url"] == home_url
 
 
@@ -244,9 +265,18 @@ def test_degrade_when_no_llm_and_pool_exhausted(profile_cache):
     payload = _plan_zh_short_row(_zh_row(), cfg, None, rng=random.Random(0))
 
     assert payload is not None  # degrade path always produces output
-    # After degrade, both anchors should come from the home branded pool
-    anchors = [link["anchor"] for link in payload["links"]]
-    for a in anchors:
+    # After degrade, the path-specific anchors (first 2 = main_domain +
+    # 1 secondary) come from the home branded pool. Trailing entries are
+    # _SUPPORTING_POOL padding from plan 2026-05-15-003 — their anchors
+    # are Wikipedia/MDN/etc and are out of scope for this test.
+    from backlink_publisher.cli.plan_backlinks import _SUPPORTING_POOL
+    pool_urls = {url for url, _anchor in _SUPPORTING_POOL}
+    branded_anchors = [
+        link["anchor"]
+        for link in payload["links"]
+        if link["url"] not in pool_urls
+    ]
+    for a in branded_anchors:
         assert a in {"51漫画首页", "51漫画"}
 
     # Profile entries should be marked degraded=True

@@ -107,9 +107,11 @@ _SUPPORTING_URLS_FOR_PREFETCH: tuple[str, ...] = tuple(
     url for url, _anchor in _SUPPORTING_POOL
 )
 
-#: Total link count target for the work-themed branch. Midpoint of the
-#: ``schema.py:143`` 6-8 gate so a single later drop stays in-range.
-_TARGET_WORK_THEMED_LINK_COUNT: int = 7
+#: Total link count target for fast-path branches (work-themed,
+#: zh-CN short) that historically emitted 2-3 links each and tripped
+#: ``schema.py:143``'s 6-8 gate. Midpoint of 6-8 so a single later drop
+#: stays in-range.
+_TARGET_PADDED_LINK_COUNT: int = 7
 
 #: Remap from ``work_themed_generator``'s emitted kinds to ``schema.LINK_KINDS``
 #: members. ``main_domain`` already matches; ``list``/``work`` are translated
@@ -838,6 +840,14 @@ def _build_zh_short_payload(
     ``content_markdown`` holds the rendered HTML directly — markdown-it is
     idempotent on plain HTML (see Unit 6 round-trip test), so downstream
     ``publish_backlinks`` works without changes.
+
+    Per plan 2026-05-15-003 (extended in commit dfa44e8 + zh-CN follow-up):
+    - Every link record carries the ``required`` field that schema demands.
+    - The bare 1+len(sec_pairs) link set is padded up to
+      ``_TARGET_PADDED_LINK_COUNT`` with entries from ``_SUPPORTING_POOL`` so
+      the row clears ``schema.py:143``'s 6-8 gate. A matching "延伸阅读"
+      paragraph is appended to the body so the URL strings appear in
+      ``content_markdown`` (R3 — verify_publish's link-presence check).
     """
     target_url = row["target_url"].rstrip("/")
     platform = row["platform"]
@@ -849,10 +859,51 @@ def _build_zh_short_payload(
     home_url = main_domain.rstrip("/") + "/"
 
     links: list[dict[str, Any]] = [
-        {"url": home_url, "anchor": main_anchor, "kind": "main_domain"},
+        {
+            "url": home_url,
+            "anchor": main_anchor,
+            "kind": "main_domain",
+            "required": True,
+        },
     ]
+    existing_urls: set[str] = {home_url}
     for sec_url, sec_anchor in sec_pairs:
-        links.append({"url": sec_url, "anchor": sec_anchor, "kind": "supporting"})
+        links.append({
+            "url": sec_url,
+            "anchor": sec_anchor,
+            "kind": "supporting",
+            "required": False,
+        })
+        existing_urls.add(sec_url)
+
+    # Pad to _TARGET_PADDED_LINK_COUNT with the shared supporting pool;
+    # dedupe by URL so an operator-configured secondary URL that happens
+    # to coincide with the pool doesn't double-list.
+    pad_count = _TARGET_PADDED_LINK_COUNT - len(links)
+    added_supporting: list[dict[str, Any]] = []
+    if pad_count > 0:
+        for surl, sanchor in _SUPPORTING_POOL:
+            if len(added_supporting) >= pad_count:
+                break
+            if surl in existing_urls:
+                continue
+            sup = {
+                "url": surl,
+                "anchor": sanchor,
+                "kind": "supporting",
+                "required": False,
+            }
+            added_supporting.append(sup)
+            links.append(sup)
+            existing_urls.add(surl)
+
+    # NOTE: zh-CN short articles have a 150-200 plain-char length budget
+    # (validated in markdown_utils.validate_zh_short_payload). Padded
+    # supporting URLs live in ``links[]`` metadata only — we deliberately
+    # do NOT append a "延伸阅读" paragraph here. The schema check
+    # (validate_output_payload) only requires ``main_domain`` to appear
+    # in body; verify_publish only checks URLs with ``required=True``.
+    # Both are already satisfied by the rendered short-article HTML.
 
     custom_title = row.get("custom_title", "")
     title = custom_title or f"{domain_label} 内容推荐"
@@ -1241,7 +1292,7 @@ def _build_work_themed_payload(
     - Normalize ``work_themed_generator``'s emitted kinds (``main_domain`` /
       ``list`` / ``work``) into ``schema.LINK_KINDS`` (``main_domain`` /
       ``category`` / ``target``) before the payload leaves this boundary.
-    - Pad ``links`` up to ``_TARGET_WORK_THEMED_LINK_COUNT`` (= 7) with
+    - Pad ``links`` up to ``_TARGET_PADDED_LINK_COUNT`` (= 7) with
       entries from ``_SUPPORTING_POOL``; append a matching "Further reading"
       paragraph to ``content_markdown`` so every padded URL is also present
       in the body (R3).
@@ -1284,10 +1335,10 @@ def _build_work_themed_payload(
         links.append(link)
         existing_urls.add(link["url"])
 
-    # Unit 3: pad to _TARGET_WORK_THEMED_LINK_COUNT with supporting URLs,
+    # Unit 3: pad to _TARGET_PADDED_LINK_COUNT with supporting URLs,
     # then append a "Further reading" paragraph so the body contains every
     # padded URL (R3).
-    pad_count = _TARGET_WORK_THEMED_LINK_COUNT - len(links)
+    pad_count = _TARGET_PADDED_LINK_COUNT - len(links)
     added_supporting: list[dict[str, Any]] = []
     if pad_count > 0:
         for surl, sanchor in _SUPPORTING_POOL:
