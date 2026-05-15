@@ -7,6 +7,7 @@ import json
 import sys
 from typing import Any
 
+from .. import config_echo
 from ..anchor_metrics import (
     _ALARM_SAMPLE_MIN_PER_TARGET,
     compute_window_metrics,
@@ -425,6 +426,9 @@ def main(argv: list[str] | None = None) -> None:
         # (defaults to Safe SEO) — we want to be useful even before the user
         # has wired up the full scheduler config.
         cfg = load_config()
+        # Config Echo Chamber (Round-3 #7): banner so operator sees which
+        # config was resolved + env overrides + SHA.
+        config_echo.emit_banner(cfg, "report-anchors")
         profile = load_profile(args.from_profile)
         report = _build_profile_report(profile, cfg.anchor_proportions)
 

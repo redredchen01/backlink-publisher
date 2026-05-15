@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from .. import errors
+from .. import config_echo, errors
 from ..anchor_lang import check_anchor_language
 from ..config import Config, get_anchor_pool_v2, load_config
 from ..errors import emit_error, InputValidationError
@@ -160,6 +160,11 @@ def main(argv: list[str] | None = None) -> None:
             f"config load failed ({exc}); branded_pool fallback disabled, "
             "relying on payload-emitted snapshots only"
         )
+
+    # Config Echo Chamber (Round-3 #7): emit a 4-line banner so operators
+    # see which config was actually resolved + env overrides + SHA.
+    if config is not None:
+        config_echo.emit_banner(config, "validate-backlinks")
 
     try:
         rows = list(read_jsonl(args.input))

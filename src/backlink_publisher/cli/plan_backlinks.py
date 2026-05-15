@@ -16,6 +16,7 @@ from .. import (
     anchor_profile,
     anchor_resolver,
     anchor_scheduler,
+    config_echo,
     content_fetch,
     errors,
     markdown_utils,
@@ -1427,6 +1428,12 @@ def main(argv: list[str] | None = None) -> None:
     # mistake in config.toml should not silently degrade SEO across the whole batch.
     cfg = load_config()
 
+    # Config Echo Chamber (Round-3 #7): emit a 4-line banner so operators
+    # see which config was actually resolved + which env vars override it
+    # + the SHA of the effective config dict. Same SHA stamped into every
+    # payload's metadata below for artifact-to-config reverse lookup.
+    config_sha = config_echo.emit_banner(cfg, "plan-backlinks")
+
     # Build the LLM provider once at startup if config supplies one — the
     # zh-CN scheduler's resolver uses it for typed-pool fallback. None is a
     # valid state (config-pinned pools only).
@@ -1508,6 +1515,10 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 metadata = dict(payload.get("metadata") or {})
                 metadata["branded_pool"] = list(branded_pool)
+                # Stamp the effective config SHA so artifacts (checkpoints,
+                # publish logs, oldest in .cache) can be reverse-mapped to
+                # the config that produced them — Config Echo Chamber #7.
+                metadata["config_sha"] = config_sha
                 payload["metadata"] = metadata
                 plan_logger.debug(
                     f"generated payload: id={payload['id']} platform={payload['platform']}",
