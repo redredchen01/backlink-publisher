@@ -1,8 +1,9 @@
 ---
 title: Lessons Kit Curation — Promote 6 MEMORY entries to docs/solutions/ with sanitization
 type: refactor
-status: active
+status: completed
 date: 2026-05-15
+completed: 2026-05-15
 origin: backlink-publisher/docs/brainstorms/2026-05-15-lessons-kit-curation-requirements.md
 deepened: 2026-05-15
 ---
@@ -407,6 +408,42 @@ Must return empty. The tokens stay on disk; only the methodology lives in this c
 **Bootstrap protocol** (lives in Unit 1.5, not here): the file is created and populated by the implementer reading the 7 source files via the Read tool. Without this bootstrap, Unit 5 grep gate vacuously passes against an empty pattern file — Unit 1.5 verifies the file is non-empty (≥3 patterns) before Unit 5 runs.
 
 **Multi-operator caveat**: this is a single-operator workflow. If the project ever has a second contributor doing curation, the bootstrap protocol must be re-run on their machine — the token file is per-operator, not shared. The 2026-08-15 quarterly reviewer must verify the file exists and is current before running gates.
+
+## Unit 5 Verification Result (executed 2026-05-15)
+
+All 4 grep gates: empty (`exit=1` from rg, meaning no matches). sha256 baseline diff produced zero output — source MEMORY files truly untouched.
+
+7/7 smoke tests PASS (one batched `learnings-researcher` dispatch covering all 7 destination files):
+
+| # | Query | Expected file (basename) | Rank | Driver fields | Verdict |
+|---|---|---|---|---|---|
+| Q1 | save_config TOML preservation data loss unmanaged | save-config-write-paths-bypass-preservation-2026-05-15.md | 1/12 | tags + symptoms + applies_when | PASS |
+| Q2 | no runtime LLM project hard constraint | no-runtime-llm-2026-05-15.md | 1/12 | tags + applies_when | PASS |
+| Q3 | monolithic webui template sibling vs retrofit | standalone-page-vs-retrofit-webui-2026-05-15.md | 1/12 | tags + applies_when | PASS |
+| Q4 | negative assertion test enshrines bug recurring | negative-assertion-locks-in-bug-2026-05-15.md | 1/12 | tags + symptoms + applies_when | PASS |
+| Q5 | floating point tie-break anchor scheduler order | floating-point-tiebreak-anchor-scheduler-2026-05-15.md | 1/12 | tags + symptoms + applies_when | PASS |
+| Q6 | RECON log level always-on operator signal | recon-log-level-for-always-on-signals-2026-05-15.md | 1/12 | tags + applies_when | PASS |
+| Q7 | plan-time URL synthesis verification publish 404 | plan-time-url-validation-prevents-publish-404-2026-05-15.md | 1/12 | tags + applies_when | PASS |
+
+Strong rank-1 margins (scores 16–26 vs runner-ups ≤10). Cross-link validation: Q1 surfaces both the new family entry AND the existing `inverted-negative-assertion-...` test-failures sibling — confirming the bidirectional cross-link works at the agent level. Q4 similarly surfaces both general-pattern + specific-incident.
+
+Sanitization checklist (R2.3 6-item × 7 destination files = 42 cells):
+
+| File | (1) no abs paths | (2) no UUIDs | (3) no token-list hits | (4) no user quotes | (5) no fix-window dates | (6) PII regex empty |
+|---|---|---|---|---|---|---|
+| best-practices/no-runtime-llm | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| best-practices/standalone-page-vs-retrofit-webui | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| best-practices/recon-log-level-for-always-on-signals | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| best-practices/plan-time-url-validation-prevents-publish-404 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| logic-errors/save-config-write-paths-bypass-preservation | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| logic-errors/floating-point-tiebreak-anchor-scheduler | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| test-failures/negative-assertion-locks-in-bug | ✓ | ✓ | ✓ | ✓ | ✓¹ | ✓ |
+
+¹ Item 5 note: contains one "PR #12 (save_config)" reference (line 94) but cross-links to existing committed `inverted-negative-assertion-enshrined-...-2026-05-14.md` which already extensively documents PR #12 + commit `a4534f9`. PR is publicly closed/fixed, not an open vulnerability window. Matches existing project posture; no NEW fix-window disclosure.
+
+42/42 ✓.
+
+Plan-count correction (minor): plan said "7 source files → 6 destinations". Actual count is 8 source files → 7 destinations (the 8th was `feedback_plan-time-url-hallucination`; the 7th destination is `plan-time-url-validation-prevents-publish-404-2026-05-15.md`). All 7 destinations created and pass all gates; 7 smoke tests rather than 6.
 
 ## Outer-Docs Audit Result (Unit 3, executed 2026-05-15)
 
