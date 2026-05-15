@@ -2858,6 +2858,7 @@ def _persist_three_tier_config(
     """
     from backlink_publisher.config import (
         load_config,
+        merge_site_url_categories,
         save_config,
         upgrade_target_to_threeurl,
     )
@@ -2879,11 +2880,21 @@ def _persist_three_tier_config(
     # tests/test_config_three_url.py::TestCoexistenceWithLegacyAnchorKeywords).
     save_config(cfg, target_anchor_keywords=None, target_three_url=merged)
 
+    # Plan 009 deferred work (brainstorm Q3): also write the
+    # [sites."<main>".url_categories] table so the zh-CN scheduler path
+    # picks up `home` + `category`. Existing hot/animate/topic keys (if any)
+    # are preserved by the in-place merge.
+    site_additions: dict[str, str] = {"home": main_url}
+    if category_url:
+        site_additions["category"] = category_url
+    merge_site_url_categories(main_url, site_additions)
+
     plan_logger.recon(
         "homepage_form_persisted",
         main=domain_key,
         wrote_category=bool(category_url),
         wrote_work=bool(work_url),
+        wrote_url_categories=True,
     )
 
 

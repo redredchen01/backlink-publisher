@@ -1386,6 +1386,134 @@ def save_config(
     _atomic_write_text(config_path, payload)
 
 
+def merge_site_url_categories(
+    main_url: str,
+    additions: dict[str, str],
+    *,
+    path: Path | None = None,
+) -> None:
+    """Add or update keys inside ``[sites."<main>".url_categories]`` in place.
+
+    Plan 2026-05-14-009 deferred work. The brainstorm Q3 contract: when the
+    homepage form submits a ``category_url``, persist it as both
+    ``target_three_url[main].list_url`` (work-themed dispatcher reads this)
+    AND ``sites."<main>".url_categories.category`` (zh-CN scheduler reads
+    this). ``save_config`` only manages the former; this helper handles the
+    latter via a focused, string-level TOML merge that preserves any
+    operator-curated ``hot`` / ``animate`` / ``topic`` keys already present
+    under the same section.
+
+    Behaviour matrix:
+
+    | section exists?     | additions keys present? | result                          |
+    |---------------------|-------------------------|---------------------------------|
+    | no                  | n/a                     | append new section block        |
+    | yes, no overlap     | n/a                     | extend section with new keys    |
+    | yes, key overlap    | key A also in section   | overwrite key A; preserve rest  |
+
+    Snapshots the file before overwrite (mirrors ``save_config``'s safety
+    net at ``.config-history/``). Atomic write via ``_atomic_write_text``.
+
+    No-op when ``additions`` is empty.
+
+    Raises if ``main_url`` contains characters that would break TOML basic
+    string quoting (newlines / control chars). Caller is responsible for
+    feeding a validated ``main_url`` (the webui handler already does so via
+    ``validate_main_domain_url``).
+    """
+    if not additions:
+        return
+
+    config_path = path or (_config_dir() / "config.toml")
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    raw = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+
+    # Defence against control chars in main_url (TOML basic strings reject).
+    if any(ch in main_url for ch in ("\n", "\r", "\x00")):
+        raise InputValidationError(
+            f"main_url contains a control character: {main_url!r}"
+        )
+
+    domain_key = main_url.rstrip("/")
+    section_header = f'[sites."{domain_key}".url_categories]'
+
+    lines = raw.splitlines() if raw else []
+    section_start_idx = -1
+    section_end_idx = -1
+
+    # Find the section if it exists.
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == section_header:
+            section_start_idx = i
+            # Section ends at the next [...] heading or EOF.
+            section_end_idx = len(lines)  # default = EOF
+            for j in range(i + 1, len(lines)):
+                sj = lines[j].strip()
+                if sj.startswith("[") and sj.endswith("]") and not sj.startswith("[["):
+                    section_end_idx = j
+                    break
+            break
+
+    if section_start_idx == -1:
+        # Section doesn't exist — append a fresh block at the end.
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(section_header)
+        for k in sorted(additions):
+            lines.append(f"{k} = {_toml_str(additions[k])}")
+        lines.append("")
+        new_text = "\n".join(lines)
+    else:
+        # Merge keys inside the existing block.
+        section_body = lines[section_start_idx + 1 : section_end_idx]
+        # Scan for keys we want to overwrite; track which additions are
+        # still pending (not yet overwritten) so we append the rest.
+        pending = dict(additions)
+        new_body: list[str] = []
+        for body_line in section_body:
+            stripped = body_line.strip()
+            if not stripped or stripped.startswith("#"):
+                new_body.append(body_line)
+                continue
+            # Parse a simple "key = value" line. Quoted-key keys aren't
+            # expected under url_categories (operator-curated names are
+            # simple identifiers).
+            if "=" not in body_line:
+                new_body.append(body_line)
+                continue
+            key_part = body_line.split("=", 1)[0].strip()
+            if key_part in pending:
+                new_body.append(f"{key_part} = {_toml_str(pending.pop(key_part))}")
+            else:
+                new_body.append(body_line)
+        # Append any leftover additions (keys not previously present).
+        # Place them before the trailing blank line if there is one.
+        trailing_blanks = []
+        while new_body and new_body[-1].strip() == "":
+            trailing_blanks.append(new_body.pop())
+        for k in sorted(pending):
+            new_body.append(f"{k} = {_toml_str(pending[k])}")
+        new_body.extend(trailing_blanks)
+        # Stitch back.
+        new_lines = (
+            lines[: section_start_idx + 1]
+            + new_body
+            + lines[section_end_idx:]
+        )
+        new_text = "\n".join(new_lines)
+
+    if raw and not new_text.endswith("\n"):
+        new_text += "\n"
+    elif not raw:
+        new_text += "\n"
+
+    if config_path.exists():
+        _snapshot_config(config_path)
+    _atomic_write_text(config_path, new_text)
+
+
 # ── TOML emission helpers used by save_config's [targets.<domain>] writer ──
 
 
