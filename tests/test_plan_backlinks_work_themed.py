@@ -85,7 +85,12 @@ def _meta(title: str = "夜空中最亮的星") -> WorkMetadata:
 
 
 class TestWorkThemedRowHappy:
-    def test_yields_one_payload_per_work_url_with_three_anchors(self):
+    def test_yields_one_payload_per_work_url_padded_to_seven_links(self):
+        # Per plan 2026-05-15-003 Unit 3: work-themed payloads are padded
+        # from the generator's bare 3 links to _TARGET_WORK_THEMED_LINK_COUNT
+        # (= 7) with supporting URLs, so schema.py:143's 6-8 gate accepts
+        # them. Kind taxonomy is also normalized (Unit 2): list → category,
+        # work → target.
         cfg = _three_url_cfg(
             work_urls=[
                 "https://site.com/work/1",
@@ -100,13 +105,27 @@ class TestWorkThemedRowHappy:
 
         assert len(payloads) == 2
         for p in payloads:
-            assert len(p["links"]) == 3
-            kinds = {link["kind"] for link in p["links"]}
-            assert kinds == {"main_domain", "list", "work"}
-            # All three anchors render in the body
+            assert len(p["links"]) == 7
+            kinds = [link["kind"] for link in p["links"]]
+            # First three: path-specific (main_domain / category / target),
+            # remap order matches work_themed_generator output order.
+            assert kinds[:3] == ["main_domain", "category", "target"]
+            # Remaining four: supporting padding from _SUPPORTING_POOL.
+            assert kinds[3:] == ["supporting"] * 4
+            # Schema invariant: every emitted kind is in LINK_KINDS.
+            from backlink_publisher.schema import LINK_KINDS
+            assert all(k in LINK_KINDS for k in kinds)
+            # The 3 work-themed anchors still render in the body via
+            # work_themed_generator's HTML <a> tags.
             assert p["content_markdown"].count("<a ") == 3
             assert 'rel="noopener"' in p["content_markdown"]
             assert "nofollow" not in p["content_markdown"]
+            # The 4 supporting URLs appear as markdown anchors in the
+            # appended "延伸阅读" / "Further reading" paragraph (R3 — body
+            # must contain every URL so verify_publish's link-presence
+            # check passes downstream).
+            for sup_link in p["links"][3:]:
+                assert f"({sup_link['url']})" in p["content_markdown"]
 
     def test_count_truncates_provided_work_urls(self):
         cfg = _three_url_cfg(

@@ -88,16 +88,38 @@ class _ContentGateRowFailure(Exception):
 _ROW_REQUIRED_KINDS: frozenset[str] = frozenset({"main_domain", "target"})
 
 
-#: The supporting URLs that ``_build_links`` pads to 6–8 total. Fixed list,
-#: same across every row. Prefetching them once per invocation lets a batch
-#: CSV run share a single fetch instead of paying re-validation per row.
-_SUPPORTING_URLS_FOR_PREFETCH: tuple[str, ...] = (
-    "https://en.wikipedia.org",
-    "https://developer.mozilla.org",
-    "https://stackoverflow.com",
-    "https://github.com",
-    "https://news.ycombinator.com",
+#: Canonical (url, anchor) pairs for supporting links. Consumed by both
+#: ``_build_links`` (long-form branch) and ``_build_work_themed_payload``
+#: (work-themed branch — plan 2026-05-15-003) to pad articles up to the
+#: schema's 6-8 link range. Fixed across every row; prefetching once per
+#: batch invocation lets CSV runs share a single fetch.
+_SUPPORTING_POOL: tuple[tuple[str, str], ...] = (
+    ("https://en.wikipedia.org", "Wikipedia"),
+    ("https://developer.mozilla.org", "MDN"),
+    ("https://stackoverflow.com", "Stack Overflow"),
+    ("https://github.com", "GitHub"),
+    ("https://news.ycombinator.com", "Hacker News"),
 )
+
+#: Backward-compat URL-only view kept for ``_collect_candidate_urls_for_row``'s
+#: prefetch path. Always equals the URL column of ``_SUPPORTING_POOL``.
+_SUPPORTING_URLS_FOR_PREFETCH: tuple[str, ...] = tuple(
+    url for url, _anchor in _SUPPORTING_POOL
+)
+
+#: Total link count target for the work-themed branch. Midpoint of the
+#: ``schema.py:143`` 6-8 gate so a single later drop stays in-range.
+_TARGET_WORK_THEMED_LINK_COUNT: int = 7
+
+#: Remap from ``work_themed_generator``'s emitted kinds to ``schema.LINK_KINDS``
+#: members. ``main_domain`` already matches; ``list``/``work`` are translated
+#: to their closest semantic neighbours so downstream consumers see the
+#: canonical taxonomy.
+_KIND_REMAP_WORK_THEMED: dict[str, str] = {
+    "main_domain": "main_domain",
+    "list": "category",
+    "work": "target",
+}
 
 
 def _collect_candidate_urls_for_row(
@@ -349,16 +371,9 @@ def _build_links(
             )
 
     # Pad with supporting links up to 8 total (gate may drop some so we keep
-    # 5 candidates and let the gate decide how many survive).
+    # all 5 candidates and let the gate decide how many survive).
     target_max = 8
-    supporting = [
-        ("https://en.wikipedia.org", "Wikipedia"),
-        ("https://developer.mozilla.org", "MDN"),
-        ("https://stackoverflow.com", "Stack Overflow"),
-        ("https://github.com", "GitHub"),
-        ("https://news.ycombinator.com", "Hacker News"),
-    ]
-    for surl, sanchor in supporting:
+    for surl, sanchor in _SUPPORTING_POOL:
         if len(candidates) >= target_max:
             break
         candidates.append({
@@ -1184,6 +1199,31 @@ def _plan_work_themed_row(
     )
 
 
+def _further_reading_paragraph(
+    supporting: list[dict[str, Any]], language: str,
+) -> str:
+    """Render a natural-prose "Further reading" appendix containing every
+    URL in ``supporting`` as a markdown anchor ``[anchor](url)``.
+
+    Returns ``""`` when ``supporting`` is empty. Each language template
+    weaves the anchor list into a single short paragraph so the article
+    body remains readable rather than degenerating into a link dump.
+    Per plan 2026-05-15-003 R3: every URL in ``links[]`` must appear in
+    ``content_markdown`` so downstream ``verify_publish`` can confirm
+    link presence in the published post body.
+    """
+    if not supporting:
+        return ""
+    anchors_md = ", ".join(
+        f"[{link['anchor']}]({link['url']})" for link in supporting
+    )
+    if language == "zh-CN":
+        return f"\n\n延伸阅读：{anchors_md}。"
+    if language == "ru":
+        return f"\n\nДополнительные материалы: {anchors_md}."
+    return f"\n\nFurther reading: {anchors_md}."
+
+
 def _build_work_themed_payload(
     row: dict[str, Any],
     three_url_cfg: ThreeUrlConfig,
@@ -1196,6 +1236,15 @@ def _build_work_themed_payload(
     Downstream ``validate-backlinks`` / ``publish-backlinks`` then need no
     branch — they see the same OUTPUT_REQUIRED_FIELDS contract regardless
     of which planner produced the article.
+
+    Per plan 2026-05-15-003 Unit 2 + Unit 3:
+    - Normalize ``work_themed_generator``'s emitted kinds (``main_domain`` /
+      ``list`` / ``work``) into ``schema.LINK_KINDS`` (``main_domain`` /
+      ``category`` / ``target``) before the payload leaves this boundary.
+    - Pad ``links`` up to ``_TARGET_WORK_THEMED_LINK_COUNT`` (= 7) with
+      entries from ``_SUPPORTING_POOL``; append a matching "Further reading"
+      paragraph to ``content_markdown`` so every padded URL is also present
+      in the body (R3).
     """
     target_url = row["target_url"].rstrip("/")
     platform = row["platform"]
@@ -1212,7 +1261,6 @@ def _build_work_themed_payload(
         markdown_utils.slugify(title)
         or hashlib.sha256(title.encode()).hexdigest()[:12]
     )
-    excerpt = re.sub(r"<[^>]+>", "", rendered["content_markdown"])[:100]
 
     custom_tags = row.get("custom_tags", "")
     tags = ["backlink", domain_label]
@@ -1221,6 +1269,44 @@ def _build_work_themed_payload(
 
     seed_str = f"{work_url}:{main_domain}:work-themed:{platform}"
     article_id = hashlib.sha256(seed_str.encode()).hexdigest()[:16]
+
+    # Unit 2: remap kinds to schema.LINK_KINDS taxonomy.
+    links: list[dict[str, Any]] = []
+    existing_urls: set[str] = set()
+    for raw in rendered["links"]:
+        link = dict(raw)
+        link["kind"] = _KIND_REMAP_WORK_THEMED.get(link["kind"], link["kind"])
+        links.append(link)
+        existing_urls.add(link["url"])
+
+    # Unit 3: pad to _TARGET_WORK_THEMED_LINK_COUNT with supporting URLs,
+    # then append a "Further reading" paragraph so the body contains every
+    # padded URL (R3).
+    pad_count = _TARGET_WORK_THEMED_LINK_COUNT - len(links)
+    added_supporting: list[dict[str, Any]] = []
+    if pad_count > 0:
+        for surl, sanchor in _SUPPORTING_POOL:
+            if len(added_supporting) >= pad_count:
+                break
+            if surl in existing_urls:
+                continue
+            sup = {
+                "url": surl,
+                "anchor": sanchor,
+                "kind": "supporting",
+                "required": False,
+            }
+            added_supporting.append(sup)
+            links.append(sup)
+            existing_urls.add(surl)
+
+    content_markdown = rendered["content_markdown"]
+    if added_supporting:
+        content_markdown += _further_reading_paragraph(
+            added_supporting, language
+        )
+
+    excerpt = re.sub(r"<[^>]+>", "", content_markdown)[:100]
 
     return {
         "id": article_id,
@@ -1235,8 +1321,8 @@ def _build_work_themed_payload(
         "slug": slug,
         "excerpt": excerpt,
         "tags": tags,
-        "content_markdown": rendered["content_markdown"],
-        "links": rendered["links"],
+        "content_markdown": content_markdown,
+        "links": links,
         "seo": {
             "title": title,
             "description": excerpt,
