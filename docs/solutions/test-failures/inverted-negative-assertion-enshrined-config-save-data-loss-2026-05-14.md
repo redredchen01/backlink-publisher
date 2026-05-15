@@ -136,6 +136,7 @@ If yes, the test is a candidate for inversion the day that behavior gets fixed �
 
 ## Related Issues
 
+- **General pattern** `docs/solutions/test-failures/negative-assertion-locks-in-bug-2026-05-15.md` — this incident is the canonical specific case; the 2026-05-15 entry generalizes the pattern after it recurred a second time (RECON-log-level introduction tripped three other negative-shape stderr assertions). Read together for both the incident detail and the abstracted prevention recipe.
 - **Memory note** `feedback_test-locks-in-bug.md` (auto memory [claude]) — the short-form warning this incident validates. Cites this exact test as the example.
 - **Memory note** `feedback_config-save-overwrite-pattern.md` (auto memory [claude]) — the underlying data-loss bug the inverted test was protecting.
 - **Memory note** `feedback_cereview-finds-latent-bugs.md` (auto memory [claude]) — confirms multi-persona review surfaces these inversions; the second-pass `document-review` on PR #12's plan flagged the test contract collision before code was written.
