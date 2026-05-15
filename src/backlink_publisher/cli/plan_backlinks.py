@@ -1413,7 +1413,9 @@ def _dispatch_row(
     """
     three_url_cfg = get_three_url_config(config, row["main_domain"])
     if three_url_cfg is not None:
-        yield from _plan_work_themed_row(row, three_url_cfg, count=work_count)
+        for payload in _plan_work_themed_row(row, three_url_cfg, count=work_count):
+            _emit_link_count_recon(payload, branch="work_themed")
+            yield payload
         return
 
     payload: dict[str, Any] | None = None
@@ -1421,11 +1423,38 @@ def _dispatch_row(
         config, row["main_domain"]
     ):
         payload = _plan_zh_short_row(row, config, llm_provider, rng=rng)
+        if payload is not None:
+            _emit_link_count_recon(payload, branch="zh_short")
+            yield payload
+            return
     if payload is None:
         payload = _generate_payload(
             row, config=config, fetch_verify_enabled=fetch_verify_enabled,
         )
+    _emit_link_count_recon(payload, branch="long_form")
     yield payload
+
+
+def _emit_link_count_recon(payload: dict[str, Any], *, branch: str) -> None:
+    """Emit a RECON event capturing which dispatch branch yielded this
+    payload and how many links / which kinds ended up in it.
+
+    Per plan 2026-05-15-003 Unit 4: surfaces link-count regressions in
+    cron logs so the next time a branch yields a payload outside the
+    schema's 6-8 gate (or with an unexpected kind taxonomy), operators
+    see it immediately rather than only at validate-backlinks-reject time.
+    Bypasses ``--log-level`` per ``recon-log-level-for-always-on-signals``.
+    """
+    links = payload.get("links") or []
+    kinds = sorted({lk.get("kind", "?") for lk in links})
+    plan_logger.recon(
+        "link_count_at_plan",
+        branch=branch,
+        count=len(links),
+        kinds=kinds,
+        main_domain=payload.get("main_domain", ""),
+        article_id=payload.get("id", ""),
+    )
 
 
 def main(argv: list[str] | None = None) -> None:

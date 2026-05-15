@@ -416,3 +416,88 @@ def _drive_dispatcher(rows: list[dict], cfg: Config) -> list[dict]:
         ):
             out.append(payload)
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Plan 2026-05-15-003 Unit 4 — RECON instrumentation at _dispatch_row
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestDispatchReconInstrumentation:
+    """``_dispatch_row`` emits one ``link_count_at_plan`` RECON event per
+    yielded payload, tagging the dispatch branch + the link count + the
+    sorted kinds. Bypasses ``--log-level`` so cron operators see it.
+    """
+
+    def test_work_themed_branch_emits_one_recon_per_yielded_payload(self):
+        cfg = _three_url_cfg(
+            work_urls=[
+                "https://site.com/work/1",
+                "https://site.com/work/2",
+            ]
+        )
+        # Minimal config wrapper for the dispatcher (no llm, no scheduler).
+        # Key is the un-trailing-slash form per existing helper precedent.
+        config = Config()
+        config.target_three_url["https://site.com"] = cfg
+
+        captured: list[dict] = []
+        original_recon = plan_backlinks.plan_logger.recon
+
+        def _capture(msg, **fields):
+            if msg == "link_count_at_plan":
+                captured.append({"msg": msg, **fields})
+            return original_recon(msg, **fields)
+
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            side_effect=lambda url, **_kw: _meta(title=f"作品-{url[-1]}"),
+        ):
+            with patch.object(
+                plan_backlinks.plan_logger, "recon", side_effect=_capture,
+            ):
+                payloads = _drive_dispatcher([_row()], config)
+
+        assert len(payloads) == 2
+        # One recon per yielded payload, all branch=work_themed
+        assert len(captured) == 2
+        for event, payload in zip(captured, payloads):
+            assert event["branch"] == "work_themed"
+            assert event["count"] == len(payload["links"]) == 7
+            assert event["main_domain"] == payload["main_domain"]
+            assert event["article_id"] == payload["id"]
+            # kinds is the sorted unique set
+            assert event["kinds"] == sorted(
+                {lk["kind"] for lk in payload["links"]}
+            )
+
+    def test_long_form_branch_emits_one_recon(self):
+        # A row with NO three-URL config and NOT zh-CN-scheduler-enabled
+        # → falls through to long-form (_generate_payload).
+        config = Config()  # bare config — no target_three_urls, no scheduler
+        captured: list[dict] = []
+        original_recon = plan_backlinks.plan_logger.recon
+
+        def _capture(msg, **fields):
+            if msg == "link_count_at_plan":
+                captured.append({"msg": msg, **fields})
+            return original_recon(msg, **fields)
+
+        en_row = {
+            "target_url": "https://example.com/post",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "blogger",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        with patch.object(
+            plan_backlinks.plan_logger, "recon", side_effect=_capture,
+        ):
+            payloads = _drive_dispatcher([en_row], config)
+
+        assert len(payloads) == 1
+        assert len(captured) == 1
+        assert captured[0]["branch"] == "long_form"
+        assert captured[0]["count"] == len(payloads[0]["links"])
+        assert 6 <= captured[0]["count"] <= 8  # schema gate
