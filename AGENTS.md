@@ -11,6 +11,8 @@ The project keeps lessons in two places:
 
 **Promotion is rewriting, not copy-paste. Strip session UUIDs, real domains, absolute paths, and user-identifying quotes; teach the pattern, not the incident.** The grep gates in `docs/plans/2026-05-15-001-refactor-lessons-kit-curation-plan.md` (Unit 5) are the safety net; the gitignored token file at `~/.local/share/backlink-publisher/private-tokens.txt` enumerates what to scrub.
 
+**First-time setup** (per-operator; the token file is local-only and never shared): see `docs/plans/2026-05-15-001-refactor-lessons-kit-curation-plan.md` Unit 1.5 for the bootstrap recipe. A new contributor must populate `~/.local/share/backlink-publisher/private-tokens.txt` with their operator-private patterns (real target domains, operator email, run-ID patterns) before running `/ce:compound`, or the grep gates will vacuously pass against an empty pattern file.
+
 Next curation review: **2026-08-15** — *aspirational quarterly cadence; not enforced by CI or any tool*. This file is static markdown; the actual trigger is "next time `/ce:compound` or `/ce:plan` runs in this repo, scan recent `feedback_*.md` and decide what's worth promoting." Update this date when the review completes; treat skipping a quarter as a soft signal, not a failure.
 
 Soft observation (2026-05-15): historical `docs/brainstorms/` and `docs/plans/` files contain real operator domain references (e.g. target hostnames). The sanitization rule above applies to `docs/solutions/` entries; if the project ever needs to extend it to historical decision artifacts, scope a separate pass — do not retrofit silently.

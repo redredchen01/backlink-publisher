@@ -202,7 +202,7 @@ Unit 5 (final verification: grep gates + PII regex + sha256 + post-migration smo
 - All 5 existing `docs/solutions/*/*.md` for sibling-schema reference
 
 **Approach:**
-- **Precedence rule (read first):** Where this plan's locked decisions in §Key Technical Decisions conflict with sibling-schema mirroring, the locked decisions win on a per-field basis. Specifically: `category:` is **always slug-only** for the new 6 entries, even though the best-practices sibling (`document-review-catches-...md`) uses path-style `category: docs/solutions/best-practices`. Sibling schema dictates field *set* and *shape*, not literal `category` value.
+- **Precedence rule (read first):** Where this plan's locked decisions in §Key Technical Decisions conflict with sibling-schema mirroring, the locked decisions win on a per-field basis. Specifically: `category:` is **always slug-only** for the new 6 entries, even though the best-practices sibling (`document-review-catches-...md`) uses path-style `category: docs/solutions/best-practices`. Sibling schema dictates field *set* and *shape*, not literal `category` value. **Schema extension (deliberate)**: new entries MAY add `applies_when:` even when the same-category sibling lacks it — `applies_when[]` is a documented driver field for `learnings-researcher` agent matching (verified in Unit 5 smoke tests). Adding it to entries where it improves discoverability is intentional schema extension, not drift; existing siblings remain unchanged per scope boundary.
 - For each destination file:
   1. Read the source `feedback_*.md` body via Read tool. Note frontmatter fields (will be discarded per R2.1).
   2. Open the same-category sibling schema reference (Context & Research §Relevant Code).
