@@ -408,6 +408,20 @@ Must return empty. The tokens stay on disk; only the methodology lives in this c
 
 **Multi-operator caveat**: this is a single-operator workflow. If the project ever has a second contributor doing curation, the bootstrap protocol must be re-run on their machine — the token file is per-operator, not shared. The 2026-08-15 quarterly reviewer must verify the file exists and is current before running gates.
 
+## Outer-Docs Audit Result (Unit 3, executed 2026-05-15)
+
+| Outer file | Final verdict | Action taken |
+|---|---|---|
+| `docs/MEDIUM_OAUTH_SETUP.md` | MOVE | mv → `backlink-publisher/docs/MEDIUM_OAUTH_SETUP.md` |
+| `docs/plans/2026-05-12-001-feat-draft-queue-scheduled-publish-plan.md` | MOVE | mv → `backlink-publisher/docs/plans/2026-05-12-001-...` (slot empty inside) |
+| `docs/plans/2026-05-13-001-feat-anchor-profile-scheduler-plan.md` | DELETE | Outer file had `status: superseded` + `superseded_by:` pointing to outer-002 same-day. Predecessor with no preserved value beyond what outer-002 (now inner-005) carries. |
+| `docs/plans/2026-05-13-002-feat-zh-short-article-scheduler-plan.md` | MOVE-with-renumber | mv → `backlink-publisher/docs/plans/2026-05-13-005-feat-zh-short-article-scheduler-plan.md` (inner 001-004 taken on 2026-05-13). `supersedes:` field annotated. |
+| `docs/brainstorms/2026-05-13-anchor-profile-scheduler-requirements.md` | MOVE | Was origin doc for both outer plans. mv → inner brainstorms. |
+| `docs/brainstorms/2026-05-13-work-themed-backlinks-requirements.md` | MOVE | Inner had plan but no requirements. mv → inner brainstorms. |
+| `docs/ideation/2026-05-15-open-ideation.md` | MOVE | Misplaced ideation doc from this session. mv → inner ideation. |
+
+Outer `docs/` directory removed entirely (was 7 files in 4 dirs; now `rmdir`'d). Within 30-min timebox: yes — total audit + execution under 5 minutes (no full-content diff required since outer-001 self-declared `status: superseded` via frontmatter).
+
 ## Pre-flight Result
 
 - **R0 / Unit 1**: VALIDATED in this same Claude Code session (2026-05-15). The `compound-engineering:research:learnings-researcher` agent was dispatched 3 times during the brainstorm + plan phases against `backlink-publisher/docs/solutions/`. Each dispatch returned matched files with absolute paths — confirming the agent reaches this directory and reads frontmatter. Specific corroborating runs: (a) Phase-1 ce:plan local research search returned 5 existing entries with frontmatter field-set; (b) ce:brainstorm document-review feasibility agent enumerated all 5 sibling files with their schemas; (c) ce:plan repo-research-analyst confirmed agent path-scanning behavior. Premise validated; proceed to Unit 1.5.
