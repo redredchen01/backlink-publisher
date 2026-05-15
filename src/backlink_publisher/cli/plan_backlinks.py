@@ -1270,12 +1270,17 @@ def _build_work_themed_payload(
     seed_str = f"{work_url}:{main_domain}:work-themed:{platform}"
     article_id = hashlib.sha256(seed_str.encode()).hexdigest()[:16]
 
-    # Unit 2: remap kinds to schema.LINK_KINDS taxonomy.
+    # Unit 2: remap kinds to schema.LINK_KINDS taxonomy AND ensure the
+    # ``required`` field is set on every link (schema.py validator demands
+    # it on each record). ``work_themed_generator`` omits ``required``;
+    # populate it here based on whether the remapped kind is row-required
+    # (main_domain / target → row cannot publish without it).
     links: list[dict[str, Any]] = []
     existing_urls: set[str] = set()
     for raw in rendered["links"]:
         link = dict(raw)
         link["kind"] = _KIND_REMAP_WORK_THEMED.get(link["kind"], link["kind"])
+        link["required"] = link["kind"] in _ROW_REQUIRED_KINDS
         links.append(link)
         existing_urls.add(link["url"])
 

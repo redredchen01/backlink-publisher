@@ -113,8 +113,22 @@ class TestWorkThemedRowHappy:
             # Remaining four: supporting padding from _SUPPORTING_POOL.
             assert kinds[3:] == ["supporting"] * 4
             # Schema invariant: every emitted kind is in LINK_KINDS.
-            from backlink_publisher.schema import LINK_KINDS
+            from backlink_publisher.schema import LINK_KINDS, validate_output_payload
             assert all(k in LINK_KINDS for k in kinds)
+            # Schema invariant: every link MUST carry `required` (validator
+            # demands it). main_domain + target are row-required; category
+            # + supporting are not.
+            for link in p["links"]:
+                assert "required" in link, f"link missing 'required': {link}"
+            assert [link["required"] for link in p["links"]] == [
+                True,   # main_domain
+                False,  # category (from list_url — auxiliary)
+                True,   # target (from work_url)
+                False,  # supporting × 4
+                False,
+                False,
+                False,
+            ]
             # The 3 work-themed anchors still render in the body via
             # work_themed_generator's HTML <a> tags.
             assert p["content_markdown"].count("<a ") == 3
@@ -126,6 +140,12 @@ class TestWorkThemedRowHappy:
             # check passes downstream).
             for sup_link in p["links"][3:]:
                 assert f"({sup_link['url']})" in p["content_markdown"]
+            # End-to-end schema gate: the whole payload now passes
+            # `validate_output_payload` — the exact validator that emits
+            # the "row 1: links[0]: missing field 'required'" errors at
+            # publish-backlinks time.
+            errors = validate_output_payload(p)
+            assert errors == [], f"validator rejected payload: {errors}"
 
     def test_count_truncates_provided_work_urls(self):
         cfg = _three_url_cfg(
