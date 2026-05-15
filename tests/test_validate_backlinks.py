@@ -218,14 +218,27 @@ def test_validate_all_url_modes():
 
 def test_validate_no_diagnostic_stderr_on_success():
     """On success, stderr must contain only the always-on reconciliation line
-    — no error/warning diagnostics."""
+    + the operator-orientation config banner from Round-3 #7 — no
+    error/warning diagnostics."""
     payload = _make_valid_payload()
     input_data = json.dumps(payload)
     stdout, stderr, code = _run_validate(input_data, check_urls=False)
     assert code == 0
-    lines = [line for line in stderr.splitlines() if line.strip()]
-    # Exactly one stderr line: the reconciliation event.
-    assert len(lines) == 1
+    # Banner adds 5 lines ("[<cli>] effective config:" header + 4 fields).
+    # Strip those before asserting only the reconciliation line remains.
+    banner_prefixes = (
+        "[validate-backlinks] effective config:",
+        "  config:",
+        "  env:",
+        "  platforms:",
+        "  sha:",
+    )
+    lines = [
+        line for line in stderr.splitlines()
+        if line.strip() and not any(line.startswith(p) for p in banner_prefixes)
+    ]
+    # Exactly one non-banner stderr line: the reconciliation event.
+    assert len(lines) == 1, f"unexpected non-banner stderr: {lines}"
     record = json.loads(lines[0])
     assert record["msg"] == "validate_reconciliation"
     assert record["level"] == "RECON"

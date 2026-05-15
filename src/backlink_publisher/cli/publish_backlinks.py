@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ..adapters import publish as adapter_publish, verify_adapter_setup
-from .. import checkpoint
+from .. import checkpoint, config_echo
 from ..config import load_config
 from ..errors import DependencyError, ExternalServiceError, emit_error
 from ..jsonl import read_jsonl, write_jsonl
@@ -525,6 +525,10 @@ def main(argv: list[str] | None = None) -> None:
     publish_logger.info(f"processing {len(rows)} payloads")
 
     config = load_config()
+
+    # Config Echo Chamber (Round-3 #7): emit a 4-line banner so operators
+    # see which config was actually resolved + env overrides + SHA.
+    config_echo.emit_banner(config, "publish-backlinks")
 
     # Pre-flight: validate all payloads and check for unsupported platforms
     for idx, row in enumerate(rows, start=1):

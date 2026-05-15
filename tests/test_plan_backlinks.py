@@ -15,16 +15,30 @@ from backlink_publisher.errors import InputValidationError
 
 
 def _stderr_without_warnings(stderr: str) -> str:
-    """Strip benign WARN + RECON log lines so tests can assert on real errors only.
+    """Strip benign WARN + RECON + config-banner log lines so tests can
+    assert on real errors only.
 
     RECON is the always-on Silent-Drop Tripwire reconciliation event emitted
     at end-of-run regardless of --log-level. WARN lines are anchor-keyword
-    fallback notices and similar advisory signals."""
+    fallback notices and similar advisory signals. The config banner
+    (Round-3 #7) is operator-orientation noise emitted at the start of
+    each CLI invocation."""
+    banner_prefixes = (
+        "[plan-backlinks] effective config:",
+        "[validate-backlinks] effective config:",
+        "[publish-backlinks] effective config:",
+        "[report-anchors] effective config:",
+        "  config:",
+        "  env:",
+        "  platforms:",
+        "  sha:",
+    )
     lines = [
         line for line in stderr.splitlines()
         if line
         and '"level": "WARN"' not in line
         and '"level": "RECON"' not in line
+        and not any(line.startswith(p) for p in banner_prefixes)
     ]
     return "\n".join(lines)
 
@@ -1020,3 +1034,71 @@ class TestContentFetchPrefetchAndStats:
             for url in batch:
                 assert "a0.example" not in url
                 assert "a1.example" not in url
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Config Echo Chamber integration (Round-3 #7)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestConfigEchoChamber:
+    """Verify the 4-line config banner emits at plan-backlinks startup +
+    the resolved-config SHA is stamped into every payload's metadata
+    so artifacts can be reverse-mapped to the config that produced them."""
+
+    def test_banner_emitted_to_stderr_on_startup(self):
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        _stdout, stderr, code = _run_plan(json.dumps(seed))
+        assert code == 0
+        # All 5 banner lines present.
+        assert "[plan-backlinks] effective config:" in stderr
+        assert "  config:" in stderr
+        assert "  env:" in stderr
+        assert "  platforms:" in stderr
+        assert "  sha:" in stderr
+
+    def test_payload_metadata_contains_config_sha(self):
+        seed = {
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "medium",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        stdout, _stderr, code = _run_plan(json.dumps(seed))
+        assert code == 0
+        payload = json.loads(stdout.strip())
+        assert "metadata" in payload
+        sha = payload["metadata"].get("config_sha")
+        assert sha is not None, "payload metadata must contain config_sha"
+        # 16-char hex prefix per compute_config_sha contract
+        import re as _re
+        assert _re.fullmatch(r"[0-9a-f]{16}", sha) is not None
+
+    def test_same_config_produces_same_sha_across_payloads(self):
+        """All payloads from one invocation carry the same SHA — no surprise
+        cross-row config drift."""
+        seeds = [
+            {
+                "target_url": f"https://example.com/a{i}",
+                "main_domain": "https://example.com",
+                "language": "en",
+                "platform": "medium",
+                "url_mode": "A",
+                "publish_mode": "draft",
+            }
+            for i in range(3)
+        ]
+        stdout, _, code = _run_plan("\n".join(json.dumps(s) for s in seeds))
+        assert code == 0
+        payloads = [json.loads(line) for line in stdout.strip().split("\n")]
+        shas = {p["metadata"]["config_sha"] for p in payloads}
+        assert len(shas) == 1, f"expected one SHA across all payloads, got {shas}"
