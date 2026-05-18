@@ -51,6 +51,37 @@ def test_jwt_redacted_and_counted():
     assert hits.get("jwt") == 1
 
 
+def test_jwt_glued_to_identifier_prefix_still_redacted():
+    # When a JWT is concatenated to an identifier (no separator), the
+    # leading ``eyJ`` is preceded by a word char so neither ``\b`` nor
+    # a negative-lookbehind on identifier chars can match it; the named
+    # pattern claims only the payload+signature half. That residual
+    # identifier+header prefix is ≥ 32 chars of base64-shaped material,
+    # so the high-entropy fallback must redact the remainder. Net: the
+    # secret bytes are gone, hit_counts shows jwt=1 (the segment we
+    # could identify) plus high_entropy=1 (the segment we could only
+    # tell was suspicious). Both signals are useful to downstream
+    # routing — the assertion pins that both fire rather than letting
+    # either silently regress.
+    text = "access_tokeneyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature done"
+    cleaned, hits = scrub_text(text)
+    assert "eyJhbGciOiJIUzI1NiJ9" not in cleaned
+    assert "eyJzdWIiOiJ4In0" not in cleaned
+    assert "signature" not in cleaned
+    assert hits.get("jwt") == 1
+    assert hits.get("high_entropy") == 1
+
+
+def test_jwt_after_non_identifier_separator_routed_to_jwt():
+    # Cases where ``\b`` already works (``:``, ``=``, whitespace, quotes,
+    # ``,``) — the negative-lookbehind anchor must not regress them.
+    for sep in (": ", "=", '"', "'", ",", " "):
+        text = f"auth{sep}eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig done"
+        cleaned, hits = scrub_text(text)
+        assert "eyJhbGciOiJIUzI1NiJ9" not in cleaned, f"sep={sep!r} leaked"
+        assert hits.get("jwt") == 1, f"sep={sep!r} wrong routing: {hits}"
+
+
 def test_google_api_key_redacted():
     # AIza prefix + exactly 35 alphanumeric chars = real-shape key
     key = "AIza" + "a" * 35

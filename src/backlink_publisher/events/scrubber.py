@@ -28,18 +28,27 @@ _PATTERNS: Final[list[tuple[str, re.Pattern[str]]]] = [
     ("oauth_bearer", re.compile(r"\bBearer\s+[A-Za-z0-9._+/=\-]+")),
     # JWT — base64url-encoded headers always start with ``eyJ`` (which is
     # ``{"`` base64'd). Include ``=`` for standard-base64 signatures.
-    ("jwt", re.compile(r"\beyJ[A-Za-z0-9._+/=\-]+")),
-    # Google API key — exactly 35 alphanumeric chars after the ``AIza``
-    # prefix. The trailing negative lookahead replaces ``\b`` (which fails
+    # Anchor with a negative lookbehind on identifier chars rather than
+    # ``\b``: ``\b`` fails when the JWT is glued to an identifier (e.g.
+    # ``access_tokeneyJhbGci…``) because both ``n`` and ``e`` are word
+    # characters and no transition exists. The lookbehind correctly
+    # admits start-of-string, whitespace, ``:``, ``=``, quotes, etc.
+    ("jwt", re.compile(r"(?<![A-Za-z0-9_])eyJ[A-Za-z0-9._+/=\-]+")),
+    # Google API key — canonical shape is ``AIza`` + exactly 35 alphanumeric
+    # chars, but ``{35,}`` widens to catch longer real-shape variants (and
+    # avoids dropping the secret to the high_entropy bucket, losing routing
+    # signal). The trailing negative lookahead replaces ``\b`` (which fails
     # when a key ends in ``-`` because ``-`` is a non-word char and ``\b``
     # would require a word↔non-word transition).
-    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}(?![0-9A-Za-z\-_])")),
-    # 64-char lowercase-hex run. Named after the sha256 shape (not after
-    # Medium): the regex catches any sha256-shaped token, including
-    # legitimate artifact digests. Routing should treat this hit as
-    # "potential secret, requires upstream confirmation" rather than as a
-    # confirmed Medium credential.
-    ("sha256_hex_token", re.compile(r"\b[0-9a-f]{64}\b")),
+    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35,}(?![0-9A-Za-z\-_])")),
+    # 64-char hex run, case-insensitive. Named after the sha256 shape (not
+    # after Medium): the regex catches any sha256-shaped token, including
+    # legitimate artifact digests. Some emitters (Windows certutil, Java
+    # keystore CLIs, TLS fingerprint dumps) produce uppercase hex, so the
+    # match is case-insensitive. Routing should treat this hit as "potential
+    # secret, requires upstream confirmation" rather than as a confirmed
+    # Medium credential.
+    ("sha256_hex_token", re.compile(r"\b[0-9a-f]{64}\b", re.IGNORECASE)),
     # HTTP(S) URL with embedded basic-auth credentials. The first segment
     # after scheme is the user, second (after the colon) is the password,
     # both up to ``@``.
@@ -54,6 +63,12 @@ _HIGH_ENTROPY_MIN_LEN: Final[int] = 32
 #: alphabet approaches log2(64) = 6.0; English prose stays below ~4.0 even
 #: in long tokens. 4.5 is the documented starting point (plan §U6 deferred).
 _HIGH_ENTROPY_THRESHOLD: Final[float] = 4.5
+
+#: Minimum ASCII density to subject a token to the entropy heuristic. CJK
+#: and other large-alphabet runs score mechanically high under per-codepoint
+#: Shannon (e.g. 32 distinct Chinese chars → log2(32)=5.0), so we restrict
+#: the redaction heuristic to ASCII-dense tokens and skip i18n prose.
+_HIGH_ENTROPY_ASCII_RATIO_MIN: Final[float] = 0.9
 
 #: Token shape for the high-entropy pass — runs of non-whitespace at least
 #: ``_HIGH_ENTROPY_MIN_LEN`` long. Punctuation inside the run is preserved
@@ -96,8 +111,10 @@ def scrub_text(s: str) -> tuple[str, dict[str, int]]:
     ``_HIGH_ENTROPY_MIN_LEN`` and redacts any whose Shannon entropy meets
     ``_HIGH_ENTROPY_THRESHOLD`` (recorded under ``high_entropy``).
 
-    The function never raises on input — non-string ``s`` will fail at the
-    call site naturally; callers are expected to pre-coerce.
+    Contract: never raises on any ``str`` input. Non-string ``s`` (e.g.
+    ``None`` from an optional field) will raise ``TypeError`` from the first
+    ``pattern.findall`` call — callers in log-write hot paths must pre-coerce
+    or wrap in ``str(...)`` to keep flush bulletproof.
     """
     hit_counts: dict[str, int] = {}
     cleaned = s
@@ -118,13 +135,9 @@ def scrub_text(s: str) -> tuple[str, dict[str, int]]:
     # starting point; refine once we have a real corpus.
     def _entropy_sub(match: re.Match[str]) -> str:
         token = match.group(0)
-        # Skip CJK / other non-ASCII-dense tokens. Per-codepoint Shannon
-        # over a large unicode alphabet inflates entropy mechanically
-        # (a 32-char Chinese sentence with 32 distinct characters scores
-        # log2(32)=5.0). Restrict the heuristic to ASCII-dense runs so we
-        # don't redact legitimate i18n error messages.
+        # Rationale documented on ``_HIGH_ENTROPY_ASCII_RATIO_MIN``.
         ascii_ratio = sum(1 for ch in token if ord(ch) < 128) / len(token)
-        if ascii_ratio < 0.9:
+        if ascii_ratio < _HIGH_ENTROPY_ASCII_RATIO_MIN:
             return token
         if _shannon_entropy(token) >= _HIGH_ENTROPY_THRESHOLD:
             hit_counts["high_entropy"] = hit_counts.get("high_entropy", 0) + 1

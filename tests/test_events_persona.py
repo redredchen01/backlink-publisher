@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -132,6 +133,109 @@ def test_truncated_salt_file_raises_corrupt_error(tmp_path):
         persona.persona_id("blogger", "alice@example.com")
 
 
+def test_zero_byte_salt_file_raises_corrupt_error(tmp_path):
+    # 0-byte salt (partial write that lost everything, or a tar fixture that
+    # touched the file without content). Same risk as truncation.
+    salt_path = tmp_path / "persona.salt"
+    salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    salt_path.write_bytes(b"")
+    persona._load_salt.cache_clear()
+    with pytest.raises(persona.CorruptSaltError):
+        persona.persona_id("blogger", "alice@example.com")
+
+
+def test_constant_byte_salt_rejected_as_corrupt(tmp_path):
+    # A 32-byte salt of all 0x00 (or all 0xFF) passes the length check but
+    # is publicly pre-imageable — an attacker who recognises the
+    # placeholder pattern can recompute persona_id for any (provider,
+    # label) pair without ever reading the salt. Refuse to load.
+    salt_path = tmp_path / "persona.salt"
+    salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    salt_path.write_bytes(b"\x00" * persona._SALT_BYTES)
+    persona._load_salt.cache_clear()
+    with pytest.raises(persona.CorruptSaltError):
+        persona.persona_id("blogger", "alice@example.com")
+
+
+def test_all_0xff_salt_rejected_as_corrupt(tmp_path):
+    # Same risk class as the zero-fill case — failed-write padding /
+    # template placeholder.
+    salt_path = tmp_path / "persona.salt"
+    salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    salt_path.write_bytes(b"\xff" * persona._SALT_BYTES)
+    persona._load_salt.cache_clear()
+    with pytest.raises(persona.CorruptSaltError):
+        persona.persona_id("blogger", "alice@example.com")
+
+
+def test_low_distinct_byte_salt_rejected(tmp_path):
+    # Right at the floor: 15 distinct bytes (one below the 16 minimum)
+    # must be rejected. Encodes the boundary that real random salts
+    # cluster well above.
+    salt_path = tmp_path / "persona.salt"
+    salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    pattern = bytes(range(15)) * 3  # 45 bytes
+    salt_path.write_bytes(pattern[: persona._SALT_BYTES])  # 32 bytes, 15 distinct
+    persona._load_salt.cache_clear()
+    with pytest.raises(persona.CorruptSaltError):
+        persona.persona_id("blogger", "alice@example.com")
+
+
+def test_atomic_publish_leaves_no_tmpfile(tmp_path):
+    # _ensure_salt writes to <name>.tmp.<pid> then links into place.
+    # Verify the tmpfile is unlinked in the finally arm even on the
+    # happy path; otherwise a long-running daemon would accumulate
+    # stale tmpfiles.
+    salt_path = tmp_path / "persona.salt"
+    persona._load_salt.cache_clear()
+    persona.persona_id("blogger", "alice@example.com")
+    leftover = list(salt_path.parent.glob("persona.salt.tmp.*"))
+    assert leftover == [], f"orphaned tmpfile(s): {leftover}"
+
+
+def test_salt_file_size_is_exact_after_first_use(tmp_path):
+    # Pin the durability contract: after first-use returns, the salt on
+    # disk is exactly _SALT_BYTES long (no torn / short-written file).
+    salt_path = tmp_path / "persona.salt"
+    persona._load_salt.cache_clear()
+    persona.persona_id("blogger", "alice@example.com")
+    assert salt_path.stat().st_size == persona._SALT_BYTES
+
+
+def test_parent_dir_chmod_tightens_existing_loose_perms(tmp_path, monkeypatch):
+    # Pre-create the config dir at 0o755 (the default-umask shape that
+    # blogger/medium token writers leave behind). _ensure_salt must
+    # tighten it to 0o700, not leave it as the operator finds it.
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(mode=0o755)
+    if sys.platform == "win32":
+        pytest.skip("POSIX mode bits not meaningful on Windows")
+    # Confirm the precondition (umask can interfere otherwise).
+    os.chmod(config_dir, 0o755)
+    assert config_dir.stat().st_mode & 0o777 == 0o755
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
+    persona._load_salt.cache_clear()
+    persona.persona_id("blogger", "alice@example.com")
+    mode = config_dir.stat().st_mode & 0o777
+    assert mode == 0o700, f"expected 0o700, got {oct(mode)}"
+
+
+def test_symlink_salt_to_dev_zero_rejected(tmp_path):
+    # A misconfigured fixture / shared CI runner could symlink the salt
+    # path to /dev/zero; the old read_bytes() would hang the process
+    # consuming memory. The is_file() guard must reject it.
+    if sys.platform == "win32":
+        pytest.skip("/dev/zero is POSIX-only")
+    if not Path("/dev/zero").exists():
+        pytest.skip("/dev/zero unavailable on this host")
+    salt_path = tmp_path / "persona.salt"
+    salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.symlink("/dev/zero", str(salt_path))
+    persona._load_salt.cache_clear()
+    with pytest.raises(persona.CorruptSaltError):
+        persona.persona_id("blogger", "alice@example.com")
+
+
 def test_concurrent_first_use_falls_through_to_read(tmp_path, monkeypatch):
     # Simulate the race: another process creates the salt file between
     # ``path.exists()`` returning False and ``os.open(O_EXCL)``. The
@@ -141,13 +245,6 @@ def test_concurrent_first_use_falls_through_to_read(tmp_path, monkeypatch):
     persona._load_salt.cache_clear()
 
     racer_salt = os.urandom(persona._SALT_BYTES)
-
-    real_exists = type(salt_path).exists
-
-    def fake_exists(self):
-        if self == salt_path and not salt_path.exists():
-            return False
-        return real_exists(self)
 
     def write_racer_salt_then_open(*args, **kwargs):
         # Run the original os.open via the saved reference, but first
@@ -171,9 +268,12 @@ def test_concurrent_first_use_falls_through_to_read(tmp_path, monkeypatch):
 
 def test_existing_salt_file_is_read_back(tmp_path):
     # Pre-seed a known salt; persona_id must use it (not regenerate).
+    # The seed must pass the distinct-byte floor (16+) — a constant-byte
+    # fixture would be rejected as corrupt, which is itself a separate
+    # contract pinned by test_constant_byte_salt_rejected_as_corrupt.
     salt_path = tmp_path / "persona.salt"
     salt_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fixed_salt = b"\xab" * persona._SALT_BYTES
+    fixed_salt = bytes(range(persona._SALT_BYTES))  # 0..31, 32 distinct bytes
     fd = os.open(str(salt_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         os.write(fd, fixed_salt)
