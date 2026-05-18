@@ -1,4 +1,5 @@
-"""Publisher ABC + table-driven dispatcher — Plan 2026-05-18-001 Unit 7.
+"""Publisher ABC + table-driven dispatcher — Plan 2026-05-18-001 Unit 7,
+extended by Plan 2026-05-18-009 R9 (CLI/schema decoupling).
 
 Replaces the ``if plat == "blogger" / elif "medium"`` chain in
 ``adapters/__init__.py:publish()`` with a registry the dispatch logic
@@ -7,7 +8,11 @@ walks once per call. Adding a new platform means:
   1. Implement ``Publisher.publish(payload, mode, config) -> AdapterResult``
   2. Call ``register("<platform>", NewAdapterCls)``
 
-No changes to the dispatcher.
+No changes to the dispatcher, the CLI argparse layer, or
+``schema.supported_platforms`` — all of those read
+``registered_platforms()`` dynamically post-R9. See
+``AGENTS.md → Adding a new publisher adapter`` for the contributor
+walkthrough that cites ``BloggerAPIAdapter`` at each step.
 
 Fallback semantics (preserved from the legacy chain):
 
@@ -22,6 +27,12 @@ Fallback semantics (preserved from the legacy chain):
 - An adapter can declare itself unavailable for a given environment by
   overriding ``Publisher.available(cls, config)`` — used by
   ``MediumBraveAdapter`` to gate itself to macOS.
+
+Adapter-declared throttle metadata (post-R9c): adapters set
+``AdapterResult.post_publish_delay_seconds`` to declare a required
+post-publish wait (Medium adapters set ``30``). The CLI's verify-poll
+window and inter-row throttle bookkeeping key off this field rather than
+matching adapter strings against a hardcoded ``_MEDIUM_ADAPTERS`` set.
 
 This is the minimum dispatcher generalisation; per Plan D5 we do not
 rewrite adapter internals, and per Plan D8 the only method on the ABC
