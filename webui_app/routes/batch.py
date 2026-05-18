@@ -191,7 +191,7 @@ def ce_publish_real():
             publish_results=publish_results, config=config,
             history=history, history_active=True)
 
-    except Exception as e:
+    except Exception as exc:
         history = _history_store.update(lambda hist: [{
             'id': str(uuid.uuid4())[:8],
             'target_url': config.get('target_url', 'unknown'),
@@ -200,8 +200,8 @@ def ce_publish_real():
             'status': 'failed',
             'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
             'article_urls': [],
-            'error': str(e),
+            'error': str(exc),
         }, *hist][:100])
 
-        return _render('index.html', error=f"发布失败: {str(e)}",
+        return _render('index.html', error=f"发布失败: {str(exc)}",
             config=config, history=history, history_active=True)

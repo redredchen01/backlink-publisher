@@ -1,0 +1,6 @@
+
+# velog session dumps (sensitive)
+velog_cookies_flat.txt
+velog_credentials_dump.json
+*_credentials_dump.json
+*_cookies_flat.txt
