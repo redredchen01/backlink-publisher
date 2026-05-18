@@ -14,6 +14,30 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 HOOK_DIR="$(git -C "$REPO_ROOT" rev-parse --git-path hooks)"
 HOOK_PATH="$HOOK_DIR/post-merge"
 
+# Detect non-default hooksPath: if `git rev-parse --git-path hooks` resolves
+# outside the repo's own --git-common-dir, the user has a core.hooksPath
+# override (per-repo, global, or system). The hook is shared with any other
+# repos that resolve to the same hooksPath — warn so the user understands the
+# blast radius before we write the file.
+COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --git-common-dir)"
+COMMON_DIR_ABS="$(cd "$COMMON_DIR" && pwd -P)"
+HOOK_DIR_ABS="$(mkdir -p "$HOOK_DIR" && cd "$HOOK_DIR" && pwd -P)"
+EXPECTED_HOOK_DIR_ABS="$COMMON_DIR_ABS/hooks"
+if [[ "$HOOK_DIR_ABS" != "$EXPECTED_HOOK_DIR_ABS" ]]; then
+  echo "warn: git core.hooksPath is overridden — hook will be written to a shared location" >&2
+  echo "      installing to: $HOOK_DIR_ABS" >&2
+  echo "      (this repo's own .git/hooks would normally be: $EXPECTED_HOOK_DIR_ABS)" >&2
+  for scope in local global system; do
+    val=$(git -C "$REPO_ROOT" config --$scope --get core.hooksPath 2>/dev/null || true)
+    [[ -n "$val" ]] && echo "      core.hooksPath ($scope): $val" >&2
+  done
+  echo "      this hook will fire for every git operation in any repo that resolves to" >&2
+  echo "      the same hooksPath. it is safe-by-default: it exits cleanly when" >&2
+  echo "      \$REPO_ROOT/scripts/_worktree_safety.sh is not present, so other repos" >&2
+  echo "      using the same hooksPath will be unaffected." >&2
+  echo "" >&2
+fi
+
 if [[ -e "$HOOK_PATH" ]] && ! grep -q "BACKLINK_PUBLISHER_WORKTREE_HOOK" "$HOOK_PATH" 2>/dev/null; then
   echo "error: a different post-merge hook already exists at $HOOK_PATH" >&2
   echo "       inspect it; merge manually or remove it and re-run this installer" >&2
