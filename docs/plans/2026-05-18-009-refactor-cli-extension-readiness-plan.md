@@ -316,7 +316,7 @@ Phase 2+: Independent hygiene/sustainability — any order
 - README.md's "For contributors" link reaches the AGENTS.md section.
 - Owner pairs through the walkthrough on a short call after landing.
 
-- [ ] **Unit 5: Delete stale `core/` + relocate workspace-root README** (R3 + R4)
+- [x] **Unit 5: Delete stale `core/` + relocate workspace-root README** (R3 + R4) — *Completed 2026-05-18. Pre-flight grep confirmed zero live references to `core/src` or `../core` in tracked code (only planning docs mention them). `core/` (which contained `pyproject.toml` for `backlink-publisher-core` v0.2.0 + a `src/` mirroring the live source) deleted from workspace root via `rm -rf ../core`. Workspace-root `README.md` (which falsely claimed a `core/` + `packages/` monorepo and recommended `uv` despite the project using pip) replaced with a 3-line pointer to `backlink-publisher/README.md`. Canonical README at `backlink-publisher/README.md` got a new "Workspace Layout" section documenting the `bp-<topic>/` git worktree convention. Commit `eaf1c07` on `docs/r9-extension-readiness-plan` branch.*
 
 **Goal:** Remove the abandoned `core/` and move the canonical README into the actual git repo.
 
