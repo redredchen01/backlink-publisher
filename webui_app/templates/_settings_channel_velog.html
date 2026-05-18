@@ -1,0 +1,38 @@
+                <div class="alert alert-warning" style="margin-bottom:20px;">
+                    <strong>⏳ Phase 0 进行中 — 暂未开放绑定</strong><br/>
+                    velog 适配器处于可达性 / TTL / 索引可行性 spike 阶段。<br/>
+                    达标线（P0-6）全部通过 + 运营负责人 / 工程 lead 联签（P0-7）后才会开放此处的绑定按钮。
+                </div>
+
+                <p class="text-muted" style="font-size:13px;">
+                    <strong>当前阶段说明：</strong><br/>
+                    velog.io 没有官方 API，只能通过内部 <code>v3.velog.io/graphql</code> 的 <code>writePost</code> mutation 直发；
+                    鉴权依赖社交登录（Google / GitHub / Facebook）后由 Playwright 导出的 cookie / <code>storage_state</code>。
+                    社交 OAuth 必须在真实浏览器完成，无法塞进 webui 表单。
+                </p>
+
+                <p class="text-muted" style="font-size:13px;">
+                    Phase 0 通过后，此处将提供「<strong>绑定 velog</strong>」按钮：点击后服务端会启动 <code>velog-login</code> CLI，
+                    本机弹出 Chromium 让你登录，凭证落到 <code>~/.config/backlink-publisher/velog-cookies.json</code>（0600）。
+                </p>
+
+                <hr style="margin:20px 0;">
+
+                <div class="d-flex align-items-center gap-3">
+                    <button type="button" class="btn btn-secondary" disabled
+                            title="Phase 0 spike 未通过前不可绑定">
+                        <i class="bi bi-lock-fill me-1"></i>绑定 velog（暂未开放）
+                    </button>
+                    <span class="badge-status warn">
+                        <i class="bi bi-hourglass-split"></i>Phase 0 进行中
+                    </span>
+                </div>
+
+                <div class="mt-3">
+                    <small class="text-muted">
+                        进度参考（仓库文档路径）：<br/>
+                        spike 报告 · <code>docs/spikes/2026-05-18-velog-phase0.md</code><br/>
+                        plan v2 · <code>docs/plans/2026-05-18-012-feat-velog-adapter-plan.md</code><br/>
+                        语种决断：<strong>韩语（ko）</strong> ✓
+                    </small>
+                </div>
