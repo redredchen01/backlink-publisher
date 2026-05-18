@@ -90,16 +90,25 @@ def ce_plan():
     target_url = main_url
     target_language = request.form.get('target_language', detect_language(target_url))
 
+    # Fetch TDK if enabled and add suggested anchors
+    fetch_tdk = request.form.get('fetch_tdk', 'yes')
+    suggested_anchors = []
+    if fetch_tdk == 'yes':
+        tdk_data = fetch_full_tdk(target_url)
+        if tdk_data.get('status') == 'success':
+            suggested_anchors = tdk_data.get('suggested_anchors', [])
+
     config = {
         'target_url': target_url,
         'main_domain': get_main_domain(target_url),
         'platform': detect_platform(target_url),
-        'url_mode': 'A',
+        'url_mode': 'C',
         'publish_mode': 'draft',
         'target_language': target_language,
         'custom_title': '',
         'custom_tags': '',
-        'fetch_tdk': 'yes',
+        'fetch_tdk': fetch_tdk,
+        'suggested_anchors': suggested_anchors,
         'urls': url_inputs,
         'meta_info': meta_info,
     }
@@ -158,32 +167,6 @@ def ce_generate():
         seed['custom_tags'] = custom_tags
     if extra_urls:
         seed['extra_urls'] = extra_urls
-    if tdk_data:
-        seed['system_prompt'] = tdk_data.get('system_prompt', '')
-        seed['tdk_title'] = tdk_data.get('title', '')
-        seed['tdk_description'] = tdk_data.get('description', '')
-        seed['tdk_keywords'] = tdk_data.get('keywords', '')
-
-    seed_json = json.dumps(seed, ensure_ascii=False)
-
-    try:
-        result = run_pipe(['plan-backlinks'], seed_json)
-        plans = result['stdout']
-        if not plans.strip():
-            error_msg = result['stderr'] or "生成失败，没有输出"
-            return _render('index.html', target_url=main_url, error=error_msg)
-
-        plans_list = []
-        for line in plans.strip().split('\n'):
-            if line.strip():
-                try:
-                    plans_list.append(json.loads(line))
-                except json.JSONDecodeError as je:
-                    print(f"JSON parse error: {je}, line: {line[:100]}",
-                          file=sys.stderr)
-
-        if not plans_list:
-            return _render('index.html', target_url=main_url,
                 error=f"解析生成结果失败。原始输出: {plans[:200]}")
 
         config = {
@@ -262,3 +245,34 @@ def ce_publish():
     except Exception as e:
         return _render('index.html', error=f"发布失败: {str(e)}",
                        config=config, history_active=True)
+
+@bp.route('/ce:preview', methods=['POST'])
+def ce_preview():
+    from backlink_publisher._util.markdown import render_to_html
+    urls_json = request.form.get('urls_json', '[]')
+    try:
+        urls = json.loads(urls_json)
+    except:
+        return "Invalid URLs"
+        
+    seed = {
+        'target_url': urls[0],
+        'main_domain': get_main_domain(urls[0]),
+        'platform': request.form.get('platform', 'medium'),
+        'language': request.form.get('target_language', 'zh-CN'),
+        'url_mode': request.form.get('url_mode', 'A'),
+        'publish_mode': 'draft',
+        'custom_title': request.form.get('custom_title', ''),
+        'custom_tags': request.form.get('custom_tags', ''),
+        'extra_urls': urls[1:],
+    }
+    if request.form.get('fetch_tdk') == 'yes':
+        seed['tdk'] = fetch_full_tdk(urls[0])
+        
+    pipe_out = run_pipe(['plan-backlinks', '-'], json.dumps([seed]))
+    content = pipe_out.stdout
+    
+    fmt = request.args.get('format', 'md')
+    if fmt == 'html':
+        return render_to_html(content)
+    return content

@@ -130,6 +130,27 @@
             </div>
         </div>
 
+        <!-- Velog 渠道折叠卡（Phase 0 spike 占位） -->
+        <div class="card channel-card">
+            <div class="card-header p-0">
+                <button type="button" class="channel-toggle"
+                        data-bs-toggle="collapse" data-bs-target="#channel-velog"
+                        aria-expanded="false" aria-controls="channel-velog">
+                    <i class="bi bi-pencil-square" style="color:#20c997;" aria-hidden="true"></i>
+                    <span>Velog</span>
+                    <span class="badges">
+                        <span class="badge-status warn">Phase 0 进行中</span>
+                    </span>
+                    <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="channel-velog" class="collapse">
+                <div class="card-body">
+                    {% include '_settings_channel_velog.html' %}
+                </div>
+            </div>
+        </div>
+
         <h2 class="section-heading">全局设置</h2>
 
         {% include '_settings_global_keywords.html' %}
