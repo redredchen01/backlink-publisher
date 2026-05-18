@@ -300,3 +300,45 @@ anchor_keywords = ["old-kw"]
     )
     cfg2 = load_config(cfg_path)
     assert get_anchor_keywords(cfg2, "https://site.com") == ["new-kw1", "new-kw2"]
+
+
+def test_config_dir_honors_env_var_override(tmp_path, monkeypatch):
+    """``BACKLINK_PUBLISHER_CONFIG_DIR`` overrides the default location.
+
+    Locks the contract that ``tests/conftest.py:_isolate_user_dirs`` relies
+    on. If this test fails, the session-scope isolation fixture is silently
+    broken and the operator's real ``~/.config/backlink-publisher/`` will
+    bleed back into test runs.
+    """
+    from backlink_publisher.config import _config_dir
+
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    assert _config_dir() == tmp_path
+
+
+def test_cache_dir_honors_env_var_override(tmp_path, monkeypatch):
+    """``BACKLINK_PUBLISHER_CACHE_DIR`` overrides the default location.
+
+    Symmetric with the config-dir override. Same isolation contract.
+    """
+    from backlink_publisher.config import _cache_dir
+
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CACHE_DIR", str(tmp_path))
+    assert _cache_dir() == tmp_path
+
+
+def test_config_dir_falls_back_when_env_var_unset(tmp_path, monkeypatch):
+    """Empty/unset env var falls back to the platform default.
+
+    Defends against a regression where empty-string env var would resolve
+    to ``Path("")``, silently writing into the CWD.
+    """
+    from backlink_publisher.config import _config_dir
+
+    monkeypatch.delenv("BACKLINK_PUBLISHER_CONFIG_DIR", raising=False)
+    assert _config_dir().name == "backlink-publisher"
+    assert "backlink-publisher" in str(_config_dir())
+
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", "")
+    # Empty string is falsy → falls back to platform default.
+    assert _config_dir().name == "backlink-publisher"

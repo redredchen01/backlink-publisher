@@ -57,6 +57,16 @@ else:
 
 
 def _config_dir() -> Path:
+    """Resolve the config directory.
+
+    Honors ``BACKLINK_PUBLISHER_CONFIG_DIR`` when set so tests, CI, and
+    containers can point at an isolated directory without touching the
+    operator's real ``~/.config/backlink-publisher/``. Falls back to
+    platform defaults otherwise.
+    """
+    override = os.environ.get("BACKLINK_PUBLISHER_CONFIG_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
@@ -65,6 +75,15 @@ def _config_dir() -> Path:
 
 
 def _cache_dir() -> Path:
+    """Resolve the cache directory.
+
+    Honors ``BACKLINK_PUBLISHER_CACHE_DIR`` for the same reasons as
+    ``_config_dir`` — keeps ``~/.cache/backlink-publisher/`` (checkpoints,
+    anchor profiles) untouched during tests.
+    """
+    override = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
+    if override:
+        return Path(override)
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
     else:
