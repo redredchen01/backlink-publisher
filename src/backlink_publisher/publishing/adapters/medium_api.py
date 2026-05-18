@@ -11,6 +11,7 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
 from .link_attr_verifier import verify_link_attributes
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
@@ -35,7 +36,7 @@ def _json_log(**kwargs: Any) -> str:
     return json.dumps(kwargs)
 
 
-class MediumAPIAdapter:
+class MediumAPIAdapter(Publisher):
     """Publishes to Medium via the official API v1 (Integration Token auth).
 
     Raises DependencyError if no token configured — dispatcher falls through

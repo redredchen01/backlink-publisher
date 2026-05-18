@@ -21,6 +21,7 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
 from .link_attr_verifier import verify_link_attributes
 
@@ -224,7 +225,7 @@ def _save_draft_via_keyboard() -> None:
     time.sleep(3)
 
 
-class MediumBraveAdapter:
+class MediumBraveAdapter(Publisher):
     """Publish to Medium via AppleScript-controlled Brave browser (macOS only).
 
     Completely bypasses CDP/automation detection since it uses the user's
@@ -233,6 +234,14 @@ class MediumBraveAdapter:
     Raises DependencyError on non-macOS platforms.
     Raises ExternalServiceError if Brave is not running or user not logged in.
     """
+
+    @classmethod
+    def available(cls, config) -> bool:
+        """Gate this adapter to macOS only — preserves the legacy
+        ``if _platform.system() == "Darwin"`` check that used to live in
+        the dispatcher (Plan Unit 7 D8)."""
+        import platform as _p
+        return _p.system() == "Darwin"
 
     def publish(
         self,

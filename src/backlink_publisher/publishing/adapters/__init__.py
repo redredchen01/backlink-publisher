@@ -1,23 +1,43 @@
-"""Adapter dispatcher — API-first with browser fallback for Medium.
+"""Adapter dispatcher — table-driven registry (Plan Unit 7).
 
-Medium fallback chain (macOS):
-  1. MediumAPIAdapter (Integration Token — deprecated by Medium in 2023)
-  2. MediumBraveAdapter (AppleScript + Brave — bypasses Cloudflare)
-  3. MediumBrowserAdapter (Playwright headed Chrome — legacy fallback)
+Replaced the if/elif chain in the previous ``publish()`` with a
+single ``dispatch()`` call into ``publishing.registry``. The Medium
+fallback chain (MediumAPI → MediumBrave on macOS → MediumBrowser
+on Playwright) is now expressed as registration order, and the
+macOS gate lives on ``MediumBraveAdapter.available()``.
+
+Behaviour preserved verbatim:
+
+  - Blogger: ``BloggerAPIAdapter`` only.
+  - Medium:
+      1. ``MediumAPIAdapter`` (Integration Token; deprecated by Medium 2023)
+      2. ``MediumBraveAdapter`` (AppleScript + Brave; macOS only;
+         ``available()`` short-circuits elsewhere)
+      3. ``MediumBrowserAdapter`` (Playwright headed Chrome — terminal)
+  - ``DependencyError`` from one adapter → try the next.
+  - ``ExternalServiceError`` (401 / 429 / network) → propagate, no fall.
+  - ``dry_run=True`` → sentinel ``AdapterResult`` without publishing.
+  - Unknown platform → ``ExternalServiceError("unsupported platform: …")``.
 """
 
 from __future__ import annotations
 
-import platform as _platform
 from typing import Any
 
-from backlink_publisher.config import Config, load_config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher.config import Config
+from backlink_publisher._util.errors import DependencyError
+from ..registry import dispatch, register
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .medium_api import MediumAPIAdapter
-from .medium_browser import MediumBrowserAdapter
 from .medium_brave import MediumBraveAdapter
+from .medium_browser import MediumBrowserAdapter
+
+
+# Register the fallback chain per platform. Adding a new platform = one
+# more ``register(...)`` call — no dispatcher changes.
+register("blogger", BloggerAPIAdapter)
+register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
 
 
 def publish(
@@ -26,55 +46,18 @@ def publish(
     config: Config,
     dry_run: bool = False,
 ) -> AdapterResult:
-    """Dispatch to the correct adapter.
-
-    Blogger: BloggerAPIAdapter (only path).
-    Medium:  MediumAPIAdapter first; on DependencyError (no token) →
-             MediumBraveAdapter (macOS, Brave) → MediumBrowserAdapter (Playwright).
-             ExternalServiceError (401, 429, network) does NOT fall through.
-
-    dry_run: returns a sentinel AdapterResult without publishing.
-    """
-    plat = payload.get("platform", "")
-
-    if dry_run:
-        return AdapterResult(
-            status="draft",
-            adapter=f"{plat}-api",
-            platform=plat,
-            _dry_run=True,
-            _command=f"publish to {plat} --mode {mode} (dry-run)",
-        )
-
-    if plat == "blogger":
-        return BloggerAPIAdapter().publish(payload, mode, config)
-
-    if plat == "medium":
-        # 1. Try Integration Token API (may be deprecated)
-        try:
-            return MediumAPIAdapter().publish(payload, mode, config)
-        except DependencyError:
-            pass  # No token configured → try browser adapters
-        except ExternalServiceError:
-            raise  # 401/429/network → do not fall through
-
-        # 2. Try AppleScript + Brave (macOS only, bypasses Cloudflare)
-        if _platform.system() == "Darwin":
-            try:
-                return MediumBraveAdapter().publish(payload, mode, config)
-            except DependencyError:
-                pass  # Brave not running → fall to Playwright
-
-        # 3. Playwright headed Chrome fallback
-        return MediumBrowserAdapter().publish(payload, mode, config)
-
-    raise ExternalServiceError(f"unsupported platform: {plat}")
+    """Public dispatch entry point — preserved as a function for backward
+    compatibility (CLI / tests / WebUI all call ``publish(...)``)."""
+    return dispatch(payload, mode, config, dry_run=dry_run)
 
 
 def verify_adapter_setup(platform: str, config: Config) -> None:
-    """Raise DependencyError if the adapter for this platform cannot function.
+    """Raise ``DependencyError`` if the adapter for this platform cannot
+    function. Called before the publish loop when not in dry-run mode.
 
-    Called before the publish loop when not in dry-run mode.
+    Kept as a module function (not on the ABC) per Plan D8 — only ``publish``
+    needs to be ABC-bound today; promoting this to the ABC waits for the
+    third platform that actually needs it.
     """
     if platform == "blogger":
         if not config.blogger_oauth:
