@@ -27,12 +27,44 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import Hashable, TypeVar
+
+# --- Gate contract constants ----------------------------------------------
+# Read by the regression gate (tests/test_footprint_regression.py) at import
+# time. Bump SCHEMA_VERSION whenever the engine's emitted shape changes in a
+# way that invalidates committed baselines; the gate then raises
+# FootprintGateSchemaMismatch instructing the operator to regenerate.
+SCHEMA_VERSION: int = 1
+
+# Default drift / alarm thresholds (percent). Plan Unit 4 may tune per
+# renderer path via THRESHOLD_OVERRIDES once natural variance is measured.
+DEFAULT_THRESHOLD_DRIFT_PP: float = 5.0
+DEFAULT_THRESHOLD_ALARM_PCT: float = 95.0
+
+# Per-(corpus, dimension) threshold overrides, populated by Unit 4 when a
+# renderer path has natural variance that exceeds the default drift cap.
+# Key: (corpus_name, dimension_name); value: (drift_pp, alarm_pct).
+THRESHOLD_OVERRIDES: dict[tuple[str, str], tuple[float, float]] = {}
 
 # Matches <a ...>...</a>. Captures the attributes blob and the anchor text.
 _A_TAG_RE = re.compile(r"<a(\s[^>]*)>([^<]*)</a>", re.IGNORECASE | re.DOTALL)
 
 # Inside the attributes blob, capture name="value" pairs in order of appearance.
 _ATTR_RE = re.compile(r'(\w[\w-]*)\s*=\s*"([^"]*)"')
+
+
+_K = TypeVar("_K", bound=Hashable)
+
+
+def _top_by_count_then_lex(counter: Counter[_K], n: int) -> list[tuple[_K, int]]:
+    """Deterministic alternative to ``Counter.most_common(n)``.
+
+    Sorts by count descending, then by key ascending (Python's native
+    ordering — works for ``str`` keys and ``tuple[str, ...]`` keys alike).
+    Tied counts always resolve to the lex-smallest key, independent of
+    insertion order and ``PYTHONHASHSEED``. Empty counter returns ``[]``.
+    """
+    return sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]
 
 
 @dataclass(frozen=True)
@@ -97,10 +129,10 @@ class FootprintReport:
     preceding_char_counts: Counter[str] = field(default_factory=Counter)
 
     def top_attr_order(self, n: int = 3) -> list[tuple[tuple[str, ...], int]]:
-        return self.attr_order_counts.most_common(n)
+        return _top_by_count_then_lex(self.attr_order_counts, n)
 
     def top_rel_values(self, n: int = 5) -> list[tuple[str, int]]:
-        return self.rel_value_counts.most_common(n)
+        return _top_by_count_then_lex(self.rel_value_counts, n)
 
     def concentration_pct(self, dimension: str) -> float:
         """Return the share of links whose value matches the most common one
@@ -109,7 +141,10 @@ class FootprintReport:
         counter = getattr(self, f"{dimension}_counts", None)
         if not isinstance(counter, Counter) or self.total_links == 0:
             return 0.0
-        _, top_count = counter.most_common(1)[0]
+        top = _top_by_count_then_lex(counter, 1)
+        if not top:
+            return 0.0
+        _, top_count = top[0]
         return 100.0 * top_count / self.total_links
 
 
@@ -175,14 +210,14 @@ def format_report_markdown(report: FootprintReport, *, alarm_pct: float = 95.0) 
         (
             "target value",
             "target_value",
-            lambda: repr(report.target_value_counts.most_common(1)[0][0])
+            lambda: repr(_top_by_count_then_lex(report.target_value_counts, 1)[0][0])
             if report.target_value_counts
             else "—",
         ),
         (
             "Preceding char",
             "preceding_char",
-            lambda: repr(report.preceding_char_counts.most_common(1)[0][0])
+            lambda: repr(_top_by_count_then_lex(report.preceding_char_counts, 1)[0][0])
             if report.preceding_char_counts
             else "—",
         ),

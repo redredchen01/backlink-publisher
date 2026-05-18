@@ -1,0 +1,15 @@
+<!-- R12 attack fixture (Plan Unit 5): multi-line <a> tags.
+
+Tests today's engine handles both single-line AND multi-line <a> tags
+(verified empirically against `_A_TAG_RE` which uses re.DOTALL). Any
+future refactor that breaks multi-line handling drops total_links from
+2 to 1 — loud and observable. -->
+
+<p>Single-line link: <a href="https://example.com" target="_blank" rel="noopener">click here</a>.</p>
+<p>Multi-line link:
+  <a
+    href="https://multi.example.com"
+    target="_blank"
+    rel="noopener"
+  >read more</a>
+.</p>

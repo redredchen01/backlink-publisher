@@ -1,0 +1,21 @@
+{
+  "concentration_pct": {
+    "attr_order": 100.0,
+    "preceding_char": 100.0,
+    "rel_value": 100.0,
+    "target_value": 100.0
+  },
+  "fixture_set_id": "d9df6c5f2e3b077f",
+  "reason": "Initial Arm A baseline — SCHEMA_VERSION=1, deterministic tie-break per R11",
+  "schema_version": 1,
+  "top_values": {
+    "attr_order": [
+      "href",
+      "target",
+      "rel"
+    ],
+    "preceding_char": " ",
+    "rel_value": "noopener",
+    "target_value": "_blank"
+  }
+}
