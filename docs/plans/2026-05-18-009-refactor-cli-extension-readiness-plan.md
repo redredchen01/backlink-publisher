@@ -347,7 +347,7 @@ Phase 2+: Independent hygiene/sustainability — any order
 
 - [x] **Unit 7: Triage `bp-local-unit{2,4,5,6}` rehearsal worktrees** (R2) — *Completed 2026-05-18: All four worktrees triaged via the R2 decision tree. Outcome: all four KEPT — all are dirty (same post-packaging-refactor mass-deletion pattern as bp-events-u1) AND all four branches are local-only (not pushed to origin, not on main). Per R2 "if ambiguous, keep and surface". These hold the Telegraph adapter implementation work (Units 2-6 of plan 2026-05-15-004); HEAD commits are real work, the deletions on top are post-packaging noise. Safe cleanup path: per-worktree stash+wip-branch then remove, deferred until Telegraph adapter plan lands.*
 
-- [ ] **Unit 8: Post-merge worktree auto-cleanup** (R10)
+- [x] **Unit 8: Post-merge worktree auto-cleanup** (R10) — *Completed 2026-05-18 on branch `feat/worktree-auto-cleanup` (commit `07316a2`, pushed). Three shell artefacts: `scripts/_worktree_safety.sh` (sourceable helpers: `wt_is_clean`, `wt_branch_in_main` with squash-merge `gh pr list` fallback, `wt_remove` with self-deletion guard, `wt_list_porcelain`); `scripts/prune-stale-worktrees.sh` (on-demand helper with `--dry-run`/`--force`/`--help`, interactive y/N/q prompts, exit 2 on removal failure); `scripts/install-post-merge-hook.sh` (per-clone installer; hook fires only on main worktree on main branch; notifies by default, auto-removes only when `BACKLINK_PUBLISHER_WORKTREE_AUTOREMOVE=1`). 5 end-to-end pytest tests against fresh fixture repos with merged+clean / unmerged / merged+dirty worktrees — all pass. AGENTS.md got a new "Worktree Auto-Cleanup" section.*
 
 **Goal:** Add two pieces of automation: post-merge hook + prune helper.
 
