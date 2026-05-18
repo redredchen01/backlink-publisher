@@ -79,13 +79,22 @@ wt_remove() {
 
 # wt_list_porcelain
 #   Echoes one line per worktree as: "<abspath>|<head>|<branch>"
-#   Skips the main worktree (we never auto-remove it).
+#   Uses substr (not $2) because worktree paths may contain spaces — awk's
+#   default field-split would silently truncate everything past the first
+#   space and the script would compare wrong strings everywhere.
 wt_list_porcelain() {
   git worktree list --porcelain | awk '
-    /^worktree / { path=$2; next }
-    /^HEAD / { head=$2; next }
-    /^branch / { branch=$2; sub(/^refs\/heads\//, "", branch); print path "|" head "|" branch; next }
+    /^worktree / { path=substr($0, 10); next }
+    /^HEAD / { head=substr($0, 6); next }
+    /^branch / { branch=substr($0, 8); sub(/^refs\/heads\//, "", branch); print path "|" head "|" branch; next }
     /^detached/ { print path "|" head "|<detached>"; next }
     /^$/ { path=""; head=""; branch="" }
   '
+}
+
+# wt_main_path
+#   Echoes the absolute path of the main worktree (the first entry of
+#   `git worktree list --porcelain`). Space-safe per wt_list_porcelain.
+wt_main_path() {
+  git worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }'
 }

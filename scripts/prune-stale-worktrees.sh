@@ -49,7 +49,7 @@ if ! git fetch --quiet origin main 2>/dev/null; then
   echo "warn: git fetch origin main failed; using local origin/main ref (may be stale)" >&2
 fi
 
-main_wt="$(git worktree list --porcelain | awk '/^worktree / { print $2; exit }')"
+main_wt="$(wt_main_path)"
 
 candidates=()
 skipped_dirty=()
