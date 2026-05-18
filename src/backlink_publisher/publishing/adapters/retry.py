@@ -8,7 +8,7 @@ import sys
 import time
 from typing import Any, Callable, TypeVar
 
-from ..errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 
 T = TypeVar("T")
 

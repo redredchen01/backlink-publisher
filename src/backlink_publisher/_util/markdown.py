@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .errors import InternalError
+from backlink_publisher._util.errors import InternalError
 
 
 _mdit_instance = None
@@ -195,7 +195,7 @@ def render_zh_short_article(
     Unit 8's validator is the strict gate and triggers retry/degrade if it
     sees one.
     """
-    from .errors import InputValidationError
+    from backlink_publisher._util.errors import InputValidationError
 
     n_sec = len(secondary_links)
     if n_sec not in (1, 2):
@@ -283,7 +283,7 @@ def validate_zh_short_payload(
     """
     # Imported locally so the markdown_utils module doesn't acquire a runtime
     # dependency on the resolver — keeps the module graph clean.
-    from .anchor_resolver import _passes_filters
+    from backlink_publisher.anchor.resolver import _passes_filters
 
     errors: list[str] = []
 

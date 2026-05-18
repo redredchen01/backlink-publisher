@@ -16,15 +16,15 @@ _HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from ..adapters import publish as adapter_publish, verify_adapter_setup
+from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from .. import checkpoint, config_echo
-from ..config import load_config
-from ..errors import DependencyError, ExternalServiceError, emit_error
-from ..jsonl import read_jsonl, write_jsonl
-from ..linkcheck import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
-from ..logger import publish_logger
+from backlink_publisher.config import load_config
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError, emit_error
+from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
+from backlink_publisher.linkcheck.http import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
+from backlink_publisher._util.logger import publish_logger
 from ..schema import SUPPORTED_PLATFORMS, validate_publish_payload
-from ..verify_publish import verify_published
+from backlink_publisher.linkcheck.verify import verify_published
 
 #: First-run banner sentinel — written after the banner fires so subsequent
 #: runs stay quiet. Bumping the version-tag forces a re-warn on future flag
@@ -460,7 +460,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    from ..logger import set_log_level
+    from backlink_publisher._util.logger import set_log_level
     set_log_level(args.log_level)
 
     # Mutual exclusion: only one of --resume, --list-runs, --cleanup, --cleanup-all

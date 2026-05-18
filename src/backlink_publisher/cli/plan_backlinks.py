@@ -23,10 +23,10 @@ from .. import (
     work_scraper,
     work_themed_generator,
 )
-from ..adapters.llm_anchor_provider import OpenAICompatibleProvider
-from ..anchor_profile import ProfileEntry
-from ..anchor_scheduler import ScheduleDecision, SecondaryLink
-from ..config import (
+from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider
+from backlink_publisher.anchor.profile import ProfileEntry
+from backlink_publisher.anchor.scheduler import ScheduleDecision, SecondaryLink
+from backlink_publisher.config import (
     Config,
     ThreeUrlConfig,
     get_anchor_keywords,
@@ -34,15 +34,15 @@ from ..config import (
     get_three_url_config,
     load_config,
 )
-from ..errors import (
+from backlink_publisher._util.errors import (
     ExternalServiceError,
     InputValidationError,
     emit_error,
 )
-from ..jsonl import read_jsonl, write_jsonl
-from ..language_check import detect_language
-from ..logger import plan_logger
-from ..markdown_utils import (
+from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
+from backlink_publisher.linkcheck.language import detect_language
+from backlink_publisher._util.logger import plan_logger
+from backlink_publisher._util.markdown import (
     _en_body_a,
     _en_body_b,
     _en_body_c,
@@ -1537,7 +1537,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    from ..logger import set_log_level
+    from backlink_publisher._util.logger import set_log_level
     set_log_level(args.log_level)
 
     if args.no_fetch_verify:

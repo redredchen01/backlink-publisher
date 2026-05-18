@@ -8,18 +8,18 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .. import config_echo, errors
-from ..anchor_lang import check_anchor_language
-from ..config import Config, get_anchor_pool_v2, load_config
-from ..errors import emit_error, InputValidationError
-from ..jsonl import read_jsonl, write_jsonl
-from ..language_check import (
+from backlink_publisher.anchor.lang import check_anchor_language
+from backlink_publisher.config import Config, get_anchor_pool_v2, load_config
+from backlink_publisher._util.errors import emit_error, InputValidationError
+from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
+from backlink_publisher.linkcheck.language import (
     SUPPORTED_LANGUAGES,
     detect_language,
     language_matches,
 )
-from ..linkcheck import check_urls_strict
-from ..logger import validate_logger
-from ..markdown_utils import validate_markdown_convertible
+from backlink_publisher.linkcheck.http import check_urls_strict
+from backlink_publisher._util.logger import validate_logger
+from backlink_publisher._util.markdown import validate_markdown_convertible
 from ..schema import SUPPORTED_PLATFORMS, validate_output_payload
 
 
@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    from ..logger import set_log_level
+    from backlink_publisher._util.logger import set_log_level
     set_log_level(args.log_level)
 
     validate_logger.info("validate-backlinks started")

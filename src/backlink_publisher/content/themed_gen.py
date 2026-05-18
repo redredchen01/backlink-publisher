@@ -28,11 +28,11 @@ import html
 import logging
 from dataclasses import dataclass
 
-from .anchor_resolver import _passes_work_anchor_filter
-from .config import ThreeUrlConfig
-from .errors import InputValidationError
-from .markdown_utils import _format_anchor_html
-from .work_scraper import WorkMetadata
+from backlink_publisher.anchor.resolver import _passes_work_anchor_filter
+from backlink_publisher.config import ThreeUrlConfig
+from backlink_publisher._util.errors import InputValidationError
+from backlink_publisher._util.markdown import _format_anchor_html
+from backlink_publisher.content.scraper import WorkMetadata
 
 __all__ = ["Anchors", "select_anchors", "render_work_themed_article"]
 

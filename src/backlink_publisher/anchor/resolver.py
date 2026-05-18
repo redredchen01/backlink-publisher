@@ -24,11 +24,11 @@ import logging
 import random
 import re
 
-from .adapters.llm_anchor_provider import (
+from backlink_publisher.publishing.adapters.llm_anchor_provider import (
     LLMAnchorRequest,
     OpenAICompatibleProvider,
 )
-from .config import Config, get_anchor_pool_v2
+from backlink_publisher.config import Config, get_anchor_pool_v2
 
 _log = logging.getLogger(__name__)
 

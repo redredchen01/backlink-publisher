@@ -21,7 +21,7 @@ Public entry: :func:`check_anchor_language`. Exemption order is:
 
 from __future__ import annotations
 
-from .language_check import SUPPORTED_LANGUAGES
+from backlink_publisher.linkcheck.language import SUPPORTED_LANGUAGES
 
 __all__ = ["check_anchor_language"]
 

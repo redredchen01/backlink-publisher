@@ -8,7 +8,7 @@ import sys
 from typing import Any
 
 from .. import config_echo
-from ..anchor_metrics import (
+from backlink_publisher.anchor.metrics import (
     _ALARM_SAMPLE_MIN_PER_TARGET,
     compute_window_metrics,
     detect_breaches,
@@ -16,13 +16,13 @@ from ..anchor_metrics import (
     group_by_target_url,
     resolve_thresholds,
 )
-from ..anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileState,
     load_profile,
     recent_degradation_rate,
     recent_type_counts,
 )
-from ..config import ANCHOR_TYPES, AnchorAlarmConfig, load_config
+from backlink_publisher.config import ANCHOR_TYPES, AnchorAlarmConfig, load_config
 
 # Exit code namespace for sibling CLIs (see plan_backlinks.py, validate_backlinks.py,
 # publish_backlinks.py): 1 = error path; 2 = sibling-CLI generic error; 3 =

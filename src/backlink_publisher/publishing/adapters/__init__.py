@@ -11,8 +11,8 @@ from __future__ import annotations
 import platform as _platform
 from typing import Any
 
-from ..config import Config, load_config
-from ..errors import DependencyError, ExternalServiceError
+from backlink_publisher.config import Config, load_config
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .medium_api import MediumAPIAdapter
