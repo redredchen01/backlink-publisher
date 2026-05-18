@@ -189,15 +189,24 @@ def fetch_full_tdk(url):
         title = title.strip() if title else ''
         description = description.strip() if description else ''
         keywords = keywords.strip() if keywords else ''
-        system_prompt = f"""你是一个专业的网站内容作家。请根据以下目标网站的SEO信息，创作一篇高质量的反向链接文章。
+        
+        # 自动提取锚文本逻辑
+        suggested_anchors = []
+        if keywords:
+            suggested_anchors = [k.strip() for k in keywords.split(',') if k.strip()]
+        if not suggested_anchors and title:
+            # 简单降级处理：尝试把标题分词（按空格或连字符）
+            suggested_anchors = [t for t in title.replace('|', '-').replace('_', '-').split('-') if len(t.strip()) > 3][:3]
 
-目标网站信息:
-- 标题: {title}
-- 描述: {description}
-- 关键词: {keywords}
-
-文章要求:
-1. 内容要与目标网站主题相关
+        return {
+            'title': title,
+            'description': description,
+            'keywords': keywords,
+            'suggested_anchors': suggested_anchors,
+            'status': 'success'
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
 2. 自然地嵌入目标网站链接
 3. 保持专业、流畅的写作风格
 4. 字数控制在100-200字之间

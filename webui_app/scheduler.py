@@ -1,13 +1,5 @@
-"""APScheduler for draft-queue background publishing — Plan Unit 3.
-
-Single-worker scheduler (max_workers=1) so two drafts never publish
-simultaneously. _publish_draft_job is registered per-item at schedule
-time and at startup via _restore_scheduled_jobs.
-"""
-
-from __future__ import annotations
-
 import uuid
+import json
 from datetime import datetime, timedelta
 
 from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
@@ -15,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from webui_store import drafts_store as _drafts_store
 from webui_store import history_store as _history_store
+from webui_store import queue_store as _queue_store
 
 from .helpers import _parse_publish_results, run_pipe
 
@@ -23,6 +16,64 @@ _scheduler = BackgroundScheduler(
     executors={'default': APSThreadPoolExecutor(max_workers=1)},
     job_defaults={'misfire_grace_time': 3600},
 )
+
+def _process_queue_job() -> None:
+    """轮询队列中的 pending 任务并执行发布，支持 429 自动退避。"""
+    tasks = _queue_store.load()
+    now = datetime.now()
+    
+    # 查找任务：PENDING 且 不在退避时间内
+    pending = [t for t in tasks if t.get('status') in ('pending', 'failed') 
+               and (not t.get('next_retry_at') or datetime.fromisoformat(t['next_retry_at']) <= now)]
+    
+    if not pending:
+        return
+
+    task = pending[0]
+    task_id = task['id']
+    _queue_store.update_task(task_id, {'status': 'processing'})
+
+    try:
+        config = task['config']
+        urls = task['urls']
+        
+        seed = {
+            'target_url': urls[0],
+            'platform': config.get('platform', 'medium'),
+            'language': config.get('target_language', 'zh-CN'),
+            'url_mode': config.get('url_mode', 'A'),
+            'publish_mode': 'draft',
+            'custom_title': config.get('custom_title', ''),
+            'custom_tags': config.get('custom_tags', ''),
+            'extra_urls': urls[1:],
+        }
+        
+        pipe_out = run_pipe(['publish-backlinks'], json.dumps([seed]))
+        
+        if pipe_out.returncode == 0:
+            _queue_store.update_task(task_id, {
+                'status': 'success', 
+                'completed_at': now.isoformat()
+            })
+        else:
+            stderr = pipe_out.stderr or ""
+            # 检测 429 错误
+            if "429" in stderr or "Too Many Requests" in stderr:
+                retry_delay = 300 # 退避 5 分钟
+                next_retry = now + timedelta(seconds=retry_delay)
+                _queue_store.update_task(task_id, {
+                    'status': 'failed', 
+                    'error': f'频率限制 (429)，将在 {next_retry.strftime("%H:%M")} 重试',
+                    'next_retry_at': next_retry.isoformat()
+                })
+            else:
+                _queue_store.update_task(task_id, {
+                    'status': 'failed', 
+                    'error': stderr or '发布失败'
+                })
+            
+    except Exception as exc:
+        _queue_store.update_task(task_id, {'status': 'failed', 'error': str(exc)})
 
 
 def _publish_draft_job(item_id: str) -> None:
@@ -78,6 +129,14 @@ def _publish_draft_job(item_id: str) -> None:
 
 def _restore_scheduled_jobs() -> None:
     """On startup, re-register any 'scheduled' draft items into APScheduler."""
+    _scheduler.add_job(
+        _process_queue_job,
+        trigger='interval',
+        minutes=1,
+        id='queue_processor',
+        replace_existing=True,
+    )
+    
     now = datetime.now()
     for item in _drafts_store.load():
         if item.get('status') != 'scheduled':
