@@ -166,6 +166,161 @@ class TestGetRoutes:
         resp = client.get("/settings?flash_type=success&flash_msg=test")
         assert resp.status_code == 200
 
+    def test_settings_html_contract(self, client):
+        """Plan 2026-05-18-011 Unit 1 — regression net for the settings
+        page channel-collapse refactor.
+
+        Asserts that the ``settings.html`` template source — or any partial
+        it includes (post-Unit-4) — still contains the load-bearing form
+        action URLs, DOM ids, and inline JS handler call names that
+        deep-links, inline JS, and browser users depend on.
+
+        Why template source, not rendered HTML: several URLs live inside
+        ``{% if blogger_token %}`` / ``{% if medium_token_set %}`` branches
+        that don't render in test conditions (clean tmp_path config). The
+        regression risk is "source accidentally drops the URL", not "config
+        flips wrong branch" — so source-level grep is the right granularity.
+        Survives the refactor: ``webui_app/templates/**/*.html`` includes
+        future partials (``_settings_channel_blogger.html`` etc.).
+
+        Also exercises the ``/settings`` GET to confirm rendering still
+        succeeds, in case a partial include path is misspelled.
+
+        Structural placement (Blogger form lives inside #channel-blogger,
+        not #channel-medium) is covered by the two ``xfail`` BeautifulSoup
+        tests below; those flip to green once the partial migration lands.
+        """
+        from pathlib import Path
+
+        # 1. /settings GET still renders successfully.
+        resp = client.get("/settings")
+        assert resp.status_code == 200
+
+        # 2. Source-level assertions across all settings templates.
+        templates_dir = Path(__file__).parent.parent / "webui_app" / "templates"
+        candidates = list(templates_dir.glob("settings*.html")) + list(
+            templates_dir.glob("_settings_*.html")
+        )
+        assert candidates, f"no settings templates under {templates_dir}"
+        combined = b"".join(p.read_bytes() for p in candidates)
+
+        # 10 form action URLs (8 channel-related + 2 global).
+        form_action_urls = [
+            b'/settings/blogger/oauth-start',
+            b'/settings/save-blogger-oauth',
+            b'/settings/revoke-blogger',
+            b'/settings/save-blog-ids',
+            b'/settings/medium/oauth-start',
+            b'/settings/save-medium-token',
+            b'/settings/clear-medium-token',
+            b'/settings/clear-medium-oauth',
+            b'/settings/save-target-keywords',
+            b'/settings/schedule',
+        ]
+        for url in form_action_urls:
+            assert url in combined, f"missing form action URL: {url!r}"
+
+        # 9 DOM ids that inline JS / deep-links / external bookmarks rely on.
+        dom_ids = [
+            b'id="oauthCredForm"',
+            b'id="clientSecretInput"',
+            b'id="mediumTokenInput"',
+            b'id="blogger-blog-ids"',
+            b'id="blogIdRows"',
+            b'id="callbackUriDisplay"',
+            b'id="copyBtn"',
+            b'id="secretEye"',
+            b'id="eyeIcon"',
+        ]
+        for dom_id in dom_ids:
+            assert dom_id in combined, f"missing DOM id: {dom_id!r}"
+
+        # 5 inline JS handler call sites.
+        js_handlers = [
+            b'copyUri(',
+            b'toggleSecret(',
+            b'toggleToken(',
+            b'addRow(',
+            b'removeRow(',
+        ]
+        for handler in js_handlers:
+            assert handler in combined, (
+                f"missing JS handler call: {handler!r}"
+            )
+
+    @pytest.mark.xfail(
+        strict=False,
+        reason="Plan 2026-05-18-011 Unit 2 introduces #channel-blogger "
+               "collapse panel; structural assertion flips to green then.",
+    )
+    def test_blogger_forms_scoped_to_channel_panel(self, client):
+        """Plan 2026-05-18-011 Unit 1 — structural regression net for the
+        Blogger channel partial.
+
+        Asserts every Blogger-related ``<form action>`` / ``<button formaction>``
+        lives inside the ``#channel-blogger`` Collapse panel. Catches the
+        copy-paste mistake of moving the Blogger form into Medium's partial
+        during Unit 3.
+
+        Marked ``xfail`` until Unit 2 lands the Blogger partial + Collapse
+        shell. Unit 2 commit must remove this marker.
+        """
+        from bs4 import BeautifulSoup
+
+        resp = client.get("/settings")
+        soup = BeautifulSoup(resp.data, "html.parser")
+        panel = soup.find(id="channel-blogger")
+        assert panel is not None, "missing #channel-blogger collapse panel"
+
+        blogger_urls = {
+            "/settings/blogger/oauth-start",
+            "/settings/save-blogger-oauth",
+            "/settings/revoke-blogger",
+            "/settings/save-blog-ids",
+        }
+        for url in blogger_urls:
+            nodes = soup.select(
+                f'form[action="{url}"], button[formaction="{url}"]'
+            )
+            assert nodes, f"no <form action> or <button formaction> for {url}"
+            for node in nodes:
+                assert panel in node.parents, (
+                    f"{url} is not inside #channel-blogger panel"
+                )
+
+    @pytest.mark.xfail(
+        strict=False,
+        reason="Plan 2026-05-18-011 Unit 3 introduces #channel-medium "
+               "collapse panel; structural assertion flips to green then.",
+    )
+    def test_medium_forms_scoped_to_channel_panel(self, client):
+        """Plan 2026-05-18-011 Unit 1 — structural regression net for the
+        Medium channel partial. See ``test_blogger_forms_scoped_to_channel_panel``
+        for design notes. Unit 3 commit must remove this marker.
+        """
+        from bs4 import BeautifulSoup
+
+        resp = client.get("/settings")
+        soup = BeautifulSoup(resp.data, "html.parser")
+        panel = soup.find(id="channel-medium")
+        assert panel is not None, "missing #channel-medium collapse panel"
+
+        medium_urls = {
+            "/settings/medium/oauth-start",
+            "/settings/save-medium-token",
+            "/settings/clear-medium-token",
+            "/settings/clear-medium-oauth",
+        }
+        for url in medium_urls:
+            nodes = soup.select(
+                f'form[action="{url}"], button[formaction="{url}"]'
+            )
+            assert nodes, f"no <form action> or <button formaction> for {url}"
+            for node in nodes:
+                assert panel in node.parents, (
+                    f"{url} is not inside #channel-medium panel"
+                )
+
     def test_sites_returns_200(self, client):
         resp = client.get("/sites")
         assert resp.status_code == 200
