@@ -496,6 +496,76 @@ flowchart TB
 - 100K 合成事件 bootstrap 跑通无 OOM（U7 配合测试）
 - Idempotency 测试不闪退
 
+**Design notes** (added 2026-05-18 post-U1/U2/U3/U6 survey, before U4 implementation):
+
+*Public API surface (added by U4):*
+
+```python
+# events/__init__.py — new exports
+from .projector import flush_for, ProjectionError, ProjectionResult
+
+# events/projector.py — new module
+@dataclass(frozen=True)
+class ProjectionResult:
+    events_inserted: int
+    articles_inserted: int
+    skipped_due_to_dedup: int
+    cursor_updated: bool
+
+def flush_for(path: Path, *, store: EventStore | None = None) -> ProjectionResult: ...
+class ProjectionError(RuntimeError): ...
+```
+
+*Internal dispatch:* `flush_for` calls `_detect_source(path) → "checkpoint" | "history" | "drafts"`, then routes to `_project_checkpoint` / `_project_history` / `_project_drafts`. Each reducer runs inside one `with store.connect() as conn:` block — the U1 context manager auto-commits on normal exit and rolls back on exception. `EventStore.append(..., conn=conn)` and `EventStore.add_article(..., conn=conn)` are explicitly designed (per U1 store.py) to share that transaction, so the reducer never half-commits.
+
+*Idempotency, three layers:*
+
+| Layer | Mechanism | Defeats |
+|---|---|---|
+| Within reducer | `seen_in_tx: set[tuple]` keyed per kind | Same logical change emitted twice in one flush |
+| Across flushes | `projection_cursor.last_seen_state_json` diff | Double-flush of identical state inserts 0 events |
+| DB physical | `articles.live_url UNIQUE` (U1 schema) | Cross-source dup (history row whose live_url checkpoint already projected) |
+
+The Open Question §Deferred "Affects U4 — reset all optional fields to None" corner case (succeeded → None → succeeded re-emitting `publish.confirmed`) is resolved by the DB-layer UNIQUE — the second `add_article` raises `sqlite3.IntegrityError`, reducer catches it as expected dedup, no second event is appended. Needs an explicit regression test in `test_events_projector_idempotency.py`.
+
+*Per-kind dedup keys (R17, hardcoded in reducers):*
+
+- `publish.confirmed` + `articles` insert: `(canonicalize_url(host), canonicalize_url(live_url))` → catch `IntegrityError` on the article INSERT and skip the event
+- `publish.intent` / `publish.failed`: `(run_id, target_url, kind)` held in `seen_in_tx`
+- `draft.created` / `draft.scheduled`: `(draft_id, kind)` held in `seen_in_tx`
+
+*Per-source reducer specifics:*
+
+- **Checkpoint** — diff by `item_id`. NEW pending → `publish.intent`. `* → succeeded` → `add_article(live_url=...)` + `publish.confirmed`; IntegrityError = dedup. `* → failed` → `scrub_text(error_message)` before payload (U6 `scrub_text`, not raw). Anchors: filter `payload.links[]` where `kind in ('main_domain', 'target')` (mirror `cli/report_anchors.py:80`). Body: `payload.content_markdown` or NULL (RBP-3 compromise). live_url: `payload.published_url or None` (empty string → NULL).
+- **History** — non-atomic writer: wrap `json.loads(path.read_text())` in 5×100ms retry; final failure logs WARN, skips this cycle, leaves cursor unchanged. Diff by append-only index. Cross-source dedup is automatic via `articles.live_url UNIQUE` (history loses to checkpoint).
+- **Drafts** — state machine: NEW + status=drafted → `draft.created`; drafted → scheduled → `draft.scheduled` (does NOT re-emit `draft.created`); → published → `publish.confirmed` + article (does NOT emit a fresh `draft.*`).
+
+*Datetime double-column (ts_raw + ts_utc, R3 schema):*
+
+- checkpoint `started_at` is already ISO-with-offset → `ts_raw = original literal`, `ts_utc = parsed.astimezone(UTC).isoformat()`
+- history `created_at = 'YYYY-MM-DD HH:MM'` is operator-local → apply local-TZ-to-UTC; tz drift between writes does NOT invalidate historical events (R23 doctor handles drift detection)
+- drafts: same as history
+
+*Error taxonomy (in projector.py):*
+
+- `ProjectionError(RuntimeError)`: cursor table corruption, schema mismatch, source dispatch failure. Surfaces to caller, transaction rolls back via U1 ctx manager.
+- `json.JSONDecodeError` during JSON read: retried 5×100ms; final failure → WARN + skip cycle + cursor untouched (NOT raised).
+- `sqlite3.IntegrityError` on `articles.live_url`: expected dedup signal, swallowed, increments `skipped_due_to_dedup` counter.
+- `kinds.UnknownKindError` (from U2): should be unreachable in correct projector code — surface as bug.
+
+*EventStore call sites (sourced from U1 `e23ea1f` store.py):*
+
+- `store.append(kind, payload, *, run_id, target_url, host, article_id, ts_raw, ts_utc, conn) -> int`
+- `store.add_article(article: dict, *, conn) -> int` — `article` keys ∈ `{body, anchors_json, target_urls_json, lang, host, live_url, published_at_raw, published_at_utc, run_id}`; unknown keys raise `KeyError` (fail-fast on typo).
+- `payload` dict pruning by U2 whitelist happens inside `append` (per U2 commit `6349f58`) — projector must NOT pre-prune.
+
+*Pre-implementation handoff (when U1 ships):*
+
+1. `git worktree add ../bp-events-u4 -b feat/event-substrate-u4 origin/main`
+2. `cd ../bp-events-u4 && pip install -e . --quiet` (re-point editable away from whichever worktree owns it; the global `pip install -e` keeps getting hijacked across worktrees — note in §Risks)
+3. Re-read U1 `test_events_store.py` for the canonical `EventStore(path=tmp_path / "events.db")` fixture pattern
+4. Walk the 4 test files top-down: happy round-trip first per reducer (test-first guard), then idempotency, then edge cases
+
 ---
 
 ### Phase 2 — Integration（U5 → U7 → U8）

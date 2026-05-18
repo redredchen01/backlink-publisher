@@ -51,6 +51,37 @@ def test_jwt_redacted_and_counted():
     assert hits.get("jwt") == 1
 
 
+def test_jwt_glued_to_identifier_prefix_still_redacted():
+    # When a JWT is concatenated to an identifier (no separator), the
+    # leading ``eyJ`` is preceded by a word char so neither ``\b`` nor
+    # a negative-lookbehind on identifier chars can match it; the named
+    # pattern claims only the payload+signature half. That residual
+    # identifier+header prefix is ≥ 32 chars of base64-shaped material,
+    # so the high-entropy fallback must redact the remainder. Net: the
+    # secret bytes are gone, hit_counts shows jwt=1 (the segment we
+    # could identify) plus high_entropy=1 (the segment we could only
+    # tell was suspicious). Both signals are useful to downstream
+    # routing — the assertion pins that both fire rather than letting
+    # either silently regress.
+    text = "access_tokeneyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.signature done"
+    cleaned, hits = scrub_text(text)
+    assert "eyJhbGciOiJIUzI1NiJ9" not in cleaned
+    assert "eyJzdWIiOiJ4In0" not in cleaned
+    assert "signature" not in cleaned
+    assert hits.get("jwt") == 1
+    assert hits.get("high_entropy") == 1
+
+
+def test_jwt_after_non_identifier_separator_routed_to_jwt():
+    # Cases where ``\b`` already works (``:``, ``=``, whitespace, quotes,
+    # ``,``) — the negative-lookbehind anchor must not regress them.
+    for sep in (": ", "=", '"', "'", ",", " "):
+        text = f"auth{sep}eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig done"
+        cleaned, hits = scrub_text(text)
+        assert "eyJhbGciOiJIUzI1NiJ9" not in cleaned, f"sep={sep!r} leaked"
+        assert hits.get("jwt") == 1, f"sep={sep!r} wrong routing: {hits}"
+
+
 def test_google_api_key_redacted():
     # AIza prefix + exactly 35 alphanumeric chars = real-shape key
     key = "AIza" + "a" * 35
@@ -75,6 +106,36 @@ def test_basic_auth_url_redacted():
     text = "fetched https://user:pa55word@example.com/path successfully"
     cleaned, hits = scrub_text(text)
     assert "user:pa55word@" not in cleaned
+    assert hits.get("basic_auth_url") == 1
+
+
+def test_basic_auth_url_terminates_at_quote():
+    # JSON / quoted-string context. The redaction span must stop at the
+    # closing quote, not extend through the trailing structured fields.
+    text = '{"url":"https://user:pa55word@example.com/x","result":"200"}'
+    cleaned, hits = scrub_text(text)
+    assert "user:pa55word@" not in cleaned
+    assert '"result":"200"' in cleaned, f"trailing JSON clobbered: {cleaned!r}"
+    assert hits.get("basic_auth_url") == 1
+
+
+def test_basic_auth_url_terminates_at_markdown_paren():
+    # Markdown link: ``[txt](url)``. The redaction must stop at ``)`` so
+    # the link wrapper survives.
+    text = "see [docs](https://user:pa55word@example.com/x) for details"
+    cleaned, hits = scrub_text(text)
+    assert "user:pa55word@" not in cleaned
+    assert ") for details" in cleaned, f"markdown structure clobbered: {cleaned!r}"
+    assert hits.get("basic_auth_url") == 1
+
+
+def test_basic_auth_url_terminates_at_angle_bracket():
+    # HTML anchor href: ``<a href="...">``. The redaction must stop at
+    # ``>`` (and at ``"`` which fires first). Pin both.
+    text = '<a href="https://user:pa55word@example.com/x">link</a>'
+    cleaned, hits = scrub_text(text)
+    assert "user:pa55word@" not in cleaned
+    assert ">link</a>" in cleaned
     assert hits.get("basic_auth_url") == 1
 
 
@@ -156,6 +217,50 @@ def test_cjk_long_text_not_high_entropy_redacted():
     cleaned, hits = scrub_text(cjk)
     assert cleaned == cjk
     assert "high_entropy" not in hits
+
+
+def test_large_input_truncated_with_marker():
+    # Inputs over _MAX_SCRUB_LEN (64 KiB) must be capped so scrub_text
+    # can't be DoS'd by feeding it a multi-MB string. The truncation
+    # marker tells the caller the cap fired.
+    from backlink_publisher.events.scrubber import (
+        _MAX_SCRUB_LEN,
+        _TRUNCATED_TEMPLATE,
+    )
+
+    huge = "x" * (_MAX_SCRUB_LEN + 5000)
+    cleaned, _hits = scrub_text(huge)
+    expected_marker = _TRUNCATED_TEMPLATE.format(n=5000)
+    assert cleaned.endswith(expected_marker), (
+        f"expected truncation marker, got tail: {cleaned[-100:]!r}"
+    )
+    # The kept prefix plus marker is the only thing in cleaned.
+    assert len(cleaned) == _MAX_SCRUB_LEN + len(expected_marker)
+
+
+def test_large_input_secret_after_cap_not_scrubbed():
+    # Anything beyond _MAX_SCRUB_LEN is dropped before scanning — by
+    # design, since the alternative is unbounded regex work. Pin the
+    # contract so callers know not to rely on full-input scrubbing.
+    from backlink_publisher.events.scrubber import _MAX_SCRUB_LEN
+
+    padding = " " * _MAX_SCRUB_LEN
+    hidden_secret = "Bearer secret-past-the-cap-token-12345"
+    text = padding + hidden_secret
+    cleaned, hits = scrub_text(text)
+    # The secret was beyond the cap; it's not present in cleaned at all
+    # (truncated away rather than redacted).
+    assert "secret-past-the-cap" not in cleaned
+    assert "oauth_bearer" not in hits
+
+
+def test_small_input_not_truncated():
+    # Sanity: inputs under the cap pass through untouched (modulo
+    # redaction). The truncation marker must NOT appear.
+    text = "the cat sat on the mat"
+    cleaned, _hits = scrub_text(text)
+    assert "<TRUNCATED" not in cleaned
+    assert cleaned == text
 
 
 def test_multiple_secrets_in_one_message_all_counted():
