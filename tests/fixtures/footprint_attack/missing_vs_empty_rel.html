@@ -1,0 +1,12 @@
+<!-- R12 attack fixture (Plan Unit 5): missing vs empty rel attribute.
+
+Today's engine uses `attr_dict.get('rel', '')` which collapses BOTH
+"missing rel" AND `rel=""` into the same `rel_value_counts[""]` bucket.
+This fixture exposes that collapse. The companion test asserts the
+current collapse explicitly so any future engine fix that separates
+them flips the test red. -->
+
+<p>First link with explicit empty rel:
+  <a href="https://example.com/a" target="_blank" rel="">link a</a>.</p>
+<p>Second link with no rel attribute:
+  <a href="https://example.com/b" target="_blank">link b</a>.</p>

@@ -13,6 +13,14 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
 
+    # Footprint Regression Gate (Plan Unit 6 / R10) requires PYTHONHASHSEED=0
+    # at interpreter startup. Setting it inside Python is a no-op — Python
+    # freezes hash randomization at process start. pyproject's
+    # [tool.pytest.ini_options].env also pins it via pytest-env, but the
+    # job-level env here protects subprocess invocations.
+    env:
+      PYTHONHASHSEED: "0"
+
     steps:
       - uses: actions/checkout@v4
 

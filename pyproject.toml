@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-mock", "pytest-timeout", "pytest-socket", "requests", "pytest-asyncio>=0.23", "hypothesis>=6.0"]
+dev = ["pytest>=7", "pytest-mock", "pytest-timeout", "pytest-socket", "pytest-env>=1.1", "requests", "pytest-asyncio>=0.23", "hypothesis>=6.0"]
 
 [project.scripts]
 plan-backlinks = "backlink_publisher.cli.plan_backlinks:main"
@@ -34,6 +34,11 @@ report-anchors = "backlink_publisher.cli.report_anchors:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
+# PYTHONHASHSEED=0 is required by the Footprint Regression Gate
+# (tests/test_footprint_regression.py + R10 from Plan 2026-05-18-007).
+# Set here via pytest-env so `pytest tests/` works out of the box locally;
+# .github/workflows/ci.yml also pins it at the job level for belt+suspenders.
+env = ["PYTHONHASHSEED=0"]
 markers = [
     "real_ssrf_check: exercise the real _check_url_for_ssrf path instead of the default-bypass autouse fixture (tests/test_content_fetch.py)",
     "real_content_fetch: exercise the real content_fetch.verify_urls_batch / verify_url_has_content path instead of the default-pass autouse fixture (tests/test_content_fetch.py applies this module-wide)",
