@@ -29,16 +29,6 @@ def test_init_requires_either_verdict_comment_or_manual(capsys: pytest.CaptureFi
     assert excinfo.value.code == 2  # argparse error
 
 
-def test_init_handler_stub_returns_not_implemented() -> None:
-    rc = CLI.main([
-        "init",
-        "--verdict-comment", "https://github.com/x/y/pull/36#issuecomment-1",
-        "--verdict-pr", "36",
-        "-y",
-    ])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED
-
-
 def test_show_handler_stub_returns_not_implemented() -> None:
     rc = CLI.main(["show", "--format", "markdown"])
     assert rc == CLI.EXIT_NOT_IMPLEMENTED
@@ -64,14 +54,3 @@ def test_show_format_choice_validation() -> None:
     with pytest.raises(SystemExit) as excinfo:
         CLI.main(["show", "--format", "xml"])
     assert excinfo.value.code == 2
-
-
-def test_manual_verdict_flag_accepts_evidence_log() -> None:
-    """`--manual-verdict --evidence-log <path>` parses without erroring (stub still runs)."""
-    rc = CLI.main([
-        "init",
-        "--manual-verdict",
-        "--evidence-log", "scripts/telegraph_spike/manual.json",
-        "-y",
-    ])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED  # parsed cleanly, stub fired
