@@ -12,7 +12,7 @@ Conventions:
 
 from __future__ import annotations
 
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
 
 
 def validate_main_domain_url(url: str | None) -> str | None:
@@ -115,3 +115,80 @@ def strip_fragment_query(url: str) -> str:
         "",
         "",
     ))
+
+
+# Default ports stripped during canonicalization (R17 dedup key support).
+_DEFAULT_PORTS: dict[str, int] = {"http": 80, "https": 443}
+
+
+def canonicalize_url(url: str) -> str:
+    """Return a canonical form of ``url`` for use as a dedup key.
+
+    Plan ref: ``docs/plans/2026-05-18-004-feat-event-substrate-corpus-plan.md`` U3 + R17.
+
+    Used by the event-substrate projector (U4) and ``bp-events-rebuild`` (U7) to
+    decide whether two ``live_url`` strings refer to the same published article.
+    Aggressive enough to collapse common formatting drift; conservative enough
+    not to silently merge URLs that point to different resources.
+
+    Rules:
+    - Lowercase ``scheme`` and ``host``
+    - Strip default ports (``:80`` for http, ``:443`` for https)
+    - Strip the trailing ``/`` from the path EXCEPT when the path is the root ``/``
+    - Drop all ``utm_*`` query parameters; keep other query keys, sorted by key,
+      preserving the original order of duplicate values within a single key
+    - Drop the fragment entirely
+
+    Non-http(s) schemes (e.g. ``mailto:``, ``ftp://``) are returned unchanged —
+    the dedup-key use case is not meaningful for them and there is no agreed
+    canonicalization rule in this codebase.
+
+    The function is idempotent: ``canonicalize_url(canonicalize_url(u)) ==
+    canonicalize_url(u)`` for any input.
+    """
+    if not url:
+        return url
+
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+
+    # Non-http(s): pass through. We don't want to touch mailto:, ftp://, etc.
+    if scheme not in _DEFAULT_PORTS:
+        return url
+
+    # netloc = userinfo@host:port. We lowercase host but preserve userinfo as-is
+    # (basic-auth credentials in URLs are a Threat-Model T1 concern, not a
+    # canonicalization concern — scrubber removes them in U6).
+    host = parts.hostname or ""
+    host_lower = host.lower()
+    port = parts.port
+    userinfo_at = ""
+    if "@" in parts.netloc:
+        userinfo_at = parts.netloc.split("@", 1)[0] + "@"
+
+    if port is None or port == _DEFAULT_PORTS[scheme]:
+        netloc = f"{userinfo_at}{host_lower}"
+    else:
+        netloc = f"{userinfo_at}{host_lower}:{port}"
+
+    # Path: strip trailing slash except for root "/".
+    path = parts.path
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    elif path == "":
+        # Empty path is treated equivalently to "" by urlunsplit — leave alone.
+        pass
+
+    # Query: drop utm_*, sort the remaining by key, preserve duplicate-value order.
+    if parts.query:
+        # keep_blank_values=True so "?b=" survives — semantically distinct from
+        # "?b" (which still parses to b=""), and we don't want to silently drop.
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        kept = [(k, v) for k, v in pairs if not k.lower().startswith("utm_")]
+        # Stable sort by key only — within a key, original order survives.
+        kept.sort(key=lambda kv: kv[0])
+        query = urlencode(kept) if kept else ""
+    else:
+        query = ""
+
+    return urlunsplit((scheme, netloc, path, query, ""))
