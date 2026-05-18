@@ -588,6 +588,7 @@ Import 排在 API 之后、Brave/Browser 之前——它做的事更轻量（只
 
 ## Documentation Plan
 
+- **Modify (Phase A 同 PR，强制)**：`docs/MEDIUM_OAUTH_SETUP.md`——当前 14 / 50 行硬编码 `http://localhost:5000/settings/medium/oauth-callback` 教用户配 Medium 应用。Unit 2 删 callback 后整篇文档指向 404。同 PR 二选一：(a) 文件整体替换为 deprecation banner 指向新的"浏览器登录"流程；(b) 删除文件，留 `<!-- removed: see docs/plans/2026-05-18-013 -->` 注释或纯删除（**强烈推荐 a**，因为搜索引擎/已存书签仍会访问 README 链接）
 - Modify: `README.md`（Medium 渠道章节）：把"申请 Integration Token"/"申请 OAuth"指引改为"首次使用：在 /settings 点击 '打开浏览器登录'"
 - 不新增 `docs/solutions/` 条目（那是事后教训，不是事前文档）
 - 不更新 AGENTS.md（无 agent-facing 行为变化）
