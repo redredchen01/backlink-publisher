@@ -9,7 +9,44 @@ not mass-migrate them.
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
+    """Isolate the operator's config and cache dirs from the test session.
+
+    Without this fixture, ``backlink_publisher.config._config_dir()`` resolves
+    to ``~/.config/backlink-publisher/`` and any ``[targets."<domain>"]`` /
+    ``[sites."<domain>".url_categories]`` entries in the operator's real
+    ``config.toml`` silently leak into test runs. Reason: 2026-05-18 bug
+    sweep (PR #40) traced ``test_plan_no_synthesized_categories_url`` to
+    exactly this coupling — a configured ``[targets."https://51acgs.com"]``
+    routed ``_dispatch_row`` to the work-themed branch, ``work_scraper`` then
+    failed under pytest-socket, and the test got empty stdout.
+
+    Mechanism: set ``BACKLINK_PUBLISHER_CONFIG_DIR`` / ``..._CACHE_DIR``
+    (supported in ``config.py`` since 2026-05-18) to fresh tmp dirs for the
+    whole session. Tests that need a populated config can write into the
+    pointed-at directory via ``save_config`` or write their own monkeypatch.
+    """
+    config_dir = tmp_path_factory.mktemp("bp-config-isolated")
+    cache_dir = tmp_path_factory.mktemp("bp-cache-isolated")
+    previous_config = os.environ.get("BACKLINK_PUBLISHER_CONFIG_DIR")
+    previous_cache = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
+    os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
+    os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(cache_dir)
+    yield
+    if previous_config is None:
+        os.environ.pop("BACKLINK_PUBLISHER_CONFIG_DIR", None)
+    else:
+        os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = previous_config
+    if previous_cache is None:
+        os.environ.pop("BACKLINK_PUBLISHER_CACHE_DIR", None)
+    else:
+        os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = previous_cache
 
 
 @pytest.fixture(autouse=True)
@@ -46,21 +83,24 @@ def _mock_content_fetch(request, monkeypatch: pytest.MonkeyPatch) -> None:
     each test so cache state never leaks across scenarios.
 
     Tests in ``tests/test_content_fetch.py`` exercise the real functions
-    against mocked ``urlopen`` — this fixture skips patching for that file
-    so its assertions hit the production code path. Other test files that
-    want to drive specific gate-failure paths re-patch
-    ``backlink_publisher.content_fetch.verify_urls_batch`` within their own
-    scope (last-wins monkeypatch semantics).
+    against mocked ``urlopen`` — that file declares ``pytestmark =
+    pytest.mark.real_content_fetch`` at module level, and this fixture
+    honors the marker to skip patching so the assertions hit the production
+    code path. Other test files that want to drive specific gate-failure
+    paths re-patch ``backlink_publisher.content_fetch.verify_urls_batch``
+    within their own scope (last-wins monkeypatch semantics).
+
+    Mirrors the ``real_ssrf_check`` opt-in pattern. Marker registration is
+    in ``pyproject.toml [tool.pytest.ini_options] markers``.
     """
     # Reset cache state up front so previous tests don't contaminate this one.
     from backlink_publisher import content_fetch as _content_fetch
 
     _content_fetch.reset_cache()
 
-    # The content_fetch unit tests exercise the real functions against a
-    # mocked urlopen and must not see the default-pass mock.
-    test_path = str(request.node.fspath)
-    if "test_content_fetch.py" in test_path:
+    # Tests marked ``real_content_fetch`` exercise the real functions
+    # against mocked ``urlopen`` and must not see the default-pass mock.
+    if request.node.get_closest_marker("real_content_fetch"):
         return
 
     def _ok_batch(urls, max_workers=5):
