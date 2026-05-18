@@ -3,6 +3,10 @@
 A local-first, terminal-native backlink publishing pipeline for Blogger and Medium.  
 Generates, validates, and publishes short backlink articles — fully pipe-friendly, cron-safe, and non-interactive.
 
+## Workspace Layout
+
+This is the canonical project repository. It lives under a parent workspace directory that is **not** itself a git repo. Sibling directories named `bp-<topic>` (e.g. `bp-events-u4`, `bp-ko-html`) are temporary `git worktree` checkouts of this same repository on parallel feature branches — they share `.git/` with this main checkout. The convention is one `bp-<topic>` worktree per active feature branch; remove the worktree (`git worktree remove ../bp-<topic>`) when the branch lands. See `AGENTS.md` for the contributor workflow.
+
 ## Quick Start
 
 ```bash
