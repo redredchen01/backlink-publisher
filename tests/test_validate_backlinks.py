@@ -477,6 +477,84 @@ class TestBothFieldsLanguageMismatch:
         assert "md=" in stderr or "ko" in stderr
 
 
+class TestR3AdversarialSchemes:
+    """Plan 2026-05-18-006 Unit 8: scheme allowlist parametrized over the
+    full set of non-http(s) schemes. Locks the contract that R3 host-parse
+    rejects every scheme outside {http, https} regardless of how the URL
+    is constructed."""
+
+    @pytest.mark.parametrize(
+        "scheme_prefix",
+        [
+            "javascript:alert(1)",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "data:text/html,<script>alert(2)</script>",
+            "JAVASCRIPT:alert(3)",  # case-insensitive
+            "//evil.com/",           # scheme-relative (no scheme)
+            "mailto:attacker@evil.com",
+        ],
+    )
+    def test_non_http_scheme_in_href_rejected(self, scheme_prefix: str) -> None:
+        payload = _make_ko_payload(
+            content_html=(
+                "<p>안녕하세요 한국어 기사입니다. 흥미로운 주제를 다룹니다.</p>"
+                f'<a href="{scheme_prefix}">example.kr</a>'
+            ),
+            platform="blogger",
+        )
+        stdout, stderr, code = _run_validate(json.dumps(payload), check_urls=False)
+        assert code == 2
+        assert "is not the host" in stderr
+
+
+class TestR3IdnHomographAndPunycode:
+    """Plan 2026-05-18-006 Unit 8: IDN homograph + Punycode spoof rejection.
+
+    Pass-2 security P1 — these were called out as missing adversarial
+    fixtures. The byte-compare against the operator-normalized main_domain
+    (Unit 1 _normalize_main_domain) is what catches both classes:
+    Cyrillic-а vs Latin-a normalize to different punycode forms; an
+    attacker-registered xn--main-domain-... that visually matches the
+    operator's domain has different bytes after IDN-encode.
+    """
+
+    def test_cyrillic_homograph_in_href_fails(self) -> None:
+        """Cyrillic 'а' (U+0430) inside an otherwise main-domain-shaped host:
+        the IDN-encode produces a different punycode form than the
+        operator's main_domain_normalized → byte-compare fails → reject."""
+        # mаin-domain.com where 'а' is U+0430 CYRILLIC SMALL LETTER A
+        # Operator's main_domain in payload is example.com (ASCII).
+        homograph_host = "exаmple.com"  # 'а' = Cyrillic; visually "example.com"
+        payload = _make_ko_payload(
+            content_html=(
+                "<p>안녕하세요 한국어 기사입니다. 흥미로운 주제를 다룹니다.</p>"
+                f'<a href="https://{homograph_host}/post">자세히 보기</a>'
+            ),
+            platform="blogger",
+        )
+        stdout, stderr, code = _run_validate(json.dumps(payload), check_urls=False)
+        assert code == 2
+        assert "is not the host" in stderr
+
+    def test_punycode_spoof_in_href_fails(self) -> None:
+        """A pre-encoded xn--... host that decodes to something visually
+        similar to the operator's main_domain but is byte-different after
+        normalization → reject."""
+        # xn--exmple-cua.com decodes to "exàmple.com" (with à) — different from
+        # operator's "example.com" → byte-compare fails.
+        payload = _make_ko_payload(
+            content_html=(
+                "<p>안녕하세요 한국어 기사입니다. 흥미로운 주제를 다룹니다.</p>"
+                '<a href="https://xn--exmple-cua.com/post">자세히 보기</a>'
+            ),
+            platform="blogger",
+        )
+        stdout, stderr, code = _run_validate(json.dumps(payload), check_urls=False)
+        assert code == 2
+        assert "is not the host" in stderr
+
+
 class TestNfcNormalization:
     """Plan 2026-05-18-006 Unit 6: NFC normalize row-resident strings at
     validate-time entry. Defends against macOS-NFD-decomposed Hangul that
