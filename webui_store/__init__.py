@@ -25,6 +25,7 @@ from pathlib import Path
 
 from .base import JsonStore, Store
 from .drafts import DraftsStore
+from .queue_store import QueueStore
 
 _CONFIG_DIR = Path.home() / ".config" / "backlink-publisher"
 
@@ -45,14 +46,19 @@ drafts_store: DraftsStore = DraftsStore(
 schedule_store: Store = JsonStore(
     _CONFIG_DIR / "schedule-settings.json", default_factory=dict,
 )
+queue_store: QueueStore = QueueStore(
+    _CONFIG_DIR / "publish-queue.json", default_factory=list,
+)
 
 
 __all__ = [
     "Store",
     "JsonStore",
     "DraftsStore",
+    "QueueStore",
     "history_store",
     "profiles_store",
     "drafts_store",
     "schedule_store",
+    "queue_store",
 ]
