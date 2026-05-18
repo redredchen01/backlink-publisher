@@ -6,9 +6,14 @@ date_p0_3_72h: 2026-05-21
 date_p0_5_review: 2026-06-01
 owner_ops: <运营填写姓名>
 owner_eng: <工程填写姓名>
-status: in_progress  # in_progress | pass | fail | pivot_to_alt_platform
+status: paused  # in_progress | pass | fail | pivot_to_alt_platform | paused
+paused_reason: "2026-05-18 — Velog Phase 0 steps P0-1..P0-5 全部硬阻塞于运营社交登录(Google/GitHub/Facebook)。优先级让位给 telegra.ph Phase 0(PR #36 进行中)。telegra.ph 6/8 出结果后重新评估:Pass → 推 velog;Fail → 直接 pivot dev.to/hashnode brainstorm,velog 永久搁置"
+paused_at: 2026-05-18
 related_brainstorm: docs/brainstorms/2026-05-15-velog-adapter-requirements.md
 ---
+
+> ⚠ **PAUSED 2026-05-18** — see frontmatter `paused_reason`. Spike skeleton + P0-2 helper script remain available for resumption; do not run before re-evaluation post telegra.ph 6/8 verdict.
+
 
 # Phase 0 spike — velog.io 适配器可达性实测
 
