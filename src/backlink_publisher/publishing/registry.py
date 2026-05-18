@@ -1,0 +1,139 @@
+"""Publisher ABC + table-driven dispatcher — Plan 2026-05-18-001 Unit 7.
+
+Replaces the ``if plat == "blogger" / elif "medium"`` chain in
+``adapters/__init__.py:publish()`` with a registry the dispatch logic
+walks once per call. Adding a new platform means:
+
+  1. Implement ``Publisher.publish(payload, mode, config) -> AdapterResult``
+  2. Call ``register("<platform>", NewAdapterCls)``
+
+No changes to the dispatcher.
+
+Fallback semantics (preserved from the legacy chain):
+
+- The registry stores an ordered list of adapter classes per platform.
+- ``dispatch`` walks the chain in order, instantiating each adapter and
+  calling ``.publish(...)``.
+- ``DependencyError`` from one adapter → fall through to the next
+  (the legacy "no Medium token → try browser" path).
+- ``ExternalServiceError`` from any adapter → propagate up immediately
+  (preserves the legacy "401 / 429 / network failure does NOT fall
+  through" semantics).
+- An adapter can declare itself unavailable for a given environment by
+  overriding ``Publisher.available(cls, config)`` — used by
+  ``MediumBraveAdapter`` to gate itself to macOS.
+
+This is the minimum dispatcher generalisation; per Plan D5 we do not
+rewrite adapter internals, and per Plan D8 the only method on the ABC
+is ``publish`` (``verify_adapter_setup`` stays a module function).
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Any
+
+from backlink_publisher.config import Config
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from .adapters.base import AdapterResult
+
+
+class Publisher(ABC):
+    """Abstract base for a single-platform publisher.
+
+    Subclasses must implement ``publish``. They may optionally override
+    ``available`` to declare environment prerequisites (e.g. macOS-only).
+    """
+
+    @abstractmethod
+    def publish(
+        self,
+        payload: dict[str, Any],
+        mode: str,
+        config: Config,
+    ) -> AdapterResult:
+        """Publish the payload. Return an ``AdapterResult`` on success.
+
+        Raise:
+        - ``DependencyError`` if a prerequisite is missing (no token, no
+          browser, no AppleScript host) — dispatcher will try the next
+          adapter in the chain.
+        - ``ExternalServiceError`` if the remote service returned an
+          error (401, 429, 5xx, network failure) — dispatcher will NOT
+          fall through; the error propagates immediately.
+        """
+
+    @classmethod
+    def available(cls, config: Config) -> bool:
+        """Return False to skip this adapter in the dispatch chain.
+
+        Default ``True`` — most adapters do not need environment gating.
+        Use cases: macOS-only adapters (``MediumBraveAdapter``), feature
+        flags, license checks.
+        """
+        return True
+
+
+# platform → ordered list of adapter classes to try.
+# Populated by ``adapters/__init__.py`` at import time (see ``_install``).
+_REGISTRY: dict[str, list[type[Publisher]]] = {}
+
+
+def register(platform: str, *publishers: type[Publisher]) -> None:
+    """Register the fallback chain for one platform. Last call wins.
+
+    Order matters: the first registered class is tried first.
+    """
+    _REGISTRY[platform] = list(publishers)
+
+
+def registered_platforms() -> list[str]:
+    """Return the list of platforms with at least one adapter registered."""
+    return sorted(_REGISTRY)
+
+
+def dispatch(
+    payload: dict[str, Any],
+    mode: str,
+    config: Config,
+    dry_run: bool = False,
+) -> AdapterResult:
+    """Walk the registered fallback chain for ``payload["platform"]``.
+
+    Mirrors the legacy ``publish()`` behaviour byte-for-byte: dry-run
+    sentinel result, ``DependencyError`` falls through, ``ExternalServiceError``
+    propagates, unknown platform raises ``ExternalServiceError``.
+    """
+    plat = payload.get("platform", "")
+
+    if dry_run:
+        return AdapterResult(
+            status="draft",
+            adapter=f"{plat}-api",
+            platform=plat,
+            _dry_run=True,
+            _command=f"publish to {plat} --mode {mode} (dry-run)",
+        )
+
+    chain = _REGISTRY.get(plat)
+    if not chain:
+        raise ExternalServiceError(f"unsupported platform: {plat}")
+
+    last_dep_error: DependencyError | None = None
+    for cls in chain:
+        if not cls.available(config):
+            continue
+        try:
+            return cls().publish(payload, mode, config)
+        except DependencyError as e:
+            # Adapter declared itself missing a prerequisite → try next.
+            last_dep_error = e
+            continue
+        # ExternalServiceError propagates without catch (legacy semantics).
+
+    if last_dep_error is not None:
+        raise last_dep_error
+    raise DependencyError(
+        f"No available adapter for platform {plat!r} — every entry in the "
+        f"chain returned available()=False."
+    )

@@ -17,6 +17,7 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
 from .link_attr_verifier import verify_link_attributes
 from .retry import retry_transient_call
@@ -45,7 +46,7 @@ def _paste_key() -> str:
     return "Meta+V" if platform.system() == "Darwin" else "Control+V"
 
 
-class MediumBrowserAdapter:
+class MediumBrowserAdapter(Publisher):
     """Fallback: publish to Medium via headed Playwright browser session."""
 
     def publish(

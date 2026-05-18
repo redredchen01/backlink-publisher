@@ -10,6 +10,7 @@ from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_i
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
@@ -91,7 +92,7 @@ def json_from_creds(creds) -> dict[str, Any]:
     }
 
 
-class BloggerAPIAdapter:
+class BloggerAPIAdapter(Publisher):
     """Publishes to Blogger via the official API v3."""
 
     def publish(
