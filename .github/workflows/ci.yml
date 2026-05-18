@@ -27,6 +27,9 @@ jobs:
           pip install -e ".[dev]"
           pip install pytest pytest-cov
 
+      - name: Print radon version
+        run: python -m radon --version
+
       - name: Run tests
         run: |
           python -m pytest tests/ -v --tb=short --timeout=30

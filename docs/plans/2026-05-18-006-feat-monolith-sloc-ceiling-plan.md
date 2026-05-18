@@ -1,10 +1,11 @@
 ---
 title: "feat: Add monolith SLOC ceiling structural test"
 type: feat
-status: active
+status: completed
 date: 2026-05-18
 origin: docs/brainstorms/2026-05-18-monolith-loc-ceiling-requirements.md
 deepened: 2026-05-18
+completed: 2026-05-18
 ---
 
 # feat: Add Monolith SLOC Ceiling Structural Test (R5 F7)
@@ -128,7 +129,7 @@ None used directly. radon, pytest, tomllib are mature standard tools. The empiri
 
 ## Implementation Units
 
-- [ ] **Unit 1: Pin `radon` as an exact-version dev dependency**
+- [x] **Unit 1: Pin `radon` as an exact-version dev dependency**
 
 **Goal:** Make `radon` importable in pytest with deterministic SLOC output across the Python 3.11 / 3.12 matrix.
 
@@ -155,7 +156,7 @@ None used directly. radon, pytest, tomllib are mature standard tools. The empiri
 
 ---
 
-- [ ] **Unit 2: Seed `monolith_budget.toml` at repo root (visible filename, post-PR48/PR50 paths)**
+- [x] **Unit 2: Seed `monolith_budget.toml` at repo root (visible filename, post-PR48/PR50 paths)**
 
 **Goal:** Create the canonical budget file with measured initial entries for all 5 monitored paths at current main HEAD.
 
@@ -211,7 +212,7 @@ rationale = "Markdown rendering helpers (_safe_anchor, link template). Stable sh
 
 ---
 
-- [ ] **Unit 3: `tests/test_no_monolith_regrowth.py` — primary enforcement test + SLOC canary fixture**
+- [x] **Unit 3: `tests/test_no_monolith_regrowth.py` — primary enforcement test + SLOC canary fixture**
 
 **Goal:** The pytest assertion enforcing R4 (hard-fail on ceiling exceedance), R5 (schema validation), R7 (warning canary), AND the radon-behavior canary (pins SLOC counter to a tested invariant).
 
@@ -315,7 +316,7 @@ def test_radon_sloc_behavior_pinned(): ...                          # the SLOC c
 
 ---
 
-- [ ] **Unit 4: CI ergonomics — print radon version**
+- [x] **Unit 4: CI ergonomics — print radon version**
 
 **Goal:** Make radon version visible in CI logs.
 
@@ -346,7 +347,7 @@ def test_radon_sloc_behavior_pinned(): ...                          # the SLOC c
 
 ---
 
-- [ ] **Unit 5: AGENTS.md note + branch-protection recommendation**
+- [x] **Unit 5: AGENTS.md note + branch-protection recommendation**
 
 **Goal:** Document the monolith-budget convention and the recommended GitHub branch-protection setting.
 

@@ -1,0 +1,32 @@
+# Monolith SLOC budget. See:
+# - docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md
+# - docs/brainstorms/2026-05-18-monolith-loc-ceiling-requirements.md
+#
+# Schema (enforced by tests/test_no_monolith_regrowth.py):
+#   each [files."<path>"] entry MUST have:
+#     ceiling  -- int, radon SLOC ceiling
+#     rationale -- string, >=80 chars explaining current shape + expected settling
+#
+# Bumping a ceiling requires editing this file in the SAME PR that grows the
+# monitored file past the prior ceiling. There is no override label. The defense
+# is `git blame` -- every intentional bump leaves a reviewable record with rationale.
+
+[files."src/backlink_publisher/cli/plan_backlinks.py"]
+ceiling = 1270
+rationale = "Largest file in the repo (SLOC 1231 at seed). Generation orchestrator: anchor handling, content-fetch gate wiring, work_themed callout. P1-queued decomposition will surface seams; lower ceiling in those landing PRs."
+
+[files."src/backlink_publisher/cli/publish_backlinks.py"]
+ceiling = 730
+rationale = "Pipeline stage 3 (SLOC 694 at seed) -- OAuth pre-flight + retry_transient + Medium throttle (3 inlined copies pending F5 ThrottleClock extraction) + real-publish verification + link_attr_verifier converge here. F5 carve will drop ~60 SLOC; lower ceiling then."
+
+[files."src/backlink_publisher/content/fetch.py"]
+ceiling = 370
+rationale = "Grew rapidly via PRs #20/#25/#26/#27/#28 (cache TTL + stats + SSRF + soft-404 + prefetch) while still flat; relocated by PR #50 to content/ subpackage. SLOC 340 at seed. Future SSRF-guard extraction may shrink further; lower ceiling at that point."
+
+[files."src/backlink_publisher/config/writer.py"]
+ceiling = 340
+rationale = "Largest piece of the post-PR48 config-subpackage split (SLOC 310 at seed). Holds atomic-write + snapshot + section-quarantine. R5 F3 safe_write carve will lift atomic-write + snapshot into a shared persistence module consumed by JsonStore + events/store; lower ceiling in that landing PR."
+
+[files."src/backlink_publisher/_util/markdown.py"]
+ceiling = 320
+rationale = "Markdown rendering helpers (SLOC 282 at seed): _safe_anchor, <a> template, link-density paragraph builder. Stable shape; no extraction planned. Ceiling held against accumulated render-time helper accretion."

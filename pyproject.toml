@@ -21,7 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-mock", "pytest-timeout", "pytest-socket", "requests", "pytest-asyncio>=0.23", "hypothesis>=6.0"]
+# radon is pinned to exact version (deviates from house `>=` style) because SLOC counts
+# must be deterministic across CI matrix rows; bumping radon requires re-measuring all
+# 5 monolith ceilings in the same PR. See docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md.
+dev = ["pytest>=7", "pytest-mock", "pytest-timeout", "pytest-socket", "requests", "pytest-asyncio>=0.23", "hypothesis>=6.0", "radon==6.0.1"]
 
 [project.scripts]
 plan-backlinks = "backlink_publisher.cli.plan_backlinks:main"

@@ -16,3 +16,19 @@ The project keeps lessons in two places:
 Next curation review: **2026-08-15** — *aspirational quarterly cadence; not enforced by CI or any tool*. This file is static markdown; the actual trigger is "next time `/ce:compound` or `/ce:plan` runs in this repo, scan recent `feedback_*.md` and decide what's worth promoting." Update this date when the review completes; treat skipping a quarter as a soft signal, not a failure.
 
 Soft observation (2026-05-15): historical `docs/brainstorms/` and `docs/plans/` files contain real operator domain references (e.g. target hostnames). The sanitization rule above applies to `docs/solutions/` entries; if the project ever needs to extend it to historical decision artifacts, scope a separate pass — do not retrofit silently.
+
+## Monolith Budget
+
+`monolith_budget.toml` at repo root tracks radon SLOC ceilings for five named source files: `src/backlink_publisher/cli/plan_backlinks.py`, `src/backlink_publisher/cli/publish_backlinks.py`, `src/backlink_publisher/content/fetch.py`, `src/backlink_publisher/config/writer.py`, `src/backlink_publisher/_util/markdown.py`. Enforced by `tests/test_no_monolith_regrowth.py` (hard-fail R4 + warning canary R7 + radon counter pinning).
+
+**When to edit:** if your PR pushes a monitored file's SLOC past its `ceiling`, the test fails. Edit `monolith_budget.toml` in the same PR — raise the ceiling and rewrite the `rationale` to explain what motivated the growth and the shape this file is expected to settle to over the next few sprints (the rationale field must be ≥80 chars).
+
+**Journal, not gate.** A solo developer can rubber-stamp any bump — the defense is `git blame` on `monolith_budget.toml`. Every intentional bump leaves a reviewable record. There is no override label and no warning-only mode for the primary check.
+
+**F7 does not decompose anything.** The surgical extraction plans (F2 `ErrorClass` oracle, F3 `safe_write` carve from `config/writer.py`, F5 `ThrottleClock`) are separate work. F7 only prevents regrowth after such carves land.
+
+**Bumping `radon` is treated as a budget edit** (pinned exactly in `pyproject.toml`'s `[project.optional-dependencies].dev`). The bump PR must re-measure all five ceilings via `python -m radon raw -s <paths>` and update the SLOC canary fixture's `SLOC_CANARY_EXPECTED` in the test file.
+
+**Recommended branch protection on `main`:** enable "Require branches to be up to date before merging." Protects against two concurrent PRs each bumping the same file's ceiling and producing a post-merge state that fails R4. The existing `push: branches: [main]` CI lane catches violations post-merge regardless, but pre-merge prevention is cheaper than a revert under pressure.
+
+References: `docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md`, `docs/brainstorms/2026-05-18-monolith-loc-ceiling-requirements.md`.
