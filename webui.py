@@ -2544,116 +2544,83 @@ def _parse_publish_results(jsonl_str):
     return results
 
 
-# ── File-based persistent history ────────────────────────────────────────────
-_HISTORY_FILE = Path.home() / '.config' / 'backlink-publisher' / 'publish-history.json'
+# ── File-backed state — Plan 2026-05-18-001 Unit 2 ───────────────────────────
+# All persistent state goes through ``webui_store`` (atomic writes + per-store
+# locking). The helpers below are thin delegations preserved for backwards
+# compatibility with route code; Unit 3 will replace direct calls with
+# ``history_store.load()`` etc. The ``_*_FILE`` module-level constants are
+# preserved as aliases so legacy tests that monkeypatch them keep working —
+# new tests should patch ``webui_store.history_store.path`` instead.
+from webui_store import (
+    drafts_store as _drafts_store,
+    history_store as _history_store,
+    profiles_store as _profiles_store,
+    schedule_store as _schedule_store,
+)
 
 
 def _load_history():
-    if _HISTORY_FILE.exists():
-        try:
-            return json.loads(_HISTORY_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            return []
-    return []
+    return _history_store.load()
 
 
 def _append_history(item: dict) -> list:
-    history = _load_history()
-    history.insert(0, item)
-    history = history[:100]
-    _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _HISTORY_FILE.write_text(
-        json.dumps(history, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-    return history
-
-
-_PROFILES_FILE = Path.home() / '.config' / 'backlink-publisher' / 'campaign-profiles.json'
+    """Insert at head, trim to 100, persist."""
+    return _history_store.update(lambda hist: [item, *hist][:100])
 
 
 def _load_profiles() -> list:
-    if _PROFILES_FILE.exists():
-        try:
-            return json.loads(_PROFILES_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            return []
-    return []
+    return _profiles_store.load()
 
 
 def _save_profiles(profiles: list) -> None:
-    _PROFILES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PROFILES_FILE.write_text(
-        json.dumps(profiles, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
-
-
-# ── Draft Queue (排程草稿欄) ──────────────────────────────────────────────────
-_DRAFT_FILE = Path.home() / '.config' / 'backlink-publisher' / 'draft-queue.json'
-_SCHEDULE_SETTINGS_FILE = Path.home() / '.config' / 'backlink-publisher' / 'schedule-settings.json'
-_draft_lock = threading.Lock()
+    _profiles_store.save(profiles)
 
 
 def _load_draft_queue() -> list:
-    if _DRAFT_FILE.exists():
-        try:
-            return json.loads(_DRAFT_FILE.read_text(encoding='utf-8'))
-        except Exception:
-            return []
-    return []
+    return _drafts_store.load()
 
 
 def _save_draft_queue(items: list) -> None:
-    _DRAFT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _DRAFT_FILE.with_suffix('.tmp')
-    tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding='utf-8')
-    tmp.replace(_DRAFT_FILE)
+    _drafts_store.save(items)
 
 
 def _get_draft_item(item_id: str) -> dict | None:
-    with _draft_lock:
-        for item in _load_draft_queue():
-            if item.get('id') == item_id:
-                return item
-    return None
+    return _drafts_store.get_item(item_id)
 
 
 def _update_draft_item(item_id: str, **fields) -> bool:
-    with _draft_lock:
-        items = _load_draft_queue()
-        for item in items:
-            if item.get('id') == item_id:
-                item.update(fields)
-                _save_draft_queue(items)
-                return True
-    return False
+    return _drafts_store.update_item(item_id, **fields)
 
 
 def _delete_draft_item(item_id: str) -> bool:
-    with _draft_lock:
-        items = _load_draft_queue()
-        new_items = [i for i in items if i.get('id') != item_id]
-        if len(new_items) < len(items):
-            _save_draft_queue(new_items)
-            return True
-    return False
+    return _drafts_store.delete_item(item_id)
 
 
 def _load_schedule_settings() -> dict:
     defaults = {'min_interval_hours': 4, 'jitter_minutes': 30}
-    if _SCHEDULE_SETTINGS_FILE.exists():
-        try:
-            data = json.loads(_SCHEDULE_SETTINGS_FILE.read_text(encoding='utf-8'))
-            defaults.update(data)
-        except Exception:
-            pass
+    loaded = _schedule_store.load()
+    if isinstance(loaded, dict):
+        defaults.update(loaded)
     return defaults
 
 
 def _save_schedule_settings(data: dict) -> None:
-    _SCHEDULE_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _SCHEDULE_SETTINGS_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8'
-    )
+    _schedule_store.save(data)
+
+
+# Path aliases — kept as module attributes so any remaining direct-file
+# code reads the canonical store path at import time. Tests that need to
+# redirect state writes should patch ``webui_store.<name>_store.path``
+# (the store is the single source of truth), not these aliases.
+_HISTORY_FILE = _history_store.path
+_PROFILES_FILE = _profiles_store.path
+_DRAFT_FILE = _drafts_store.path
+_SCHEDULE_SETTINGS_FILE = _schedule_store.path
+
+# Legacy lock alias — drafts_store has its own internal lock now. The few
+# remaining ``with _draft_lock:`` call sites are harmless (extra outer lock)
+# and get removed in Unit 3 when routes are split out.
+_draft_lock = threading.Lock()
 
 
 def _calc_next_available(requested_dt: datetime) -> datetime:
@@ -3243,10 +3210,9 @@ def ce_history():
 def ce_history_delete():
     """Delete one history record by id."""
     item_id = request.form.get('id', '')
-    history = _load_history()
-    history = [h for h in history if h.get('id') != item_id]
-    _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding='utf-8')
+    history = _history_store.update(
+        lambda hist: [h for h in hist if h.get('id') != item_id]
+    )
     return _render(HTML, history=history, history_active=True,
                    config=session.get('config', {}))
 
@@ -3256,13 +3222,15 @@ def ce_history_update_status():
     """Update the status of one history record."""
     item_id = request.form.get('id', '')
     new_status = request.form.get('status', '')
-    history = _load_history()
-    for h in history:
-        if h.get('id') == item_id:
-            h['status'] = new_status
-            break
-    _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding='utf-8')
+
+    def _apply(hist):
+        for h in hist:
+            if h.get('id') == item_id:
+                h['status'] = new_status
+                break
+        return hist
+
+    history = _history_store.update(_apply)
     return _render(HTML, history=history, history_active=True,
                    config=session.get('config', {}))
 
