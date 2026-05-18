@@ -15,9 +15,36 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 DUMP_PATH = Path("velog_credentials_dump.json")
 COOKIE_FILE = Path("velog_cookies_flat.txt")  # 用于 curl 命令的扁平格式
+
+
+def _velog_host_allowed(host: str | None) -> bool:
+    """Plan 012 R16 规范化白名单 primitive：精确匹配 velog.io。
+
+    `host.lower().lstrip(".")` 后 == "velog.io"。排除：
+    - `evilvelog.io`（前缀混淆）
+    - `velog.io.attacker.tld`（后缀混淆）
+    - `Velog.IO`（大小写归一为 True）
+    - 空 / None（防御性 False）
+
+    Unit 3 实现 cookies + storage_state.origins[] 双过滤时复用此 primitive。
+    """
+    if not host:
+        return False
+    return host.lower().lstrip(".") == "velog.io"
+
+
+def _origin_host_allowed(origin: str | None) -> bool:
+    """Storage_state.origins[] 用：从 origin URL 提取 host 后过 _velog_host_allowed。"""
+    if not origin:
+        return False
+    try:
+        return _velog_host_allowed(urlparse(origin).hostname)
+    except Exception:
+        return False
 
 
 async def main() -> None:
@@ -47,27 +74,33 @@ async def main() -> None:
 
         dump_time = datetime.now(timezone.utc).isoformat()
 
-        # 1. Cookies（全部）
+        # 1. Cookies（规范化白名单过滤，与 Unit 3 R16 行为一致）
         all_cookies = await context.cookies()
         velog_cookies = [
             c for c in all_cookies
-            if "velog.io" in c.get("domain", "")
+            if _velog_host_allowed(c.get("domain"))
         ]
         other_cookies = [
             c for c in all_cookies
-            if "velog.io" not in c.get("domain", "")
+            if not _velog_host_allowed(c.get("domain"))
         ]
 
         # 2. localStorage / sessionStorage
         local_storage = dict(await page.evaluate("Object.entries(localStorage)"))
         session_storage = dict(await page.evaluate("Object.entries(sessionStorage)"))
 
-        # 3. storage_state（仅 velog.io origin）
+        # 3. storage_state（origins 用同一 host primitive 过滤）
         storage_state = await context.storage_state()
-        storage_state["origins"] = [
-            o for o in storage_state.get("origins", [])
-            if "velog.io" in o.get("origin", "")
+        all_origins = storage_state.get("origins", [])
+        velog_origins = [
+            o for o in all_origins
+            if _origin_host_allowed(o.get("origin"))
         ]
+        dropped_origins = [
+            o.get("origin") for o in all_origins
+            if not _origin_host_allowed(o.get("origin"))
+        ]
+        storage_state["origins"] = velog_origins
 
         # 分析 token 位置
         token_locations: dict[str, list[str]] = {
@@ -84,6 +117,7 @@ async def main() -> None:
 
         dump = {
             "_dump_time": dump_time,
+            "_filter_primitive": "_velog_host_allowed(host).lower().lstrip('.') == 'velog.io'",
             "_analysis": {
                 "velog_cookie_names": [c["name"] for c in velog_cookies],
                 "idp_cookie_domains": list({
@@ -92,6 +126,7 @@ async def main() -> None:
                         "google", "github", "facebook", "accounts"
                     ])
                 }),
+                "dropped_origin_urls": dropped_origins,
                 "token_locations": token_locations,
                 "recommended_persistence": (
                     "cookies-only"
@@ -123,11 +158,18 @@ async def main() -> None:
         print(f"  velog cookies: {dump['_analysis']['velog_cookie_names']}")
         print(f"  token 位置: {token_locations}")
         print(f"  推荐持久化策略: {dump['_analysis']['recommended_persistence']}")
+        if dropped_origins:
+            print(f"  ⚠ 已过滤的非 velog.io origin（IdP storage 防泄漏）:")
+            for o in dropped_origins:
+                print(f"      - {o}")
         print()
         print("下一步：")
         print("  1. 检查 velog_credentials_dump.json 确认 access_token 位置")
         print("  2. 用 velog_cookies_flat.txt 执行 P0-1 curl 测试")
-        print("  3. 保存 velog_cookies_flat.txt，25h 后执行 P0-3 臂 A 测试")
+        print("  3. **P0-1b deliberate-bad-input harvest**：用同一 cookie 故意提交")
+        print("     4-5 类坏输入，harvest errors[].extensions.code（≥ 3 类）")
+        print("     这是 Unit 4 _KNOWN_EXTENSIONS_CODES baseline 的唯一来源。")
+        print("  4. 保存 velog_cookies_flat.txt，25h 后执行 P0-3 臂 A 测试")
         print("=" * 60)
 
         await browser.close()

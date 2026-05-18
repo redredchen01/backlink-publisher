@@ -14,6 +14,7 @@ decision: pending
 
 **P0-6 达标线（全部满足才能 Go）：**
 - [ ] P0-1 成功：`curl` 直发 `writePost` mutation，页面公开可访
+- [ ] **P0-1b harvest ≥ 3 类 `errors[].extensions.code`**（成功路径无 error code 可抄，必须故意触发坏输入 harvest baseline；是 `_KNOWN_EXTENSIONS_CODES` 唯一可信来源）
 - [ ] P0-3 臂 A：idle TTL ≥ 24h（25h 零调用后 mutation 仍成功）
 - [ ] P0-5 阶段 1：≥ 70% 测试文章在 14 天内被 Google 索引
 - [ ] P0-4：运营对语种有明确书面决断
@@ -119,6 +120,74 @@ curl -s -X POST 'https://v3.velog.io/graphql' \
 | 已知 errors[].extensions.code | `_______________` |
 | mutation 是否需要 `url_slug` / `meta` 字段 | `是 / 否（理由：______）` |
 | 结论 | `✓ P0-1 通过 / ✗ 失败（原因：______）` |
+
+---
+
+## P0-1b：deliberate bad-input harvest（`_KNOWN_EXTENSIONS_CODES` baseline）
+
+### 目的
+
+P0-1 成功路径上 `errors` 字段为空 / null —— 无 code 可抄。要给 Unit 4 的 `_KNOWN_EXTENSIONS_CODES` 集合 seed baseline，必须**故意提交坏输入**, harvest 每类错误的 `extensions.code`。
+
+**为什么不能跳过：** Unit 4 收到未知 code 会走独立 `log.error("schema-drift candidate")` + `_provider_meta["unknown_extension_code"]`。若 baseline 是空集，**每个正常 validation 错误（title 太长、tag 非法、字段缺失）都会触发"schema-drift"警报，canary 沦为噪声**（adversarial reviewer 标定的 P1 finding f3）。
+
+### 操作步骤
+
+用 P0-1 的 cookie 复用 `curl` 模板，依次提交以下 4-5 类坏输入。每次记录响应中 `errors[].extensions.code` 值。
+
+**坏输入 1：缺 title**
+```bash
+curl -s -X POST 'https://v3.velog.io/graphql' \
+  -H 'Content-Type: application/json' \
+  -H "Cookie: $(cat velog_cookies_flat.txt)" \
+  -H "User-Agent: $UA" \
+  -H 'Origin: https://velog.io' \
+  -d '{
+    "operationName": "WritePost",
+    "query": "mutation WritePost($input: WritePostInput!) { writePost(input: $input) { id } }",
+    "variables": {
+      "input": {
+        "title": "",
+        "body": "x",
+        "tags": [],
+        "is_markdown": true,
+        "is_temp": false,
+        "is_private": false,
+        "series_id": null
+      }
+    }
+  }' | python3 -m json.tool
+```
+
+**坏输入 2：body 超长（先粘 10 万字符 body）**
+
+**坏输入 3：tags 含非法字符（如 `["<script>"]`）**
+
+**坏输入 4：mutation 缺必填字段（如把 `is_markdown` 删除）**
+
+**坏输入 5：cookie 故意去掉 `access_token` 字段（验证 auth code）**
+
+### 记录区
+
+| 编号 | 坏输入类型 | HTTP 状态 | `errors[0].extensions.code` | `errors[0].message`（截断） |
+|------|-----------|-----------|------------------------------|------------------------------|
+| 1 | 缺 title | `___` | `_______________` | `_______________` |
+| 2 | body 超长 | `___` | `_______________` | `_______________` |
+| 3 | tags 非法字符 | `___` | `_______________` | `_______________` |
+| 4 | 缺必填字段 | `___` | `_______________` | `_______________` |
+| 5 | 缺 auth | `___` | `_______________` | `_______________` |
+
+> 至少 harvest **3 类不同 code** 才算 P0-1b 通过（少于 3 类则 baseline 太小，schema-drift canary 灵敏度不够）。
+
+**额外检查：是否出现 auth-shape pattern code？**
+
+观察是否有 code 含子串 `UNAUTH` / `FORBIDDEN` / `SESSION` / `TOKEN` / `CSRF` / `EXPIRED`（plan v2 Unit 4 的 auth-shape pattern match 由此驱动）。
+
+| 项目 | 记录值 |
+|------|--------|
+| 是否出现 auth-shape code | `是（list：______）/ 否（仅 NOT_LOGGED_IN/UNAUTHENTICATED）` |
+| 推荐写入 `_KNOWN_EXTENSIONS_CODES` 的 baseline 集 | `{________________________________}` |
+| `_KNOWN_CODES_BASELINE_SIZE` 值 | `_____` |
 
 ---
 
@@ -315,6 +384,7 @@ done
 | 分项 | 状态 | 备注 |
 |------|------|------|
 | P0-1 curl writePost 成功 | `✓ / ✗ / 待完成` | |
+| P0-1b harvest ≥ 3 类 codes | `✓ / ✗ / 待完成` | `_KNOWN_EXTENSIONS_CODES` baseline 来源 |
 | P0-3 臂 A idle TTL ≥ 24h | `✓ / ✗ / 待完成` | |
 | P0-5 阶段 1 索引率 ≥ 70% | `✓ / ✗ / 待完成` | ETA: 发布后 14 天 |
 | P0-4 运营语种决断 | `✓ / ✗ / 待完成` | |
@@ -343,7 +413,10 @@ done
 | 持久化策略（来自 P0-2） | `cookies-only / storage_state / 双保险` |
 | 语种（来自 P0-4） | `ko / en` |
 | P0-1 确认的必需 headers | `_______________` |
-| 已知 extensions.code 白名单 | `_______________` |
+| **P0-1b harvested `_KNOWN_EXTENSIONS_CODES` baseline** | `{________________________________}` |
+| **`_KNOWN_CODES_BASELINE_SIZE` 值（写入 Unit 4 模块常量）** | `_____` |
+| **是否检测到 auth-shape codes（除 NOT_LOGGED_IN/UNAUTHENTICATED 外）** | `是（list：______）/ 否` |
+| P0-1 确认的 mutation 必需字段（除 6 字段最小集外） | `无 / 需补充：______` |
 
 ---
 
