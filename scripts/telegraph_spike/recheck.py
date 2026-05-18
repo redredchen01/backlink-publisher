@@ -35,6 +35,24 @@ from pathlib import Path
 import requests
 
 DEFAULT_RESULTS = Path(__file__).resolve().parent / "run_output" / "results.json"
+DEFAULT_MANIFEST = Path(__file__).resolve().parent / "results-manifest.json"
+
+
+def load_pages(results_path: Path,
+               manifest_path: Path) -> tuple[list[dict], str]:
+    """Prefer gitignored run_output/results.json (richest, includes
+    link_attrs from publish time); fall back to the committed sanitized
+    manifest so remote scheduled agents can re-run the checkpoints
+    without needing the operator's local artifacts."""
+    if results_path.exists():
+        return json.loads(results_path.read_text()), str(results_path)
+    if manifest_path.exists():
+        m = json.loads(manifest_path.read_text())
+        return m.get("pages", []), str(manifest_path)
+    raise FileNotFoundError(
+        f"neither {results_path} nor {manifest_path} found. "
+        "publish_batch.py needs to have run, OR results-manifest.json "
+        "needs to be committed to the repo for remote agents.")
 
 
 class _AnchorParser(HTMLParser):
@@ -100,7 +118,9 @@ def main() -> int:
     p.add_argument("--day", required=True, choices=["t7", "t14", "t21"],
                    help="Checkpoint label")
     p.add_argument("--results", type=Path, default=DEFAULT_RESULTS,
-                   help="Path to publish_batch.py results.json")
+                   help="Path to publish_batch.py results.json (preferred)")
+    p.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST,
+                   help="Committed fallback manifest if results.json absent")
     p.add_argument("--target-url", default="https://51acgs.com",
                    help="Target URL used in the batch run (anchor matcher)")
     p.add_argument("--check-indexation", action="store_true",
@@ -109,13 +129,12 @@ def main() -> int:
     p.add_argument("--inter-call-delay", type=float, default=2.0)
     args = p.parse_args()
 
-    if not args.results.exists():
-        print(f"ERROR: {args.results} not found. Did publish_batch.py run?",
-              file=sys.stderr)
+    try:
+        records, source = load_pages(args.results, args.manifest)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-
-    records = json.loads(args.results.read_text())
-    print(f"rechecking {len(records)} pages @ {args.day}")
+    print(f"rechecking {len(records)} pages @ {args.day} (source: {source})")
 
     rows: list[str] = []
     rel_col = f"rel_{args.day}"
@@ -170,7 +189,9 @@ def main() -> int:
               + (f"  indexation={cells[-1]}" if idx_col else ""))
         time.sleep(args.inter_call_delay)
 
-    out = args.results.parent / f"recheck-{args.day}.md"
+    out_dir = args.results.parent  # run_output/
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"recheck-{args.day}.md"
     out.write_text("\n".join(rows) + "\n")
 
     print(f"\nresults table → {out}")
