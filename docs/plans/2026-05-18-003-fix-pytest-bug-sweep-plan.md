@@ -1,10 +1,13 @@
 ---
 title: "fix: Pytest Bug Sweep — Full-Suite Failure Triage & Sequential Repair"
 type: fix
-status: active
+status: completed
 date: 2026-05-18
 deepened: 2026-05-18
+completed: 2026-05-18
 origin: docs/brainstorms/2026-05-18-pytest-bug-sweep-requirements.md
+pr: https://github.com/redredchen01/backlink-publisher/pull/40
+report: docs/bug-sweep-2026-05-18.md
 ---
 
 # fix: Pytest Bug Sweep — Full-Suite Failure Triage & Sequential Repair
