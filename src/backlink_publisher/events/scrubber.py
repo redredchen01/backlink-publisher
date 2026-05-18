@@ -51,8 +51,20 @@ _PATTERNS: Final[list[tuple[str, re.Pattern[str]]]] = [
     ("sha256_hex_token", re.compile(r"\b[0-9a-f]{64}\b", re.IGNORECASE)),
     # HTTP(S) URL with embedded basic-auth credentials. The first segment
     # after scheme is the user, second (after the colon) is the password,
-    # both up to ``@``.
-    ("basic_auth_url", re.compile(r"https?://[^:/\s@]+:[^@/\s]+@[^\s]+")),
+    # both up to ``@``. The tail char class terminates on whitespace and
+    # on the common log-format delimiters that no real URL contains —
+    # quotes, angle brackets, backticks, closing parens/brackets/braces,
+    # backslashes. Without these, a URL embedded in HTML (``"..."``),
+    # markdown (``[txt](url)``), or JSON (``"url"``) would extend the
+    # redaction span into the surrounding scaffold and lose observability
+    # data. Chained credential URLs (``?next=https://u:p@b/x`` nested
+    # inside another URL) remain a known limit — regex alone cannot split
+    # them; the secret is still scrubbed but ``hit_counts.basic_auth_url``
+    # undercounts.
+    (
+        "basic_auth_url",
+        re.compile(r"https?://[^:/\s@]+:[^@/\s]+@[^\s\"'<>`)\]}\\]+"),
+    ),
 ]
 
 #: Minimum token length for the high-entropy fallback. Tokens shorter than
@@ -79,6 +91,18 @@ _HIGH_ENTROPY_TOKEN: Final[re.Pattern[str]] = re.compile(r"\S{%d,}" % _HIGH_ENTR
 #: was scrubbed (not silently dropped). Caller's ``hit_counts`` carries the
 #: pattern name for routing.
 _REDACTED: Final[str] = "<REDACTED>"
+
+#: Maximum input size (in characters) that ``scrub_text`` will scan in full.
+#: Inputs over this cap are truncated to ``_MAX_SCRUB_LEN`` and tagged with
+#: ``<TRUNCATED:N more chars>``. A multi-megabyte response body slipping
+#: into an exception traceback would otherwise do tens of MB of regex work
+#: synchronously on the caller's thread. 64 KiB comfortably covers a real
+#: log line; anything larger almost certainly should not be in a log.
+_MAX_SCRUB_LEN: Final[int] = 65536
+
+#: Marker appended to truncated inputs so log readers can tell the cap fired
+#: (vs. a genuinely-short payload).
+_TRUNCATED_TEMPLATE: Final[str] = "<TRUNCATED:{n} more chars>"
 
 
 def _shannon_entropy(s: str) -> float:
@@ -115,7 +139,18 @@ def scrub_text(s: str) -> tuple[str, dict[str, int]]:
     ``None`` from an optional field) will raise ``TypeError`` from the first
     ``pattern.findall`` call — callers in log-write hot paths must pre-coerce
     or wrap in ``str(...)`` to keep flush bulletproof.
+
+    Inputs longer than ``_MAX_SCRUB_LEN`` are truncated before scanning and
+    annotated with a ``<TRUNCATED:N more chars>`` suffix so the caller can
+    see the cap fired. The cap bounds worst-case work to ~11 linear passes
+    over ``_MAX_SCRUB_LEN`` chars regardless of attacker-controlled length.
+    Secrets that live past the cap are dropped rather than scrubbed — this
+    is a deliberate trade-off (log lines that long should not be reaching
+    this code path in the first place).
     """
+    if len(s) > _MAX_SCRUB_LEN:
+        truncated = _TRUNCATED_TEMPLATE.format(n=len(s) - _MAX_SCRUB_LEN)
+        s = s[:_MAX_SCRUB_LEN] + truncated
     hit_counts: dict[str, int] = {}
     cleaned = s
     for name, pattern in _PATTERNS:
