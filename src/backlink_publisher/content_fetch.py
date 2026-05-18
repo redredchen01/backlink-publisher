@@ -57,8 +57,15 @@ FETCH_TIMEOUT: int = 10
 #: ``http_200_no_title`` are not retried — the result is structurally stable.
 MAX_RETRIES: int = 2
 
-#: Per-attempt body cap. Larger responses are rejected with ``body_too_large``
-#: rather than parsed — protects against accidental binary downloads.
+#: Soft head-window cap. Title extraction only needs ``<head>`` content;
+#: we stream the response and stop as soon as ``</head>`` appears (or after
+#: this many bytes if it doesn't). 256KB is generous for any reasonable HTML
+#: head — typical heads are 5-50KB even with inlined CSS/JS / og: tags.
+HEAD_SCAN_BYTES: int = 256_000
+
+#: Retained for backward-import compatibility and as a defensive hard cap
+#: passed down to readers in case ``HEAD_SCAN_BYTES`` ever needs to grow.
+#: No longer triggers ``body_too_large`` — streaming caps far earlier.
 MAX_BODY_BYTES: int = 1_000_000
 
 #: User-Agent identifies this fetcher distinctly from ``linkcheck``'s probe so
@@ -361,6 +368,38 @@ def _is_soft_404_title(title: str) -> bool:
     return False
 
 
+def _read_html_head_window(resp, max_bytes: int) -> bytes:
+    """Stream ``resp`` and return the accumulated body up to whichever comes
+    first: closing ``</head>`` tag, end of stream, or ``max_bytes``.
+
+    Title extraction (``<meta property="og:title">`` and ``<title>``) lives
+    entirely in ``<head>``; reading the full body is wasteful and is what
+    used to trip ``body_too_large`` on real HTML pages with inlined CSS/JS
+    (modern pages routinely exceed 1MB). Stopping at ``</head>`` keeps memory
+    use bounded by the head's actual size — typically tens of KB.
+
+    Substring search is restricted to the trailing window so the inner loop
+    stays linear in the response size.
+    """
+    buf = bytearray()
+    chunk_size = 16_384
+    sentinel = b"</head>"
+    # Trailing window for the close-tag probe: must be ≥ len(sentinel) and
+    # large enough to span a chunk boundary on conservative chunk sizes.
+    probe_window = 32_768
+    while len(buf) < max_bytes:
+        remaining = max_bytes - len(buf)
+        chunk = resp.read(min(chunk_size, remaining))
+        if not chunk:
+            break
+        buf.extend(chunk)
+        # Case-insensitive close-tag check on the trailing window only.
+        tail_start = max(0, len(buf) - probe_window)
+        if sentinel in bytes(buf[tail_start:]).lower():
+            break
+    return bytes(buf)
+
+
 def _extract_title(body: bytes) -> Optional[str]:
     """Parse ``body`` as HTML and return the first non-empty title element.
 
@@ -451,7 +490,7 @@ def _check_once(url: str) -> CheckResult:
         return False, f"http_{code}", None
 
     try:
-        body = resp.read(MAX_BODY_BYTES + 1)
+        body = _read_html_head_window(resp, HEAD_SCAN_BYTES)
     except Exception:  # noqa: BLE001
         return False, "network_error", None
     finally:
@@ -459,9 +498,6 @@ def _check_once(url: str) -> CheckResult:
             resp.close()
         except Exception:  # noqa: BLE001
             pass
-
-    if len(body) > MAX_BODY_BYTES:
-        return False, "body_too_large", None
 
     title = _extract_title(body)
     if not title:

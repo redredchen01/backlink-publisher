@@ -27,6 +27,7 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from backlink_publisher.content_fetch import (
+    HEAD_SCAN_BYTES,
     MAX_BODY_BYTES,
     reset_cache,
     verify_url_has_content,
@@ -137,16 +138,35 @@ def test_200_with_no_title_element_at_all_fails_gate():
     assert reason == "http_200_no_title"
 
 
-# ── body_too_large ─────────────────────────────────────────────────────────
+# ── head-window streaming (replaces former body_too_large path) ───────────
 
 
-def test_oversized_body_rejected():
-    body = b"x" * (MAX_BODY_BYTES + 100)
+def test_oversized_body_no_title_resolves_as_http_200_no_title():
+    """A giant body with no <head>/<title> is no longer rejected as
+    body_too_large — the streaming reader caps at HEAD_SCAN_BYTES and the
+    title extractor returns None on a body of just filler bytes.
+    """
+    body = b"x" * (HEAD_SCAN_BYTES * 4)
     with patch("backlink_publisher.content_fetch._SSRF_OPENER.open", return_value=_mock_response(200, body)):
         ok, reason, title = verify_url_has_content("https://example.com/")
     assert ok is False
-    assert reason == "body_too_large"
+    assert reason == "http_200_no_title"
     assert title is None
+
+
+def test_head_window_stops_at_head_close_even_when_body_is_huge():
+    """Title-bearing <head> followed by a giant body succeeds: the streamer
+    stops at </head> and never reads the bloated body that used to trip
+    body_too_large. Verifies the root fix for HTML pages that exceed the
+    old 1MB body cap due to inlined CSS/JS or large nav structures.
+    """
+    head = b"<html><head><title>OK</title></head>"
+    huge_body = b"<body>" + b"x" * (HEAD_SCAN_BYTES * 4) + b"</body></html>"
+    with patch("backlink_publisher.content_fetch._SSRF_OPENER.open", return_value=_mock_response(200, head + huge_body)):
+        ok, reason, title = verify_url_has_content("https://example.com/")
+    assert ok is True
+    assert reason is None
+    assert title == "OK"
 
 
 # ── http error paths ──────────────────────────────────────────────────────
