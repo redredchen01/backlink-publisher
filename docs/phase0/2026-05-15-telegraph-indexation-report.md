@@ -59,26 +59,30 @@ related_brainstorm: docs/brainstorms/2026-05-15-telegraph-adapter-requirements.m
 
 > 运营填写。`rel_t0` 等字段填:`null`(无 rel 属性 = dofollow,达标) / `nofollow` / `ugc` / `sponsored`。索引列填:`yes` / `no` / `n/a`。
 
-| # | URL | 组 | velocity? | 外链数 | 目标域示例 | rel_t0 | target_t0 | rel_t7 | rel_t14 | rel_t21 | indexed_t14 | GSC_referring_t14 |
+| # | URL | 组 | velocity? | 外链数 | 目标域 | rel_t0 | target_t0 | rel_t7 | rel_t14 | rel_t21 | indexed_t14 | GSC_referring_t14 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | https://telegra.ph/<slug-01> | A | — | 1 | example.com | — | — | — | — | — | — | — |
-| 2 | https://telegra.ph/<slug-02> | A | — | 1 | example.com | — | — | — | — | — | — | — |
-| 3 | https://telegra.ph/<slug-03> | A | — | 1 | example.com | — | — | — | — | — | — | — |
-| 4 | https://telegra.ph/<slug-04> | B | V1 | 3 | foo.com / bar.io / baz.dev | — | — | — | — | — | — | — |
-| 5 | https://telegra.ph/<slug-05> | B | V2 | 3 | foo.com / bar.io / baz.dev | — | — | — | — | — | — | — |
-| 6 | https://telegra.ph/<slug-06> | B | — | 3 | foo.com / bar.io / baz.dev | — | — | — | — | — | — | — |
-| 7 | https://telegra.ph/<slug-07> | C | V3 | 5 | (含 1 个 .xyz / .top) | — | — | — | — | — | — | — |
-| 8 | https://telegra.ph/<slug-08> | C | — | 5 | (含 1 个 .xyz / .top) | — | — | — | — | — | — | — |
-| 9 | https://telegra.ph/<slug-09> | C | — | 5 | (含 1 个 .xyz / .top) | — | — | — | — | — | — | — |
-| 10 | https://telegra.ph/<slug-10> | C | — | 5 | (含 1 个 .icu) | — | — | — | — | — | — | — |
+| 1 | https://telegra.ph/A-Beginners-Roadmap-for-Anime-Genre-Exploration-05-18 | A | — | 1 | 51acgs.com | null | _blank | — | — | — | — | — |
+| 2 | https://telegra.ph/Reading-Order-Pitfalls-in-Long-Running-Manga-Series-05-18 | A | — | 1 | 51acgs.com | null | _blank | — | — | — | — | — |
+| 3 | https://telegra.ph/Sustainable-Habits-for-Seasonal-Anime-Tracking-05-18 | A | — | 1 | 51acgs.com | null | _blank | — | — | — | — | — |
+| 4 | https://telegra.ph/How-Studio-Identity-Shapes-Anime-Adaptations-05-18 | B | V1 | 3 | 51acgs.com + anilist.co + myanimelist.net | null | _blank | — | — | — | — | — |
+| 5 | https://telegra.ph/Notes-on-Voice-Acting-as-Performance-Not-Decoration-05-18 | B | V2 | 3 | 51acgs.com + animenewsnetwork.com + anidb.net | null | _blank | — | — | — | — | — |
+| 6 | https://telegra.ph/A-Practical-Comparison-of-Manga-Reading-Platforms-05-18 | B | — | 3 | 51acgs.com + mangadex.org + animenewsnetwork.com | null | _blank | — | — | — | — | — |
+| 7 | https://telegra.ph/A-Working-Photographers-Notes-on-Cosplay-Shoots-05-18 | C | V3 | 5 | 51acgs.com + acgrefs.xyz + anilist.co + myanimelist.net + animenewsnetwork.com | null | _blank | — | — | — | — | — |
+| 8 | https://telegra.ph/The-Economics-of-Independent-Doujin-Circles-05-18 | C | — | 5 | 51acgs.com + doujininfo.top + animenewsnetwork.com + anidb.net + mangadex.org | null | _blank | — | — | — | — | — |
+| 9 | https://telegra.ph/A-Listeners-Tour-Through-Anime-Soundtrack-Composition-05-18 | C | — | 5 | 51acgs.com + animost.xyz + animenewsnetwork.com + anidb.net + crunchyroll.com | null | _blank | — | — | — | — | — |
+| 10 | https://telegra.ph/Translation-Workflows-Fan-Subs-Scanlation-and-Professional-Localisation-05-18 | C | — | 5 | 51acgs.com + translog.top + anilist.co + animenewsnetwork.com + mangadex.org | null | _blank | — | — | — | — | — |
+
+**T0 published 2026-05-18** via `scripts/telegraph_spike/publish_batch.py --target-url https://51acgs.com`. All 10 target_url anchors verified `rel=null` (dofollow) + `target=_blank` immediately post-publish. Telegraph chrome adds 2 extra anchors per page (sign-in + share); total page anchor count = inline + 2. Anonymous `access_token` stored at `scripts/telegraph_spike/run_output/telegraph-phase0-token.json` (0600, gitignored) for any `editPage`/`revokeAccessToken` follow-ups. Suspicious-TLD distribution: `.xyz` × 2 (acgrefs / animost) + `.top` × 2 (doujininfo / translog) across C group.
 
 ### 3.1 velocity 子实验复查(T+21)
 
-| velocity 标记 | URL | rel_t21 | indexed_t21 | Notes |
-|---|---|---|---|---|
-| V1 | (同表 #4) | — | — | — |
-| V2 | (同表 #5) | — | — | — |
-| V3 | (同表 #7) | — | — | — |
+| velocity 标记 | URL | 发布日 | rel_t21 | indexed_t21 | Notes |
+|---|---|---|---|---|---|
+| V1 | https://telegra.ph/How-Studio-Identity-Shapes-Anime-Adaptations-05-18 | 2026-05-18 | — | — | (同表 #4) |
+| V2 | https://telegra.ph/Notes-on-Voice-Acting-as-Performance-Not-Decoration-05-18 | 2026-05-18 | — | — | (同表 #5) |
+| V3 | https://telegra.ph/A-Working-Photographers-Notes-on-Cosplay-Shoots-05-18 | 2026-05-18 | — | — | (同表 #7) |
+
+**V1/V2/V3 all published within < 1 minute of each other at T0**, satisfying the "24h burst" constraint trivially. The narrower-than-required burst window is acceptable per plan §188 (velocity sub-experiment 3/3 condition checks **status at T+21**, not the burst window itself).
 
 ---
 
@@ -93,26 +97,28 @@ related_brainstorm: docs/brainstorms/2026-05-15-telegraph-adapter-requirements.m
 ## 5. 运营 SOP(每个 checkpoint 的操作步骤)
 
 ### 5.1 T0(发布日,2026-05-18)
-- [ ] 用同一 Telegraph 账号(`createAccount` 一次,保存 `access_token`)发布 10 个页面,逐一记录返回的 `https://telegra.ph/<slug>` 到第 3 节表格
-- [ ] 对每个页面跑 `curl -s <url> | grep -oE '<a [^>]*>'`,把每个 `<a>` 的 `rel` 与 `target` 记入 `rel_t0` / `target_t0`(`rel` 缺省记 `null`)
-- [ ] 验证 velocity 三页(V1/V2/V3)在 24h 内全部发布完成
-- [ ] 同日内发布 1 篇 dev.to **或** hashnode 对照文,记入第 4 节
+- [x] **2026-05-18 done** — 10 个页面通过 `python scripts/telegraph_spike/publish_batch.py --target-url https://51acgs.com` 一键发布;`access_token` 保存到 `scripts/telegraph_spike/run_output/telegraph-phase0-token.json`(0600)
+- [x] **2026-05-18 done** — 所有 10 个 target_url anchor 的 `rel`/`target` 在第 3 节表格已填(rel_t0=`null`、target_t0=`_blank`)
+- [x] **2026-05-18 done** — velocity V1/V2/V3 三页发布时间间隔 < 1 分钟,远小于 24h 上限
+- [ ] **运营今日 (2026-05-18) 待做** — 同日内发布 1 篇 dev.to **或** hashnode 对照文,记入第 4 节(本平台需要运营登录账号,工程无法代劳)
 
-### 5.2 T+7(2026-05-25)
-- [ ] 重新 `curl` 抓 10 个 telegra.ph 页面,把 `rel` 填入 `rel_t7` 列
-- [ ] 若任一 page 出现 `rel=nofollow`/`ugc`/`sponsored`,提早记入 followup(不影响后续复查继续)
+### 5.2 T+7(2026-05-25) — ScheduleWakeup 自动触发
+- [ ] 跑 `python scripts/telegraph_spike/recheck.py --day t7` → 输出 `run_output/recheck-t7.md`,把 `rel_t7` 列粘进第 3 节
+- [ ] 若 summary 报告 `nofollow_introduced > 0`,提早开 brainstorm followup(不影响 T+14/T+21 复查继续)
 
-### 5.3 T+14(2026-06-01)
-- [ ] `site:telegra.ph/<slug-01>` ~ `site:telegra.ph/<slug-10>` 逐一在 Google 搜索,有结果填 `yes`,无填 `no`,记入 `indexed_t14`
-- [ ] (若有目标站 GSC 权限)进入 Google Search Console → Links → External links → Top linking sites,查 `telegra.ph` 是否出现并记录引荐 page count → `GSC_referring_t14`
-- [ ] 重新抓 `rel`,填 `rel_t14`
+### 5.3 T+14(2026-06-01) — ScheduleWakeup 自动触发(主判定日)
+- [ ] 跑 `python scripts/telegraph_spike/recheck.py --day t14 --check-indexation`
+  - `rel_t14` 列由脚本填充
+  - Google `site:` 探针软信号填入 `indexed_t14`(若返回 `captcha`,运营手工 verify 在隐身窗口逐一搜索)
+- [ ] 运营手工复核:Google Search Console → Links → External links → Top linking sites,查 `telegra.ph` 出现并记录引荐 page count → `GSC_referring_t14`
 - [ ] 抓 baseline 平台同日数据,填入第 4 节
 
-### 5.4 T+21(2026-06-08)
-- [ ] 重新抓 10 个页面 `rel`,填 `rel_t21`
-- [ ] velocity 子实验单独再核对一次(第 3.1 节)
-- [ ] 在第 1 节"达标线"表格里填实测数,勾 Pass/Fail
-- [ ] 在第 6 节写最终结论 + 任何观察到的非预期(如 telegra.ph 路径长度策略变更、目标域被自动剥离等)
+### 5.4 T+21(2026-06-08) — ScheduleWakeup 自动触发(最终判定日)
+- [ ] 跑 `python scripts/telegraph_spike/recheck.py --day t21`
+- [ ] 把 summary 的 `dofollow_retained` / `nofollow_introduced` 填入第 1 节"达标线"表格
+- [ ] velocity 子实验单独再核对一次(第 3.1 节),填 `rel_t21` + `indexed_t21`
+- [ ] 在第 6 节写最终结论 + 任何非预期观察(如 telegra.ph 路径长度策略变更、目标域被自动剥离、suspicious TLD 行为差异等)
+- [ ] 若 Pass,在 PR #36 自己 approve + merge,工程方喊 `/ce:work` 启动 Unit 2/4/5/6
 
 ---
 
