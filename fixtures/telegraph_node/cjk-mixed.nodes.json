@@ -1,0 +1,63 @@
+[
+  {
+    "tag": "h3",
+    "children": [
+      "资源推荐:简短说明"
+    ]
+  },
+  {
+    "tag": "p",
+    "children": [
+      "最近发现的优质站点 ",
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "https://example.com/zh"
+        },
+        "children": [
+          "示例站点"
+        ]
+      },
+      " 整理得很用心,值得收藏。"
+    ]
+  },
+  {
+    "tag": "ul",
+    "children": [
+      {
+        "tag": "li",
+        "children": [
+          "主页:",
+          {
+            "tag": "a",
+            "attrs": {
+              "href": "https://example.com/zh/home"
+            },
+            "children": [
+              "首页入口"
+            ]
+          }
+        ]
+      },
+      {
+        "tag": "li",
+        "children": [
+          "分类:",
+          {
+            "tag": "strong",
+            "children": [
+              "精选合集"
+            ]
+          },
+          "与新作更新"
+        ]
+      },
+      {
+        "tag": "li",
+        "children": [
+          "适合长期跟进"
+        ]
+      }
+    ]
+  }
+]

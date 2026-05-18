@@ -1,0 +1,64 @@
+[
+  {
+    "tag": "h3",
+    "children": [
+      "A short guide to the topic"
+    ]
+  },
+  {
+    "tag": "p",
+    "children": [
+      "The platform at ",
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "https://example.com/"
+        },
+        "children": [
+          "example.com"
+        ]
+      },
+      " is a useful entry point for readers exploring the area. We recommend starting from the homepage and walking through the sections one by one."
+    ]
+  },
+  {
+    "tag": "ul",
+    "children": [
+      {
+        "tag": "li",
+        "children": [
+          "Read the ",
+          {
+            "tag": "strong",
+            "children": [
+              "introduction"
+            ]
+          },
+          " carefully."
+        ]
+      },
+      {
+        "tag": "li",
+        "children": [
+          "Bookmark the ",
+          {
+            "tag": "a",
+            "attrs": {
+              "href": "https://example.com/tutorial"
+            },
+            "children": [
+              "tutorial section"
+            ]
+          },
+          " for later."
+        ]
+      },
+      {
+        "tag": "li",
+        "children": [
+          "Share the page if you found it helpful."
+        ]
+      }
+    ]
+  }
+]

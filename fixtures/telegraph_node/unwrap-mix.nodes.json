@@ -1,0 +1,59 @@
+[
+  "Top-level heading should unwrap",
+  {
+    "tag": "p",
+    "children": [
+      "A normal paragraph here."
+    ]
+  },
+  "col",
+  "description",
+  "one",
+  "cell holding a ",
+  {
+    "tag": "a",
+    "attrs": {
+      "href": "https://example.com/in-table"
+    },
+    "children": [
+      "link"
+    ]
+  },
+  " that must survive",
+  {
+    "tag": "p",
+    "children": [
+      "A blockquote with ",
+      {
+        "tag": "em",
+        "children": [
+          "emphasis"
+        ]
+      },
+      " and another ",
+      {
+        "tag": "a",
+        "attrs": {
+          "href": "https://example.com/in-quote"
+        },
+        "children": [
+          "link"
+        ]
+      },
+      "."
+    ]
+  },
+  {
+    "tag": "p",
+    "children": [
+      "After the rule, one more paragraph with ",
+      {
+        "tag": "strong",
+        "children": [
+          "bold"
+        ]
+      },
+      "."
+    ]
+  }
+]
