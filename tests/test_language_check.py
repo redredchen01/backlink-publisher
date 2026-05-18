@@ -18,8 +18,11 @@ from backlink_publisher.language_check import (
 # --- SUPPORTED_LANGUAGES constant ---
 
 
-def test_supported_languages_contains_exactly_three_languages() -> None:
-    assert SUPPORTED_LANGUAGES == frozenset({"zh-CN", "ru", "en"})
+def test_supported_languages_contains_canonical_four_languages() -> None:
+    # Plan 2026-05-18-006 Unit 1: ko added. ja / zh-TW deferred to follow-up
+    # brainstorms (require harder detection algorithms — Hiragana/Katakana for
+    # ja, 繁简 lexicon for zh-TW — that this PR explicitly does not template).
+    assert SUPPORTED_LANGUAGES == frozenset({"zh-CN", "ru", "en", "ko"})
 
 
 # --- detect_language: happy paths ---

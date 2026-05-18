@@ -8,7 +8,11 @@ import re
 #: Languages the gate semantically distinguishes. Anything outside this set is
 #: treated as ``"unknown"`` for matching purposes (R3, see plan
 #: ``docs/plans/2026-05-14-001-feat-mandatory-linkcheck-lang-gate-plan.md``).
-SUPPORTED_LANGUAGES = frozenset({"zh-CN", "ru", "en"})
+#:
+#: Canonical source of truth — :mod:`backlink_publisher.schema` imports from
+#: here. Adding a new language is a one-line change in this file
+#: (plan 2026-05-18-006 Unit 1: ko added; ja / zh-TW deferred to follow-ups).
+SUPPORTED_LANGUAGES = frozenset({"zh-CN", "ru", "en", "ko"})
 
 
 #: Patterns removed from text BEFORE language scoring.
