@@ -48,23 +48,22 @@ def _isolated_config_dir(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _isolated_webui_state(tmp_path, monkeypatch):
-    """Redirect the four module-level JSON state files to tmp_path.
+    """Redirect the four JsonStore paths to tmp_path.
 
-    These are written directly by routes (history, profiles, draft queue,
-    schedule settings) bypassing config._config_dir, so they need their own
-    patches. After Plan Unit 2 lands the JsonStore abstraction, this fixture
-    can collapse to a single ``JsonStore.path`` override.
+    Plan 2026-05-18-001 Unit 2 collapsed the original 4 module-level
+    file constants into ``webui_store.*_store`` singletons. Patching
+    ``.path`` reassigns the underlying ``_path`` via the JsonStore
+    property setter — load/save/update reads from the new location
+    starting on the next call.
     """
-    import webui
+    import webui_store as ws
 
     state_dir = tmp_path / "webui_state"
     state_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(webui, "_HISTORY_FILE", state_dir / "publish-history.json")
-    monkeypatch.setattr(webui, "_PROFILES_FILE", state_dir / "campaign-profiles.json")
-    monkeypatch.setattr(webui, "_DRAFT_FILE", state_dir / "draft-queue.json")
-    monkeypatch.setattr(
-        webui, "_SCHEDULE_SETTINGS_FILE", state_dir / "schedule-settings.json",
-    )
+    monkeypatch.setattr(ws.history_store, "path", state_dir / "publish-history.json")
+    monkeypatch.setattr(ws.profiles_store, "path", state_dir / "campaign-profiles.json")
+    monkeypatch.setattr(ws.drafts_store, "path", state_dir / "draft-queue.json")
+    monkeypatch.setattr(ws.schedule_store, "path", state_dir / "schedule-settings.json")
 
 
 @pytest.fixture(autouse=True)
@@ -128,12 +127,12 @@ class TestGetRoutes:
 
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
         """Edge case: first-time startup, none of the JSON state files exist
-        yet. The autouse fixture points them at a fresh tmp_path so they're
+        yet. The autouse fixture points stores at a fresh tmp_path so they're
         guaranteed absent. Index must still render."""
-        import webui
+        import webui_store as ws
 
-        assert not webui._HISTORY_FILE.exists()
-        assert not webui._DRAFT_FILE.exists()
+        assert not ws.history_store.path.exists()
+        assert not ws.drafts_store.path.exists()
 
         resp = client.get("/")
         assert resp.status_code == 200
