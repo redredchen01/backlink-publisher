@@ -227,3 +227,37 @@ class TestSingletons:
                     )
                 finally:
                     store.path = orig
+
+
+# ─── Plan Unit 8: Store protocol conformance ────────────────────────────────
+
+
+class TestStoreProtocol:
+    """Locks Plan Unit 8 — Store is the seam a SQLite implementation would
+    drop into. These tests guard against the protocol shape silently
+    drifting away from what JsonStore already provides."""
+
+    def test_store_is_runtime_checkable(self, tmp_path):
+        """``isinstance(JsonStore(...), Store)`` works at runtime."""
+        from webui_store import JsonStore, Store
+
+        store = JsonStore(tmp_path / "x.json", default_factory=list)
+        assert isinstance(store, Store)
+
+    def test_singletons_satisfy_protocol(self):
+        """The four module-level singletons all conform to ``Store``."""
+        from webui_store import (
+            Store,
+            history_store,
+            profiles_store,
+            drafts_store,
+            schedule_store,
+        )
+        for s in (history_store, profiles_store, drafts_store, schedule_store):
+            assert isinstance(s, Store), f"{s!r} does not satisfy Store"
+
+    def test_protocol_exported_from_package(self):
+        """``Store`` is importable from the package root for downstream
+        annotations and isinstance checks (e.g. a future SqliteStore can
+        ``from webui_store import Store`` and inherit/satisfy it)."""
+        from webui_store import Store  # noqa: F401  — import is the assertion

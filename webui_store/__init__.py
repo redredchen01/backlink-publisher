@@ -23,26 +23,32 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import JsonStore
+from .base import JsonStore, Store
 from .drafts import DraftsStore
 
 _CONFIG_DIR = Path.home() / ".config" / "backlink-publisher"
 
-history_store: JsonStore = JsonStore(
+# Singleton bindings declared as the ``Store`` protocol (not the concrete
+# ``JsonStore``) so a future SQLite implementation can drop in here
+# without rippling type annotations across the route + service layers.
+# Plan 2026-05-18-001 Unit 8 — see ``base.py`` for the protocol contract
+# and a worked SqliteStore swap example.
+history_store: Store = JsonStore(
     _CONFIG_DIR / "publish-history.json", default_factory=list,
 )
-profiles_store: JsonStore = JsonStore(
+profiles_store: Store = JsonStore(
     _CONFIG_DIR / "campaign-profiles.json", default_factory=list,
 )
 drafts_store: DraftsStore = DraftsStore(
     _CONFIG_DIR / "draft-queue.json",
 )
-schedule_store: JsonStore = JsonStore(
+schedule_store: Store = JsonStore(
     _CONFIG_DIR / "schedule-settings.json", default_factory=dict,
 )
 
 
 __all__ = [
+    "Store",
     "JsonStore",
     "DraftsStore",
     "history_store",
