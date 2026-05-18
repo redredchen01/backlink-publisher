@@ -41,3 +41,121 @@ Safety: both refuse to remove the worktree the script is running in, both honor 
 **Recommended branch protection on `main`:** enable "Require branches to be up to date before merging." Protects against two concurrent PRs each bumping the same file's ceiling and producing a post-merge state that fails R4. The existing `push: branches: [main]` CI lane catches violations post-merge regardless, but pre-merge prevention is cheaper than a revert under pressure.
 
 References: `docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md`, `docs/brainstorms/2026-05-18-monolith-loc-ceiling-requirements.md`.
+
+## Adding a new publisher adapter
+
+Post-R9 (plan `docs/plans/2026-05-18-009-refactor-cli-extension-readiness-plan.md`), a new platform is one `register("x", XAdapter)` call away from reaching both the CLI argparse layer and `schema.validate_publish_payload`. The dispatcher, schema enum, throttle gating, and LinkedIn-style rejection all read from `publishing.registry.registered_platforms()` — you do not edit any CLI file or `schema.py` to add a new platform.
+
+The five-step recipe below builds on `BloggerAPIAdapter` as a concrete reference at every step.
+
+### 1. Subclass `Publisher`
+
+Reference: `src/backlink_publisher/publishing/adapters/blogger_api.py::BloggerAPIAdapter`.
+
+```python
+# src/backlink_publisher/publishing/adapters/yourplatform.py
+from typing import Any
+
+from backlink_publisher.config import Config
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher.publishing.registry import Publisher
+from .base import AdapterResult
+
+
+class YourPlatformAdapter(Publisher):
+    @classmethod
+    def available(cls, config: Config) -> bool:
+        # Return False to skip this adapter in the dispatch chain. Use for
+        # macOS-only adapters, feature flags, license checks. Default True.
+        return True
+
+    def publish(self, payload: dict[str, Any], mode: str, config: Config) -> AdapterResult:
+        ...
+```
+
+### 2. Implement `publish()`
+
+Mirror the structure of `BloggerAPIAdapter.publish()`:
+
+- Read the row fields you need from `payload` (`title`, `content_markdown` / `content_html`, `tags`, `main_domain`).
+- Call `extract_publish_html(payload, "yourplatform")` from `publishing.content_negotiation` to get the platform-appropriate body. The tier table (`ROUTE_TIER_MATRIX`) defaults to `"c"` (fail-closed) for unknown platforms — add an entry only when you have an XSS contract test in place (see step 6).
+- Wrap remote calls in `retry_transient_call` from `.retry` to inherit the 429/5xx backoff.
+- Return an `AdapterResult(status="drafted"|"published", adapter="yourplatform-api", platform="yourplatform", draft_url=..., published_url=...)`. If your platform needs a post-publish throttle (rate-limit avoidance), set `post_publish_delay_seconds=N` on the result — the CLI's verify-poll window and inter-row throttle key off this field instead of a hardcoded platform name (plan 2026-05-18-009 R9c).
+
+Error contract (preserved across the dispatch chain):
+
+- Raise `DependencyError` for missing prerequisites (no token, no browser, no AppleScript host) — the dispatcher will try the next adapter registered for the same platform.
+- Raise `ExternalServiceError` for remote failures (401, 429, 5xx, network) — it propagates immediately, no fallthrough.
+
+### 3. Register
+
+Add one line to `src/backlink_publisher/publishing/adapters/__init__.py`:
+
+```python
+from .yourplatform import YourPlatformAdapter
+
+register("yourplatform", YourPlatformAdapter)
+```
+
+This is the **only** registration point. Post-R9 you do not edit:
+
+- `cli/publish_backlinks.py` argparse `choices=` (reads `registered_platforms()` dynamically).
+- `cli/plan_backlinks.py` `--default-platform` choices.
+- `cli/validate_backlinks.py` unsupported-platform rejection.
+- `schema.py` `supported_platforms()` or `reject_unsupported_platform()`.
+
+If your platform has a fallback chain (like Medium's `MediumAPIAdapter → MediumBraveAdapter → MediumBrowserAdapter`), pass all classes in one call: `register("yourplatform", PrimaryAdapter, FallbackAdapter1, FallbackAdapter2)`. Order matters — `available()=False` skips an entry, `DependencyError` falls through, `ExternalServiceError` propagates.
+
+### 4. Add config (if needed)
+
+Reference: `src/backlink_publisher/config/types.py::BloggerOAuthConfig` (the dataclass) and `Config.blogger_blog_ids` (line 131, the per-blog map).
+
+If your platform needs persistent credentials or per-blog config, follow the Blogger pattern:
+
+- Add a frozen dataclass for the auth bundle (`@dataclass(frozen=True) class YourPlatformOAuthConfig: client_id: str; client_secret: str`).
+- Add a field to `Config` (`yourplatform_oauth: YourPlatformOAuthConfig | None = None`).
+- Add the TOML key to `config.example.toml` and the loader path in `config/loader.py`.
+- Add `load_yourplatform_token` / `save_yourplatform_token` helpers mirroring `load_blogger_token` if you need a separate token cache file.
+
+### 5. Add an optional dependency (if needed)
+
+Reference: `pyproject.toml` `[project.optional-dependencies].dev` block (line 23-25).
+
+If your platform's SDK adds dependencies that not every operator needs, declare them as an extra:
+
+```toml
+[project.optional-dependencies]
+yourplatform = ["yourplatform-sdk>=2.0"]
+```
+
+Document the install incantation in the adapter docstring and in `README.md` under "Prerequisites". Operators run `pip install -e .[yourplatform]` to opt in.
+
+**Escalation path for resolver conflicts:** if your platform's SDK pins a dependency that conflicts with the base `[project.dependencies]` block, do not split the package into `core/` + `packages/` reactively — the registry already isolates the dispatch contract, and the schema layer reads from it. Open an issue with the conflict trace first so we can evaluate either pinning the conflicting dep in `dev` extras or, only if no other path exists, a real package split.
+
+### 6. Add a test
+
+Reference: `tests/test_adapter_blogger_api.py` (unit) and `tests/test_adapter_blogger_api_xss_contract.py` (XSS contract — required if you add a `ROUTE_TIER_MATRIX` entry at tier `"a"` so the adapter forwards `content_html` verbatim).
+
+Minimum coverage for a new adapter:
+
+- One happy-path test that mocks the SDK / HTTP boundary and asserts on the returned `AdapterResult` (status, `adapter`, `platform`, `draft_url`/`published_url`, and `post_publish_delay_seconds` if your platform sets one).
+- One test that raises `DependencyError` from the SDK and asserts the dispatcher would try the next adapter (or returns the error cleanly when no fallback exists).
+- One test that raises `ExternalServiceError` from the SDK and asserts propagation (not fallthrough).
+- If you add a `ROUTE_TIER_MATRIX["yourplatform"] = "a"` entry, you owe an XSS contract test: a malicious `content_html` payload reaches the adapter unchanged (the adapter is a forwarder; sanitize is the remote service's job).
+
+The R9 falsifiable acceptance proof in `tests/test_r9_extension_readiness.py` already exercises the cross-layer wiring (argparse + schema + `supported_platforms` + `reject_unsupported_platform`) for a fixture-scoped `register("fake", FakeAdapter)`. You do not need to repeat that test for your platform — registering is sufficient to inherit the proof.
+
+### PR description checklist
+
+When opening the PR for your new adapter, include:
+
+- [ ] Adapter file under `src/backlink_publisher/publishing/adapters/`
+- [ ] One-line `register(...)` added to `adapters/__init__.py`
+- [ ] Config dataclass / loader / TOML example updated (if your platform needs config)
+- [ ] `pyproject.toml` optional-dependency entry (if your platform's SDK is heavyweight)
+- [ ] At least 3 adapter tests (happy / `DependencyError` / `ExternalServiceError`)
+- [ ] XSS contract test if you added a tier-`"a"` `ROUTE_TIER_MATRIX` entry
+- [ ] `README.md` Prerequisites section updated (if the install instructions changed)
+- [ ] Did **not** edit any CLI file or `schema.py` — confirm via `git diff --stat src/backlink_publisher/cli/ src/backlink_publisher/schema.py` is empty
+
+Related: `docs/plans/2026-05-18-009-refactor-cli-extension-readiness-plan.md` (the R9 plan that made this recipe possible), `src/backlink_publisher/publishing/registry.py` (the `Publisher` ABC and dispatcher).

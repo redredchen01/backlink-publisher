@@ -550,3 +550,9 @@ backlink-publisher/
 └── fixtures/
     └── seed.jsonl
 ```
+
+## For contributors
+
+Adding a new publishing platform (WordPress, Substack, Telegraph, …) is one `register("x", XAdapter)` call away from being reachable through the CLI and schema layers. See [AGENTS.md → Adding a new publisher adapter](AGENTS.md#adding-a-new-publisher-adapter) for the five-step recipe (subclass / implement / register / config / deps / test) that cites `BloggerAPIAdapter` at every step.
+
+For broader project conventions (`docs/solutions/` lesson curation, monolith SLOC budget, worktree auto-cleanup), the rest of [AGENTS.md](AGENTS.md) is the source of truth.
