@@ -1503,7 +1503,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--default-language",
         default="zh-CN",
-        choices=["zh-CN", "en", "ru"],
+        choices=["zh-CN", "en", "ru", "ko"],
         help="Language for --from-csv / --from-sitemap rows (default: zh-CN)",
     )
     parser.add_argument(
