@@ -84,15 +84,36 @@ def _no_real_subprocess():
 
 @pytest.fixture(autouse=True)
 def _no_run_pipe():
-    """Stub webui.run_pipe so /ce:generate/validate/publish/batch/publish-real
-    never invoke real plan-backlinks / validate-backlinks / publish-backlinks."""
-    import webui
+    """Stub run_pipe in every consumer module so route handlers don't shell out.
 
+    After Plan Unit 3 split, ``run_pipe`` lives in ``webui_app.helpers`` and
+    each route blueprint does ``from ..helpers import run_pipe`` — that binds
+    the name into the blueprint module's namespace. Patching only
+    ``webui_app.helpers.run_pipe`` would miss the blueprint-local references.
+    Patch each consumer explicitly.
+
+    The ``_no_real_subprocess`` fixture also stubs ``subprocess.run``
+    underneath, so even if a patch is missed the call still won't hit the
+    network — but the explicit patches give faster, clearer assertions.
+    """
     def _fake(_cmd, _stdin):
         return {"stdout": "", "stderr": ""}
 
-    with patch.object(webui, "run_pipe", side_effect=_fake):
+    targets = [
+        "webui_app.helpers.run_pipe",
+        "webui_app.routes.pipeline.run_pipe",
+        "webui_app.routes.batch.run_pipe",
+        "webui_app.routes.sites.run_pipe",
+        "webui_app.scheduler.run_pipe",
+    ]
+    patches = [patch(t, side_effect=_fake) for t in targets]
+    for p in patches:
+        p.start()
+    try:
         yield
+    finally:
+        for p in patches:
+            p.stop()
 
 
 @pytest.fixture
