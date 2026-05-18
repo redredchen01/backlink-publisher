@@ -37,10 +37,10 @@ from xml.etree import ElementTree as ET
 import requests
 from bs4 import BeautifulSoup
 
-from .adapters.retry import retry_transient_call
-from .errors import ExternalServiceError, InputValidationError
-from .logger import plan_logger
-from .url_utils import (
+from backlink_publisher.publishing.adapters.retry import retry_transient_call
+from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
+from backlink_publisher._util.logger import plan_logger
+from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
     strip_fragment_query,

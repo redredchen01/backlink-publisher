@@ -32,9 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .config import ANCHOR_TYPES, _cache_dir
-from .io_utils import atomic_write_json
-from .logger import plan_logger
+from backlink_publisher.config import ANCHOR_TYPES, _cache_dir
+from backlink_publisher._util.io import atomic_write_json
+from backlink_publisher._util.logger import plan_logger
 
 # Schema version — bump when ProfileEntry shape changes incompatibly.
 _PROFILE_SCHEMA_VERSION = 1

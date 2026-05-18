@@ -47,7 +47,7 @@ from urllib.request import (
 
 from bs4 import BeautifulSoup
 
-from .logger import opencli_logger
+from backlink_publisher._util.logger import opencli_logger
 
 #: Wall-clock budget per single GET attempt. Roughly matches ``linkcheck``'s
 #: REQUEST_TIMEOUT so a row's combined plan-time HTTP doesn't drift wildly.

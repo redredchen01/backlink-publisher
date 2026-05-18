@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..errors import DependencyError, InputValidationError
-from ..logger import plan_logger
-from ..url_utils import validate_https_url, validate_main_domain_url
+from backlink_publisher.errors import DependencyError, InputValidationError
+from backlink_publisher.logger import plan_logger
+from backlink_publisher.url_utils import validate_https_url, validate_main_domain_url
 from .types import (
     ANCHOR_TYPES,
     AnchorAlarmConfig,

@@ -7,10 +7,10 @@ from typing import Any
 
 import requests
 
-from ..config import Config
-from ..errors import DependencyError, ExternalServiceError
-from ..logger import opencli_logger as log
-from ..markdown_utils import render_to_html
+from backlink_publisher.config import Config
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.logger import opencli_logger as log
+from backlink_publisher._util.markdown import render_to_html
 from .base import AdapterResult
 from .link_attr_verifier import verify_link_attributes
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
@@ -49,7 +49,7 @@ class MediumAPIAdapter:
         mode: str,
         config: Config,
     ) -> AdapterResult:
-        from ..config import load_medium_token
+        from backlink_publisher.config import load_medium_token
 
         # 优先使用 OAuth token，其次 Integration Token
         medium_token_data = load_medium_token()

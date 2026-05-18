@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Iterable
 
-from .anchor_profile import ProfileEntry, ProfileState
+from backlink_publisher.anchor.profile import ProfileEntry, ProfileState
 
 if TYPE_CHECKING:
     from .config import AnchorAlarmConfig

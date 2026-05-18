@@ -34,14 +34,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from .anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileState,
     recent_secondary_count_split,
     recent_type_counts,
     recent_url_category_counts,
 )
-from .config import ANCHOR_TYPES
-from .errors import InputValidationError
+from backlink_publisher.config import ANCHOR_TYPES
+from backlink_publisher._util.errors import InputValidationError
 
 # Tie-break order when multiple anchor types share the maximum deficit.
 # Brainstorm v2 R20 + Plan v2 Key Decisions: Branded > Partial > LSI > Exact.

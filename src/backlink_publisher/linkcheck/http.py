@@ -9,8 +9,8 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from .errors import ExternalServiceError
-from .logger import opencli_logger
+from backlink_publisher._util.errors import ExternalServiceError
+from backlink_publisher._util.logger import opencli_logger
 
 REQUEST_TIMEOUT = 10  # seconds
 MAX_CONCURRENT = 10
@@ -59,9 +59,17 @@ def _check_url_once(url: str) -> tuple[bool, str | None]:
 
 def _check_url_with_retry(url: str) -> tuple[str, bool, str | None]:
     """Check a URL with retry logic. Returns (url, reachable, error_message)."""
+    # Indirect lookup via the legacy ``backlink_publisher.linkcheck`` module
+    # so ``patch("backlink_publisher.linkcheck._check_url_once", ...)`` in
+    # tests intercepts. The Unit 6 split moved ``_check_url_once`` from
+    # ``linkcheck.py`` (where the patch worked module-internally) into
+    # ``linkcheck/http.py`` (where a captured reference in
+    # ``linkcheck/__init__.py`` no longer routes through the patched
+    # attribute). Same shim pattern as Unit 5 ``config/writer.py``.
+    from backlink_publisher import linkcheck as _legacy
     last_error = "unknown error"
     for attempt in range(MAX_RETRIES + 1):
-        reachable, error = _check_url_once(url)
+        reachable, error = _legacy._check_url_once(url)
         if reachable:
             return url, True, None
         last_error = error or "unknown error"

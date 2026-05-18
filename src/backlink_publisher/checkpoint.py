@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import _cache_dir
-from .io_utils import atomic_write_json
+from backlink_publisher._util.io import atomic_write_json
 
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _lock = threading.Lock()

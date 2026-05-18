@@ -36,7 +36,7 @@ from typing import Any
 
 import requests
 
-from ..errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from .retry import retry_transient_call
 
 _log = logging.getLogger(__name__)
