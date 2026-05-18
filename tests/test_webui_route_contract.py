@@ -776,6 +776,42 @@ class TestSitesPostRoutes:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Queue + Dashboard routes — /ce:queue-task, /ce:dashboard, /ce:retry-task
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestQueueDashboardRoutes:
+    def test_ce_dashboard_returns_200(self, client):
+        resp = client.get("/ce:dashboard")
+        assert resp.status_code == 200
+
+    def test_ce_queue_task_returns_json(self, client):
+        resp = client.post(
+            "/ce:queue-task",
+            data={"platform": "medium", "urls_json": '["https://example.com/"]'},
+        )
+        assert resp.status_code == 200
+        assert resp.is_json
+        data = resp.get_json()
+        assert data["status"] == "queued"
+        assert "task_id" in data
+
+    def test_ce_retry_task_missing_id_returns_error(self, client):
+        resp = client.post("/ce:retry-task", data={})
+        assert resp.status_code == 200
+        assert resp.is_json
+        data = resp.get_json()
+        assert data["status"] == "error"
+
+    def test_ce_retry_task_unknown_id_returns_success(self, client):
+        resp = client.post("/ce:retry-task", data={"task_id": "nonexistent-id"})
+        assert resp.status_code == 200
+        assert resp.is_json
+        data = resp.get_json()
+        assert data["status"] == "success"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Coverage assertion — make sure we exercised every @app.route declared.
 # This is the file's primary regression net for "did anyone add a route?".
 # ═════════════════════════════════════════════════════════════════════════════
