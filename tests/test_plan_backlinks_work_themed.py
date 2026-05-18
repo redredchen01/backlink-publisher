@@ -85,7 +85,12 @@ def _meta(title: str = "夜空中最亮的星") -> WorkMetadata:
 
 
 class TestWorkThemedRowHappy:
-    def test_yields_one_payload_per_work_url_with_three_anchors(self):
+    def test_yields_one_payload_per_work_url_padded_to_seven_links(self):
+        # Per plan 2026-05-15-003 Unit 3: work-themed payloads are padded
+        # from the generator's bare 3 links to _TARGET_WORK_THEMED_LINK_COUNT
+        # (= 7) with supporting URLs, so schema.py:143's 6-8 gate accepts
+        # them. Kind taxonomy is also normalized (Unit 2): list → category,
+        # work → target.
         cfg = _three_url_cfg(
             work_urls=[
                 "https://site.com/work/1",
@@ -100,13 +105,47 @@ class TestWorkThemedRowHappy:
 
         assert len(payloads) == 2
         for p in payloads:
-            assert len(p["links"]) == 3
-            kinds = {link["kind"] for link in p["links"]}
-            assert kinds == {"main_domain", "list", "work"}
-            # All three anchors render in the body
+            assert len(p["links"]) == 7
+            kinds = [link["kind"] for link in p["links"]]
+            # First three: path-specific (main_domain / category / target),
+            # remap order matches work_themed_generator output order.
+            assert kinds[:3] == ["main_domain", "category", "target"]
+            # Remaining four: supporting padding from _SUPPORTING_POOL.
+            assert kinds[3:] == ["supporting"] * 4
+            # Schema invariant: every emitted kind is in LINK_KINDS.
+            from backlink_publisher.schema import LINK_KINDS, validate_output_payload
+            assert all(k in LINK_KINDS for k in kinds)
+            # Schema invariant: every link MUST carry `required` (validator
+            # demands it). main_domain + target are row-required; category
+            # + supporting are not.
+            for link in p["links"]:
+                assert "required" in link, f"link missing 'required': {link}"
+            assert [link["required"] for link in p["links"]] == [
+                True,   # main_domain
+                False,  # category (from list_url — auxiliary)
+                True,   # target (from work_url)
+                False,  # supporting × 4
+                False,
+                False,
+                False,
+            ]
+            # The 3 work-themed anchors still render in the body via
+            # work_themed_generator's HTML <a> tags.
             assert p["content_markdown"].count("<a ") == 3
             assert 'rel="noopener"' in p["content_markdown"]
             assert "nofollow" not in p["content_markdown"]
+            # The 4 supporting URLs appear as markdown anchors in the
+            # appended "延伸阅读" / "Further reading" paragraph (R3 — body
+            # must contain every URL so verify_publish's link-presence
+            # check passes downstream).
+            for sup_link in p["links"][3:]:
+                assert f"({sup_link['url']})" in p["content_markdown"]
+            # End-to-end schema gate: the whole payload now passes
+            # `validate_output_payload` — the exact validator that emits
+            # the "row 1: links[0]: missing field 'required'" errors at
+            # publish-backlinks time.
+            errors = validate_output_payload(p)
+            assert errors == [], f"validator rejected payload: {errors}"
 
     def test_count_truncates_provided_work_urls(self):
         cfg = _three_url_cfg(
@@ -377,3 +416,88 @@ def _drive_dispatcher(rows: list[dict], cfg: Config) -> list[dict]:
         ):
             out.append(payload)
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Plan 2026-05-15-003 Unit 4 — RECON instrumentation at _dispatch_row
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestDispatchReconInstrumentation:
+    """``_dispatch_row`` emits one ``link_count_at_plan`` RECON event per
+    yielded payload, tagging the dispatch branch + the link count + the
+    sorted kinds. Bypasses ``--log-level`` so cron operators see it.
+    """
+
+    def test_work_themed_branch_emits_one_recon_per_yielded_payload(self):
+        cfg = _three_url_cfg(
+            work_urls=[
+                "https://site.com/work/1",
+                "https://site.com/work/2",
+            ]
+        )
+        # Minimal config wrapper for the dispatcher (no llm, no scheduler).
+        # Key is the un-trailing-slash form per existing helper precedent.
+        config = Config()
+        config.target_three_url["https://site.com"] = cfg
+
+        captured: list[dict] = []
+        original_recon = plan_backlinks.plan_logger.recon
+
+        def _capture(msg, **fields):
+            if msg == "link_count_at_plan":
+                captured.append({"msg": msg, **fields})
+            return original_recon(msg, **fields)
+
+        with patch.object(
+            plan_backlinks.work_scraper, "fetch_work_metadata",
+            side_effect=lambda url, **_kw: _meta(title=f"作品-{url[-1]}"),
+        ):
+            with patch.object(
+                plan_backlinks.plan_logger, "recon", side_effect=_capture,
+            ):
+                payloads = _drive_dispatcher([_row()], config)
+
+        assert len(payloads) == 2
+        # One recon per yielded payload, all branch=work_themed
+        assert len(captured) == 2
+        for event, payload in zip(captured, payloads):
+            assert event["branch"] == "work_themed"
+            assert event["count"] == len(payload["links"]) == 7
+            assert event["main_domain"] == payload["main_domain"]
+            assert event["article_id"] == payload["id"]
+            # kinds is the sorted unique set
+            assert event["kinds"] == sorted(
+                {lk["kind"] for lk in payload["links"]}
+            )
+
+    def test_long_form_branch_emits_one_recon(self):
+        # A row with NO three-URL config and NOT zh-CN-scheduler-enabled
+        # → falls through to long-form (_generate_payload).
+        config = Config()  # bare config — no target_three_urls, no scheduler
+        captured: list[dict] = []
+        original_recon = plan_backlinks.plan_logger.recon
+
+        def _capture(msg, **fields):
+            if msg == "link_count_at_plan":
+                captured.append({"msg": msg, **fields})
+            return original_recon(msg, **fields)
+
+        en_row = {
+            "target_url": "https://example.com/post",
+            "main_domain": "https://example.com",
+            "language": "en",
+            "platform": "blogger",
+            "url_mode": "A",
+            "publish_mode": "draft",
+        }
+        with patch.object(
+            plan_backlinks.plan_logger, "recon", side_effect=_capture,
+        ):
+            payloads = _drive_dispatcher([en_row], config)
+
+        assert len(payloads) == 1
+        assert len(captured) == 1
+        assert captured[0]["branch"] == "long_form"
+        assert captured[0]["count"] == len(payloads[0]["links"])
+        assert 6 <= captured[0]["count"] <= 8  # schema gate
