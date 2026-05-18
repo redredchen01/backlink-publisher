@@ -131,7 +131,7 @@ flowchart TB
 
 ---
 
-- [~] **Unit 1: PR #37 (Unit 3) 合入 main** _(prep done 2026-05-18: 29 tests 本地全绿,CI Python 3.11/3.12 SUCCESS,mergeable CLEAN;等运营/工程方触发 merge)_
+- [x] **Unit 1: PR #37 (Unit 3) 合入 main** _(done 2026-05-18: squash merged `d769bff`,main HEAD 含 `telegraph_node.py` + 29 tests + fixtures。远程 feat 分支已删。4 个 worktree base `49030ec` 仍可工作,后续 rebase main 时 patch-id 等价自动 skip)_
 
 **Goal:** 把 telegraph_node 转换器合入 main，成为 etalon 实现，让 Unit 4 本地预演分支可直接 import。
 
