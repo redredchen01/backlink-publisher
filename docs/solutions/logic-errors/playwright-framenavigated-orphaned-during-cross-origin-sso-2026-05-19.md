@@ -33,7 +33,7 @@ Two consecutive Spike 7 runs on 2026-05-19 against medium.com Google SSO produce
 1. Spike opens headed Chromium, attaches `page.on("framenavigated", lambda f: nav_events.append(f.url))`, calls `page.goto("https://medium.com/m/signin")`.
 2. Operator clicks "Sign in with Google", walks through 2FA, lands successfully on Medium.
 3. `page.url` continues to return `/m/signin` indefinitely. `nav_events` does not grow past the initial signin-page load.
-4. Cookie dump from the same profile after killing the script shows `sid`, `rid`, `cf_clearance`, `xsrf` all present with far-future expiries — login fully succeeded. Restart `goto('/me')` against the same profile lands on `/@redredchen01`.
+4. Cookie dump from the same profile after killing the script shows `sid`, `rid`, `cf_clearance`, `xsrf` all present with far-future expiries — login fully succeeded. Restart `goto('/me')` against the same profile lands on `/@username`.
 
 The script's `page` reference was orphaned during the cross-origin handoff. The new page (or popup or replaced tab) that received the post-SSO Medium landing was not the one the listener was attached to.
 

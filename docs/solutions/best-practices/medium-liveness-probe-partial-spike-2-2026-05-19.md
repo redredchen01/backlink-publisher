@@ -22,17 +22,17 @@ tags:
 
 ## Observation
 
-On 2026-05-19, Spike 2 ran 6 out of a planned 10 headless `goto("https://medium.com/me")` probes against the operator's logged-in `@redredchen01` profile (5-minute interval between probes, `~/.cache/medium-spike`). The script was terminated at the 30-minute mark before completing iterations 7-10.
+On 2026-05-19, Spike 2 ran 6 out of a planned 10 headless `goto("https://medium.com/me")` probes against a logged-in test account's Medium profile (5-minute interval between probes, `~/.cache/medium-spike`). The script was terminated at the 30-minute mark before completing iterations 7-10.
 
 All 6 completed probes:
 
 ```
-[ 1/10] OK -> https://medium.com/@redredchen01
-[ 2/10] OK -> https://medium.com/@redredchen01
-[ 3/10] OK -> https://medium.com/@redredchen01
-[ 4/10] OK -> https://medium.com/@redredchen01
-[ 5/10] OK -> https://medium.com/@redredchen01
-[ 6/10] OK -> https://medium.com/@redredchen01
+[ 1/10] OK -> https://medium.com/@username
+[ 2/10] OK -> https://medium.com/@username
+[ 3/10] OK -> https://medium.com/@username
+[ 4/10] OK -> https://medium.com/@username
+[ 5/10] OK -> https://medium.com/@username
+[ 6/10] OK -> https://medium.com/@username
 ```
 
 Zero Cloudflare challenges (`challenges.cloudflare.com`, `__cf_chl_`), zero Datadome interrupts, zero `/m/signin` redirects. The probe consistently landed on the operator's profile page.
