@@ -739,7 +739,10 @@ class TestCliHappyPaths:
                 "  paths:\n"
                 "    - src/foo.py\n"
                 "  shas:\n"
-                f"    - {main_sha[:7]}\n"
+                # YAML-quote the SHA: an all-digit 7-char short hash (~5% of
+                # random SHAs) parses as int otherwise. Schema correctly
+                # rejects ints; the fixture must declare strings.
+                f"    - '{main_sha[:7]}'\n"
             ),
         )
         result = pc.main([str(plan)])
@@ -946,7 +949,7 @@ class TestCliDrift:
                 "claims:\n"
                 "  paths: []\n"
                 "  shas:\n"
-                f"    - {feat_sha}\n"  # exists in DB but not on main
+                f"    - '{feat_sha}'\n"  # exists in DB but not on main; quoted to keep PyYAML from int-coercing an all-digit hash
             ),
         )
         with pytest.raises(SystemExit) as exc:
