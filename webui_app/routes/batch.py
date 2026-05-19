@@ -5,18 +5,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import uuid
 from datetime import datetime
 
 from flask import Blueprint, request, session
 
 from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
 
-from webui_store import history_store as _history_store
-
 from ..helpers import (
     _REPO_ROOT,
     _parse_publish_results,
+    _push_history_per_row,
+    _push_history_single_failure,
     _render,
     _rewrite_cli_cmd,
     get_main_domain,
@@ -126,18 +125,18 @@ def ce_batch():
                 'title': '', 'error': err_hint,
             })
 
-    success_results = [r for r in results if r['status'] == 'success']
-    if success_results:
-        article_urls = [r['article_url'] for r in success_results if r['article_url']]
-        _history_store.update(lambda hist: [{
-            'id': str(uuid.uuid4())[:8],
-            'target_url': urls[0] if urls else 'batch',
-            'platform': platform,
-            'language': language,
-            'status': 'drafted' if publish_mode == 'draft' else 'published',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': article_urls,
-        }, *hist][:100])
+    # Plan 2026-05-19-006 Unit 1: per-row history with real status carried
+    # forward (including `*_unverified` suffixes). The CLI stdout already
+    # only contains rows whose adapter did not raise — `_unverified` rows
+    # are written with error=None, which is precisely the assumption we
+    # used to drop. Now we keep them as their real status.
+    if publish_results:
+        _push_history_per_row(
+            publish_results,
+            target_url_fallback=urls[0] if urls else 'batch',
+            platform_fallback=platform,
+            language_fallback=language,
+        )
 
     return _render('index.html', batch_results=results, batch_tab=True,
                    batch_urls=urls_text, config={})
@@ -169,33 +168,27 @@ def ce_publish_real():
                 config=config, history_active=True)
 
         publish_results = _parse_publish_results(published)
-        article_urls = [r.get('published_url') or r.get('draft_url', '')
-                        for r in publish_results if r]
-        history = _history_store.update(lambda hist: [{
-            'id': str(uuid.uuid4())[:8],
-            'target_url': config.get('target_url', 'unknown'),
-            'platform': platform,
-            'language': config.get('target_language', 'zh-CN'),
-            'status': 'success',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': [u for u in article_urls if u],
-        }, *hist][:100])
+        # Plan 2026-05-19-006 Unit 1: per-row truth-propagation. Previously
+        # one history row hard-coded status='success' regardless of per-row
+        # outcome (notably `*_unverified` rows showed as ✓ on UI).
+        history = _push_history_per_row(
+            publish_results,
+            target_url_fallback=config.get('target_url', 'unknown'),
+            platform_fallback=platform,
+            language_fallback=config.get('target_language', 'zh-CN'),
+        )
 
         return _render('index.html', published=published,
             publish_results=publish_results, config=config,
             history=history, history_active=True)
 
-    except Exception as exc:
-        history = _history_store.update(lambda hist: [{
-            'id': str(uuid.uuid4())[:8],
-            'target_url': config.get('target_url', 'unknown'),
-            'platform': platform,
-            'language': config.get('target_language', 'zh-CN'),
-            'status': 'failed',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': [],
-            'error': str(exc),
-        }, *hist][:100])
+    except Exception as e:
+        history = _push_history_single_failure(
+            target_url=config.get('target_url', 'unknown'),
+            platform=platform,
+            language=config.get('target_language', 'zh-CN'),
+            error=str(e),
+        )
 
-        return _render('index.html', error=f"发布失败: {str(exc)}",
+        return _render('index.html', error=f"发布失败: {str(e)}",
             config=config, history=history, history_active=True)

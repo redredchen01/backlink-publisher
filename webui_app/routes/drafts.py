@@ -108,3 +108,75 @@ def ce_draft_delete():
         pass
     _drafts_store.delete_item(item_id)
     return redirect('/?tab=draft&flash_type=success&flash_msg=已删除')
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Bulk operations — Plan 2026-05-19-006 Unit 3
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def _remove_job_silent(job_id: str) -> None:
+    try:
+        from ..scheduler import _scheduler
+        _scheduler.remove_job(job_id)
+    except Exception:
+        pass
+
+
+@bp.route('/ce:draft/bulk-delete', methods=['POST'])
+def ce_draft_bulk_delete():
+    """Delete multiple drafts by id. Form: ids=<id1>&ids=<id2>..."""
+    ids = request.form.getlist('ids')
+    if not ids:
+        return redirect('/?tab=draft&flash_type=warning&flash_msg=未选择任何项')
+    for item_id in ids:
+        _remove_job_silent(item_id)
+    removed = _drafts_store.bulk_delete(ids)
+    return redirect(
+        f'/?tab=draft&flash_type=success&flash_msg=已删除 {removed} 项'
+    )
+
+
+@bp.route('/ce:draft/bulk-publish-now', methods=['POST'])
+def ce_draft_bulk_publish_now():
+    """Schedule multiple drafts for near-immediate publish, staggered by 5s."""
+    ids = request.form.getlist('ids')
+    if not ids:
+        return redirect('/?tab=draft&flash_type=warning&flash_msg=未选择任何项')
+    from ..scheduler import _publish_draft_job, _scheduler
+    base = datetime.now()
+    scheduled = 0
+    for i, item_id in enumerate(ids):
+        if not _drafts_store.get_item(item_id):
+            continue
+        run_date = base + timedelta(seconds=5 + i * 5)
+        _drafts_store.update_item(
+            item_id, status='scheduled', scheduled_at=run_date.isoformat()
+        )
+        _scheduler.add_job(
+            _publish_draft_job, trigger='date', run_date=run_date,
+            id=item_id, args=[item_id], replace_existing=True,
+        )
+        scheduled += 1
+    return redirect(
+        f'/?tab=draft&flash_type=info&flash_msg=正在批量发布 {scheduled} 项，请稍候刷新页面'
+    )
+
+
+@bp.route('/ce:draft/bulk-cancel', methods=['POST'])
+def ce_draft_bulk_cancel():
+    """Cancel scheduling for multiple drafts (revert to pending)."""
+    ids = request.form.getlist('ids')
+    if not ids:
+        return redirect('/?tab=draft&flash_type=warning&flash_msg=未选择任何项')
+    cancelled = 0
+    for item_id in ids:
+        item = _drafts_store.get_item(item_id)
+        if not item or item.get('status') != 'scheduled':
+            continue
+        _remove_job_silent(item_id)
+        _drafts_store.update_item(item_id, status='pending', scheduled_at=None)
+        cancelled += 1
+    return redirect(
+        f'/?tab=draft&flash_type=success&flash_msg=已取消 {cancelled} 项排程'
+    )

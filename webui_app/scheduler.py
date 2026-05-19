@@ -1,4 +1,3 @@
-import uuid
 import json
 from datetime import datetime, timedelta
 
@@ -8,10 +7,14 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from backlink_publisher.logger import plan_logger
 
 from webui_store import drafts_store as _drafts_store
-from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
-from .helpers import _parse_publish_results, run_pipe
+from .helpers import (
+    _parse_publish_results,
+    _push_history_per_row,
+    _push_history_single_failure,
+    run_pipe,
+)
 
 
 _scheduler = BackgroundScheduler(
@@ -105,19 +108,44 @@ def _publish_draft_job(item_id: str) -> None:
             raise RuntimeError(result.get('stderr') or '发布失败，无输出')
 
         publish_results = _parse_publish_results(published)
-        article_urls = [r.get('published_url') or r.get('draft_url', '')
-                        for r in publish_results if r]
-        article_urls = [u for u in article_urls if u]
+        article_urls = [
+            u for r in publish_results
+            for u in ((r.get('published_url'), r.get('draft_url')))
+            if u
+        ]
 
+        # Reflect aggregate outcome on the draft row itself. If any row is
+        # `*_unverified`, the draft is marked `published_unverified` so the
+        # UI badge tells the truth even before recheck runs.
+        draft_status = 'published'
+        any_unverified = any(
+            (r.get('status') or '').endswith('_unverified') for r in publish_results
+        )
+        if any_unverified:
+            draft_status = 'published_unverified'
         _drafts_store.update_item(
-            item_id, status='published',
+            item_id, status=draft_status,
             article_urls=article_urls,
             published_at=datetime.now().strftime('%Y-%m-%d %H:%M'),
         )
-        _push_history('drafted' if publish_mode == 'draft' else 'published', article_urls)
+
+        # Plan 2026-05-19-006 Unit 1: per-row truth-propagation. The old
+        # implementation hard-wrote `'drafted'` / `'published'` regardless
+        # of per-row `status`, hiding `*_unverified` rows as solid ✓.
+        _push_history_per_row(
+            publish_results,
+            target_url_fallback=item.get('target_url', 'unknown'),
+            platform_fallback=platform,
+            language_fallback=item.get('language', 'zh-CN'),
+        )
     except Exception as exc:
         _drafts_store.update_item(item_id, status='failed', error=str(exc))
-        _push_history('failed', error=str(exc))
+        _push_history_single_failure(
+            target_url=item.get('target_url', 'unknown'),
+            platform=platform,
+            language=item.get('language', 'zh-CN'),
+            error=str(exc),
+        )
 
 
 def _schedule_draft_job(item_id: str, run_date: datetime) -> None:

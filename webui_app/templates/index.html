@@ -463,6 +463,47 @@
             color: var(--secondary);
         }
 
+        /* Plan 2026-05-19-006 — bulk operations UI */
+        .bulk-action-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            margin: 0 0 14px 0;
+            background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+            border: 1px solid #c7d2fe;
+            border-radius: 10px;
+            flex-wrap: wrap;
+            font-size: 13px;
+        }
+        .bulk-action-bar .bulk-action-label {
+            color: var(--secondary);
+            font-weight: 500;
+            margin-right: 4px;
+        }
+        .bulk-action-bar .form-check-input {
+            margin-top: 0;
+        }
+        .bulk-action-bar .btn {
+            font-size: 12px;
+        }
+        .bulk-action-bar .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .history-item .bulk-select {
+            margin-right: 10px;
+            transform: translateY(2px);
+        }
+        .history-item.unverified {
+            border-left-color: var(--warning);
+            background: #fffbeb;
+        }
+        .status-badge.unverified {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
         .editor-container {
             background: white;
             border-radius: 12px;
@@ -1138,12 +1179,43 @@
                         {% set sched_settings = draft_queue | selectattr('status','equalto','scheduled') | list %}
                         <small class="text-muted">{{ draft_queue | length }} 项 · {{ sched_settings | length }} 已排程</small>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body" id="draftCardBody">
                         {% if draft_queue %}
+                        <!-- Plan 2026-05-19-006 Unit 6: bulk-action bar -->
+                        <form id="draftBulkForm" method="POST" style="margin:0;">
+                        <div class="bulk-action-bar">
+                            <span class="form-check" style="margin:0;">
+                                <input class="form-check-input" type="checkbox" id="draftSelectAll">
+                                <label class="form-check-label" for="draftSelectAll" style="font-size:12px;">
+                                    全选 <span id="draftSelectedCount" class="text-muted">(0/{{ draft_queue|length }})</span>
+                                </label>
+                            </span>
+                            <span class="bulk-action-label">|</span>
+                            <button type="submit" formaction="/ce:draft/bulk-publish-now"
+                                    class="btn btn-sm btn-success draft-bulk-btn" disabled
+                                    onclick="return confirm('批量立即发布所选草稿？')">
+                                <i class="bi bi-send me-1"></i>批量发布
+                            </button>
+                            <button type="submit" formaction="/ce:draft/bulk-cancel"
+                                    class="btn btn-sm btn-outline-warning draft-bulk-btn" disabled>
+                                <i class="bi bi-x-circle me-1"></i>批量取消排程
+                            </button>
+                            <button type="submit" formaction="/ce:draft/bulk-delete"
+                                    class="btn btn-sm btn-outline-danger draft-bulk-btn" disabled
+                                    onclick="return confirm('批量删除所选草稿？')">
+                                <i class="bi bi-trash me-1"></i>批量删除
+                            </button>
+                        </div>
                         {% for item in draft_queue %}
                         {% set s = item.status %}
-                        <div class="history-item {% if s == 'published' %}success{% elif s == 'failed' %}failed{% elif s == 'scheduled' %}pending{% else %}{% endif %}" style="{% if s == 'scheduled' %}border-left-color:var(--info);{% endif %}">
+                        <div class="history-item {% if s == 'published' %}success{% elif s == 'failed' %}failed{% elif s == 'scheduled' %}pending{% else %}{% endif %}"
+                             data-id="{{ item.id }}"
+                             data-status="{{ s }}"
+                             style="{% if s == 'scheduled' %}border-left-color:var(--info);{% endif %}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                <input class="form-check-input bulk-select draft-bulk-select"
+                                       type="checkbox" name="ids" value="{{ item.id }}"
+                                       form="draftBulkForm" style="margin-top:6px;">
                                 <div style="flex:1;min-width:0;">
                                     <strong style="word-break:break-all;font-size:14px;">{{ item.target_url }}</strong>
                                     <br><small style="color:var(--secondary);">
@@ -1226,6 +1298,7 @@
                             </div>
                         </div>
                         {% endfor %}
+                        </form>
                         {% else %}
                         <div style="text-align:center;padding:30px;color:var(--secondary);">
                             <i class="bi bi-calendar-plus" style="font-size:36px;"></i>
@@ -1247,6 +1320,7 @@
                             <button type="button" class="filter-chip active" data-filter-group="status" data-filter-value="all">全部 <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="drafted">草稿 <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="published">已发布 <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="unverified">未核实 <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="failed">失败 <span class="chip-count">0</span></button>
                         </div>
                         <div class="filter-bar" data-filter-group-row="platform" style="margin-bottom:14px;">
@@ -1258,23 +1332,63 @@
                             {% endfor %}
                             <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="other">其他 <span class="chip-count">0</span></button>
                         </div>
+                        <!-- Plan 2026-05-19-006 Unit 6: bulk-action bar for history -->
+                        <form id="historyBulkForm" method="POST" style="margin:0;">
+                        <div class="bulk-action-bar">
+                            <span class="form-check" style="margin:0;">
+                                <input class="form-check-input" type="checkbox" id="historySelectAll">
+                                <label class="form-check-label" for="historySelectAll" style="font-size:12px;">
+                                    全选可见 <span id="historySelectedCount" class="text-muted">(0/{{ history|length }})</span>
+                                </label>
+                            </span>
+                            <span class="bulk-action-label">|</span>
+                            <button type="submit" formaction="/ce:history/bulk-recheck"
+                                    class="btn btn-sm btn-outline-primary history-bulk-btn" disabled
+                                    onclick="return confirm('对所选记录执行重新核实（GET 外站校验 title+anchor）？耗时约 10s/条')">
+                                <i class="bi bi-shield-check me-1"></i>批量重新核实
+                            </button>
+                            <button type="submit" formaction="/ce:history/bulk-delete"
+                                    class="btn btn-sm btn-outline-danger history-bulk-btn" disabled
+                                    onclick="return confirm('批量删除所选历史？')">
+                                <i class="bi bi-trash me-1"></i>批量删除
+                            </button>
+                            <span class="bulk-action-label" style="margin-left:auto;">|</span>
+                            {% set _failed_count = history | selectattr('status','equalto','failed') | list | length %}
+                            <!-- "一键清失败" 不依赖勾选；用 form= 关联到下方独立的 historyPurgeForm，
+                                 避免在 historyBulkForm 内嵌套 <form>（HTML 非法）。 -->
+                            <button type="submit" form="historyPurgeForm" class="btn btn-sm btn-warning"
+                                    {% if _failed_count == 0 %}disabled{% endif %}>
+                                <i class="bi bi-funnel me-1"></i>⚡ 一键清失败 ({{ _failed_count }})
+                            </button>
+                        </div>
                         {% for item in history %}
                         {% set s = item.status %}
-                        {% set norm_status = 'published' if s in ('success', 'published') else (s if s in ('drafted', 'failed') else 'other') %}
+                        {% set norm_status =
+                            'unverified' if s in ('published_unverified', 'drafted_unverified')
+                            else ('published' if s in ('success', 'published')
+                                  else (s if s in ('drafted', 'failed') else 'other')) %}
                         {% set _platform_slugs = platforms | map(attribute='slug') | list %}
                         {% set norm_platform = item.platform if item.platform in _platform_slugs else 'other' %}
-                        <div class="history-item {% if s in ('success','published') %}success{% elif s == 'failed' %}failed{% else %}pending{% endif %}"
+                        <div class="history-item {% if s in ('success','published') %}success{% elif s in ('published_unverified','drafted_unverified') %}unverified{% elif s == 'failed' %}failed{% else %}pending{% endif %}"
+                             data-id="{{ item.id }}"
                              data-status="{{ norm_status }}" data-platform="{{ norm_platform }}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                <input class="form-check-input bulk-select history-bulk-select"
+                                       type="checkbox" name="ids" value="{{ item.id }}"
+                                       form="historyBulkForm" style="margin-top:6px;"
+                                       {% if not item.article_urls %}data-no-urls="1"{% endif %}>
                                 <div style="flex:1;min-width:0;">
                                     <strong style="word-break:break-all;font-size:14px;">{{ item.target_url }}</strong>
                                     <br><small style="color:var(--secondary);">{{ item.created_at }}
                                     {% if item.platform %} · <i class="bi bi-broadcast"></i> {{ item.platform }}{% endif %}
                                     {% if item.language %} · {{ item.language }}{% endif %}
+                                    {% if item.verified_at %} · <i class="bi bi-shield-check text-success"></i> {{ item.verified_at[:16] | replace('T',' ') }}{% endif %}
                                     </small>
                                 </div>
-                                <span class="status-badge {% if s in ('success','published') %}success{% elif s == 'drafted' %}pending{% elif s == 'failed' %}error{% else %}pending{% endif %}" style="flex-shrink:0;">
+                                <span class="status-badge {% if s in ('success','published') %}success{% elif s in ('published_unverified','drafted_unverified') %}unverified{% elif s == 'drafted' %}pending{% elif s == 'failed' %}error{% else %}pending{% endif %}" style="flex-shrink:0;">
                                     {% if s in ('success','published') %}<i class="bi bi-check-circle"></i> 已发布
+                                    {% elif s == 'published_unverified' %}<i class="bi bi-exclamation-triangle"></i> 已发布·未核实
+                                    {% elif s == 'drafted_unverified' %}<i class="bi bi-exclamation-triangle"></i> 草稿·未核实
                                     {% elif s == 'drafted' %}<i class="bi bi-clock"></i> 草稿
                                     {% elif s == 'failed' %}<i class="bi bi-x-circle"></i> 失败
                                     {% else %}<i class="bi bi-clock"></i> {{ s }}{% endif %}
@@ -1295,11 +1409,23 @@
                                 <i class="bi bi-exclamation-triangle me-1"></i>{{ item.error[:200] }}
                             </div>
                             {% endif %}
+                            {% if item.verify_error %}
+                            <div style="margin-top:6px;font-size:12px;color:#92400e;background:#fef3c7;padding:6px 10px;border-radius:6px;">
+                                <i class="bi bi-shield-exclamation me-1"></i>核实失败：{{ item.verify_error[:200] }}
+                            </div>
+                            {% endif %}
                             <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                                 <form method="POST" action="/ce:history/reuse" style="margin:0;">
                                     <input type="hidden" name="target_url" value="{{ item.target_url }}">
                                     <button type="submit" class="btn btn-sm btn-outline-primary">
                                         <i class="bi bi-arrow-repeat me-1"></i>重新外链
+                                    </button>
+                                </form>
+                                <form method="POST" action="/ce:history/recheck" style="margin:0;">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning"
+                                            {% if not item.article_urls %}disabled title="此记录无文章 URL，无法核实"{% endif %}>
+                                        <i class="bi bi-shield-check me-1"></i>重新核实
                                     </button>
                                 </form>
                                 <form method="POST" action="/ce:history/update-status" style="margin:0;display:flex;gap:4px;">
@@ -1319,6 +1445,12 @@
                             </div>
                         </div>
                         {% endfor %}
+                        </form>
+                        <!-- Out-of-band form for the purge-failed button (cannot nest in historyBulkForm) -->
+                        <form id="historyPurgeForm" method="POST" action="/ce:history/purge-failed"
+                              style="display:none;"
+                              onsubmit="return confirm('一键清除所有 status=failed 记录？\n（不影响“未核实”，那些需要批量重新核实判定）');">
+                        </form>
                         <div id="historyEmptyFiltered" style="display:none;">
                             <i class="bi bi-funnel" style="font-size:48px;"></i>
                             <p style="margin-top:10px;">当前筛选无匹配记录</p>
@@ -1669,6 +1801,12 @@
                 if (counts.status[st] !== undefined) counts.status[st]++;
                 if (counts.platform[pf] !== undefined) counts.platform[pf]++;
             });
+            // Plan 2026-05-19-006: 'unverified' chip count (not in initial set)
+            var unverifiedCount = 0;
+            items.forEach(function(item) {
+                if (item.dataset.status === 'unverified') unverifiedCount++;
+            });
+            counts.status.unverified = unverifiedCount;
             chips.forEach(function(chip) {
                 var group = chip.dataset.filterGroup;
                 var value = chip.dataset.filterValue;
@@ -1690,11 +1828,93 @@
                 });
                 chip.classList.add('active');
                 applyFilter();
+                if (typeof window.__rewireBulkSelect === 'function') window.__rewireBulkSelect();
             });
         });
 
         initCounts();
         applyFilter();
+    })();
+
+    // ── Plan 2026-05-19-006 Unit 6: bulk-select select-all / button enable ──
+    (function initBulkSelect() {
+        function wireSection(rootId, selectAllId, checkboxClass, countLabelId, btnClass) {
+            var root = document.getElementById(rootId);
+            if (!root) return null;
+            var selectAll = document.getElementById(selectAllId);
+            var countLabel = document.getElementById(countLabelId);
+            if (!selectAll) return null;
+            var buttons = document.querySelectorAll('.' + btnClass);
+
+            function visibleCheckboxes() {
+                return Array.prototype.filter.call(
+                    root.querySelectorAll('.' + checkboxClass),
+                    function(cb) {
+                        // Excluded if the host history-item is hidden by chip filter
+                        var host = cb.closest('.history-item');
+                        return host && host.style.display !== 'none';
+                    }
+                );
+            }
+            function refresh() {
+                var visible = visibleCheckboxes();
+                var checked = visible.filter(function(cb) { return cb.checked; });
+                if (countLabel) {
+                    countLabel.textContent = '(' + checked.length + '/' + visible.length + ')';
+                }
+                buttons.forEach(function(btn) {
+                    btn.disabled = checked.length === 0;
+                });
+                if (visible.length === 0) {
+                    selectAll.indeterminate = false;
+                    selectAll.checked = false;
+                } else if (checked.length === visible.length) {
+                    selectAll.indeterminate = false;
+                    selectAll.checked = true;
+                } else if (checked.length === 0) {
+                    selectAll.indeterminate = false;
+                    selectAll.checked = false;
+                } else {
+                    selectAll.indeterminate = true;
+                }
+            }
+            selectAll.addEventListener('change', function() {
+                var target = selectAll.checked;
+                visibleCheckboxes().forEach(function(cb) { cb.checked = target; });
+                refresh();
+            });
+            document.addEventListener('change', function(e) {
+                if (e.target.classList && e.target.classList.contains(checkboxClass)) refresh();
+            });
+            return refresh;
+        }
+        var refreshDraft = wireSection(
+            'draftCardBody', 'draftSelectAll', 'draft-bulk-select',
+            'draftSelectedCount', 'draft-bulk-btn'
+        );
+        var refreshHistory = wireSection(
+            'historyCardBody', 'historySelectAll', 'history-bulk-select',
+            'historySelectedCount', 'history-bulk-btn'
+        );
+        // Re-evaluate after chip filter toggles visibility — checkboxes on
+        // now-hidden items must be unchecked so the bulk POST doesn't grab them.
+        window.__rewireBulkSelect = function() {
+            if (refreshHistory) {
+                var root = document.getElementById('historyCardBody');
+                if (root) {
+                    root.querySelectorAll('.history-bulk-select').forEach(function(cb) {
+                        var host = cb.closest('.history-item');
+                        if (host && host.style.display === 'none' && cb.checked) {
+                            cb.checked = false;
+                        }
+                    });
+                }
+                refreshHistory();
+            }
+            if (refreshDraft) refreshDraft();
+        };
+        if (refreshDraft) refreshDraft();
+        if (refreshHistory) refreshHistory();
     })();
     </script>
 
