@@ -1314,7 +1314,10 @@
                         <i class="bi bi-clock-history me-2"></i>发布历史
                     </div>
                     <div class="card-body" id="historyCardBody">
-                        {% if history %}
+                        {# Filter bars render unconditionally so the registered-platforms
+                           contract (test_webui_platforms_context.py) holds even on a
+                           fresh install with empty history. Chip counts start at 0 and
+                           are populated by JS once rows exist. #}
                         <div class="filter-bar" data-filter-group-row="status">
                             <span class="filter-bar-label">状态</span>
                             <button type="button" class="filter-chip active" data-filter-group="status" data-filter-value="all">全部 <span class="chip-count">0</span></button>
@@ -1332,6 +1335,7 @@
                             {% endfor %}
                             <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="other">其他 <span class="chip-count">0</span></button>
                         </div>
+                        {% if history %}
                         <!-- Plan 2026-05-19-006 Unit 6: bulk-action bar for history -->
                         <form id="historyBulkForm" method="POST" style="margin:0;">
                         <div class="bulk-action-bar">
