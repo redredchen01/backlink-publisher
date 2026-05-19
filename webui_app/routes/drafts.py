@@ -10,6 +10,7 @@ from flask import Blueprint, redirect, request, session
 from webui_store import drafts_store as _drafts_store
 
 from ..helpers import _calc_next_available
+from ..scheduler import _schedule_draft_job, _scheduler
 
 bp = Blueprint("drafts", __name__)
 
@@ -60,11 +61,7 @@ def ce_draft_schedule():
     _drafts_store.update_item(item_id, status='scheduled',
                               scheduled_at=final_dt.isoformat())
 
-    from ..scheduler import _publish_draft_job, _scheduler
-    _scheduler.add_job(
-        _publish_draft_job, trigger='date', run_date=final_dt,
-        id=item_id, args=[item_id], replace_existing=True,
-    )
+    _schedule_draft_job(item_id, final_dt)
     adjusted = final_dt != requested_dt
     msg = f'已排程：{final_dt.strftime("%Y-%m-%d %H:%M")}'
     if adjusted:
@@ -81,11 +78,7 @@ def ce_draft_publish_now():
     run_date = datetime.now() + timedelta(seconds=5)
     _drafts_store.update_item(item_id, status='scheduled',
                               scheduled_at=run_date.isoformat())
-    from ..scheduler import _publish_draft_job, _scheduler
-    _scheduler.add_job(
-        _publish_draft_job, trigger='date', run_date=run_date,
-        id=item_id, args=[item_id], replace_existing=True,
-    )
+    _schedule_draft_job(item_id, run_date)
     return redirect('/?tab=draft&flash_type=info&flash_msg=正在发布，请稍候刷新页面')
 
 
@@ -96,7 +89,6 @@ def ce_draft_cancel():
     if not item_id:
         return redirect('/?tab=draft&flash_type=danger&flash_msg=参数缺失')
     try:
-        from ..scheduler import _scheduler
         _scheduler.remove_job(item_id)
     except Exception:
         pass
@@ -111,7 +103,6 @@ def ce_draft_delete():
     if not item_id:
         return redirect('/?tab=draft&flash_type=danger&flash_msg=参数缺失')
     try:
-        from ..scheduler import _scheduler
         _scheduler.remove_job(item_id)
     except Exception:
         pass

@@ -1,7 +1,6 @@
 """Body content components for article generation."""
 
 import random
-from typing import List, Callable
 
 # Body Content Pools (Migrated from markdown.py)
 _ZH_BODY_A_POOL = [

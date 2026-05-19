@@ -31,13 +31,6 @@ class DraftsStore(JsonStore):
     def update_item(self, item_id: str, **fields: Any) -> bool:
         """Locate by id, merge ``fields`` in place, save. Returns False
         if no matching id was found (no-op write skipped)."""
-        def _apply(items: list[dict]) -> tuple[list[dict], bool]:
-            for it in items:
-                if it.get("id") == item_id:
-                    it.update(fields)
-                    return items, True
-            return items, False
-
         with self._lock:
             items = self.load()
             for it in items:

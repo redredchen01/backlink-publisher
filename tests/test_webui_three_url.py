@@ -267,7 +267,7 @@ class TestSaveThreeUrl:
 
 class TestScrapePreview:
     def test_returns_json_metadata(self, client):
-        from backlink_publisher.work_scraper import WorkMetadata
+        from backlink_publisher.content.scraper import WorkMetadata
         with patch(
             "webui_app.routes.sites.fetch_work_metadata",
             return_value=WorkMetadata(
@@ -774,11 +774,14 @@ class TestContentFetchTTLWiring:
     happens at webui startup via `_wire_content_fetch_ttl_from_env`."""
 
     def test_default_900_seconds_when_env_unset(self, monkeypatch):
-        from backlink_publisher import content_fetch
+        from backlink_publisher.content import fetch as content_fetch
         import webui
 
         monkeypatch.delenv("BACKLINK_GATE_CACHE_TTL_SECONDS", raising=False)
         monkeypatch.delenv("BACKLINK_NO_FETCH_VERIFY", raising=False)
+        content_fetch.set_default_max_age(None)
+        webui._wire_content_fetch_ttl_from_env()
+        assert content_fetch._DEFAULT_MAX_AGE_S == 900.0
         content_fetch.set_default_max_age(None)
         webui._wire_content_fetch_ttl_from_env()
         # 900s default per plan 008 Unit 3
@@ -787,7 +790,7 @@ class TestContentFetchTTLWiring:
         content_fetch.set_default_max_age(None)
 
     def test_explicit_env_overrides_default(self, monkeypatch):
-        from backlink_publisher import content_fetch
+        from backlink_publisher.content import fetch as content_fetch
         import webui
 
         monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", "60")
@@ -797,7 +800,7 @@ class TestContentFetchTTLWiring:
         assert content_fetch._DEFAULT_MAX_AGE_S == 60.0
 
     def test_bypass_env_skips_ttl_wiring(self, monkeypatch):
-        from backlink_publisher import content_fetch
+        from backlink_publisher.content import fetch as content_fetch
         import webui
 
         monkeypatch.setenv("BACKLINK_NO_FETCH_VERIFY", "1")
@@ -807,7 +810,7 @@ class TestContentFetchTTLWiring:
         assert content_fetch._DEFAULT_MAX_AGE_S is None
 
     def test_invalid_env_falls_back_to_900(self, monkeypatch):
-        from backlink_publisher import content_fetch
+        from backlink_publisher.content import fetch as content_fetch
         import webui
 
         monkeypatch.setenv("BACKLINK_GATE_CACHE_TTL_SECONDS", "not-a-number")
@@ -817,7 +820,7 @@ class TestContentFetchTTLWiring:
         assert content_fetch._DEFAULT_MAX_AGE_S == 900.0
 
     def test_zero_or_negative_seconds_skips_wiring(self, monkeypatch):
-        from backlink_publisher import content_fetch
+        from backlink_publisher.content import fetch as content_fetch
         import webui
 
         for value in ("0", "-5"):
@@ -944,7 +947,7 @@ class TestSitesMinimalInput:
             },
         )
         monkeypatch.setattr(
-            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            "backlink_publisher.content.scraper.fetch_work_urls_from_list",
             lambda *a, **k: [
                 "https://x.com/work/1", "https://x.com/work/2",
             ],
@@ -994,7 +997,7 @@ class TestSitesMinimalInput:
         def _raise_scraper(*a, **k):
             raise RuntimeError("simulated scrape failure")
         monkeypatch.setattr(
-            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            "backlink_publisher.content.scraper.fetch_work_urls_from_list",
             _raise_scraper,
         )
 
@@ -1029,7 +1032,7 @@ class TestSitesMinimalInput:
             lambda url: {"title": "Some Title", "description": "Some desc"},
         )
         monkeypatch.setattr(
-            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            "backlink_publisher.content.scraper.fetch_work_urls_from_list",
             lambda *a, **k: [],
         )
 

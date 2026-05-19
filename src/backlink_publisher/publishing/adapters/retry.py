@@ -89,7 +89,7 @@ def _emit_retry(
     """Write a structured retry warning to stderr (R3a — no credentials/bodies)."""
     msg: dict[str, Any] = {
         "level": "WARN",
-        "msg": f"retrying (attempt {attempt + 1}/{max_attempts}): {exc_name} — waiting {wait:.1f}s",
+        "msg": f"retrying (attempt {attempt}/{max_attempts}): {exc_name} — waiting {wait:.1f}s",
         "adapter": adapter,
     }
     print(json.dumps(msg), file=sys.stderr, flush=True)

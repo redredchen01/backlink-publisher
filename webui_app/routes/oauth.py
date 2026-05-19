@@ -7,9 +7,19 @@ import secrets
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
+import requests as req
 from flask import Blueprint, redirect, request, session
+from google_auth_oauthlib.flow import Flow
 
-from backlink_publisher.config import load_config, save_config
+from backlink_publisher.adapters.blogger_api import _SCOPES, json_from_creds
+from backlink_publisher.config import (
+    MediumOAuthConfig,
+    _config_dir,
+    load_config,
+    save_blogger_token,
+    save_config,
+    save_medium_token,
+)
 
 from ..helpers import _oauth_callback_uri
 
@@ -30,7 +40,6 @@ def settings_medium_oauth_start():
                         + '请填写 Client ID 和 Client Secret#channel-medium')
 
     try:
-        from backlink_publisher.config import MediumOAuthConfig
         cfg = load_config()
         cfg.medium_oauth = MediumOAuthConfig(
             client_id=client_id, client_secret=client_secret,
@@ -60,7 +69,6 @@ def settings_medium_oauth_start():
 @bp.route('/settings/medium/oauth-callback')
 def settings_medium_oauth_callback():
     """Medium redirects here after user approves."""
-    import requests as req
 
     err = request.args.get('error')
     if err:
@@ -115,9 +123,6 @@ def settings_medium_oauth_callback():
                 + int(token_data["expires_in"])
             )
 
-        from backlink_publisher.config import (
-            MediumOAuthConfig, save_medium_token,
-        )
         save_medium_token(token_data)
         cfg = load_config()
         cfg.medium_oauth = MediumOAuthConfig(
@@ -139,7 +144,6 @@ def settings_medium_oauth_callback():
 def settings_clear_medium_oauth():
     """Clear Medium OAuth configuration."""
     try:
-        from backlink_publisher.config import _config_dir
         token_file = _config_dir() / "medium-token.json"
         if token_file.exists():
             os.remove(token_file)
@@ -188,9 +192,6 @@ def settings_blogger_oauth_start():
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=凭据保存失败: {e}#channel-blogger')
 
-    from google_auth_oauthlib.flow import Flow
-    from backlink_publisher.adapters.blogger_api import _SCOPES
-
     cb_uri = _oauth_callback_uri()
     client_config = {
         'installed': {
@@ -225,10 +226,6 @@ def settings_blogger_oauth_callback():
     if not state or not client_config:
         return redirect('/settings?flash_type=warning&flash_msg='
                         + '授权会话已过期，请重新点击登入按钮#channel-blogger')
-
-    from google_auth_oauthlib.flow import Flow
-    from backlink_publisher.adapters.blogger_api import _SCOPES, json_from_creds
-    from backlink_publisher.config import save_blogger_token
 
     cb_uri = _oauth_callback_uri()
     try:

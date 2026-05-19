@@ -42,7 +42,6 @@ from urllib.request import (
     HTTPRedirectHandler,
     Request,
     build_opener,
-    urlopen,
 )
 
 from bs4 import BeautifulSoup

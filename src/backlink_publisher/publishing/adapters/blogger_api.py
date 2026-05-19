@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_id, load_blogger_token, save_blogger_token
+from backlink_publisher.config import Config, resolve_blog_id, load_blogger_token, save_blogger_token
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.content_negotiation import extract_publish_html
@@ -124,7 +124,6 @@ class BloggerAPIAdapter(Publisher):
         try:
             from googleapiclient.discovery import build
             from googleapiclient.errors import HttpError
-            import google.auth.transport.requests as google_requests
 
             service = build("blogger", "v3", credentials=creds)
             # Plan 2026-05-18-006 Unit 5 R9: extract_publish_html selects the

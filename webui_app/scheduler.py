@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from backlink_publisher.logger import plan_logger
+
 from webui_store import drafts_store as _drafts_store
 from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
@@ -36,44 +38,40 @@ def _process_queue_job() -> None:
     try:
         config = task['config']
         urls = task['urls']
+        target_url = urls[0] if urls else ''
         
         seed = {
-            'target_url': urls[0],
+            'target_url': target_url,
             'platform': config.get('platform', 'medium'),
             'language': config.get('target_language', 'zh-CN'),
             'url_mode': config.get('url_mode', 'A'),
             'publish_mode': 'draft',
             'custom_title': config.get('custom_title', ''),
             'custom_tags': config.get('custom_tags', ''),
-            'extra_urls': urls[1:],
+            'extra_urls': urls[1:] if urls else [],
         }
         
-        pipe_out = run_pipe(['publish-backlinks'], json.dumps([seed]))
-        
-        if pipe_out.returncode == 0:
+        run_pipe(['publish-backlinks'], json.dumps([seed]))
+        _queue_store.update_task(task_id, {
+            'status': 'success',
+            'completed_at': now.isoformat()
+        })
+    except Exception as exc:
+        # run_pipe raises on failure — capture error, detect 429 backoff
+        stderr = str(exc)
+        if "429" in stderr or "Too Many Requests" in stderr:
+            retry_delay = 300
+            next_retry = now + timedelta(seconds=retry_delay)
             _queue_store.update_task(task_id, {
-                'status': 'success', 
-                'completed_at': now.isoformat()
+                'status': 'failed',
+                'error': f'频率限制 (429)，将在 {next_retry.strftime("%H:%M")} 重试',
+                'next_retry_at': next_retry.isoformat()
             })
         else:
-            stderr = pipe_out.stderr or ""
-            # 检测 429 错误
-            if "429" in stderr or "Too Many Requests" in stderr:
-                retry_delay = 300 # 退避 5 分钟
-                next_retry = now + timedelta(seconds=retry_delay)
-                _queue_store.update_task(task_id, {
-                    'status': 'failed', 
-                    'error': f'频率限制 (429)，将在 {next_retry.strftime("%H:%M")} 重试',
-                    'next_retry_at': next_retry.isoformat()
-                })
-            else:
-                _queue_store.update_task(task_id, {
-                    'status': 'failed', 
-                    'error': stderr or '发布失败'
-                })
-            
-    except Exception as exc:
-        _queue_store.update_task(task_id, {'status': 'failed', 'error': str(exc)})
+            _queue_store.update_task(task_id, {
+                'status': 'failed',
+                'error': stderr or '发布失败'
+            })
 
 
 def _publish_draft_job(item_id: str) -> None:
@@ -85,6 +83,18 @@ def _publish_draft_job(item_id: str) -> None:
     platform = item.get('platform', 'medium')
     publish_mode = item.get('publish_mode', 'draft')
     plans_jsonl = item.get('plans_jsonl', '')
+
+    def _push_history(status, article_urls=None, error=None):
+        _history_store.update(lambda hist: [{
+            'id': str(uuid.uuid4())[:8],
+            'target_url': item.get('target_url', 'unknown'),
+            'platform': platform,
+            'language': item.get('language', 'zh-CN'),
+            'status': status,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'article_urls': article_urls or [],
+            **({'error': error} if error else {}),
+        }, *hist][:100])
 
     try:
         cmd = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
@@ -104,27 +114,17 @@ def _publish_draft_job(item_id: str) -> None:
             article_urls=article_urls,
             published_at=datetime.now().strftime('%Y-%m-%d %H:%M'),
         )
-        _history_store.update(lambda hist: [{
-            'id': str(uuid.uuid4())[:8],
-            'target_url': item.get('target_url', 'unknown'),
-            'platform': platform,
-            'language': item.get('language', 'zh-CN'),
-            'status': 'drafted' if publish_mode == 'draft' else 'published',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': article_urls,
-        }, *hist][:100])
+        _push_history('drafted' if publish_mode == 'draft' else 'published', article_urls)
     except Exception as exc:
         _drafts_store.update_item(item_id, status='failed', error=str(exc))
-        _history_store.update(lambda hist: [{
-            'id': str(uuid.uuid4())[:8],
-            'target_url': item.get('target_url', 'unknown'),
-            'platform': platform,
-            'language': item.get('language', 'zh-CN'),
-            'status': 'failed',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': [],
-            'error': str(exc),
-        }, *hist][:100])
+        _push_history('failed', error=str(exc))
+
+
+def _schedule_draft_job(item_id: str, run_date: datetime) -> None:
+    _scheduler.add_job(
+        _publish_draft_job, trigger='date', run_date=run_date,
+        id=item_id, args=[item_id], replace_existing=True,
+    )
 
 
 def _restore_scheduled_jobs() -> None:
@@ -149,13 +149,6 @@ def _restore_scheduled_jobs() -> None:
             run_date = datetime.fromisoformat(ts)
             if run_date < now:
                 run_date = now + timedelta(seconds=5)
-            _scheduler.add_job(
-                _publish_draft_job,
-                trigger='date',
-                run_date=run_date,
-                id=item_id,
-                args=[item_id],
-                replace_existing=True,
-            )
+            _schedule_draft_job(item_id, run_date)
         except Exception:
-            pass
+            plan_logger.warn("restore_scheduled_job_failed", item_id=item_id, ts=ts)

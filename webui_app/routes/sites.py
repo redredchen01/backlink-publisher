@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import quote as _quote
 
-from flask import Blueprint, jsonify, redirect, render_template, request
+from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 from backlink_publisher.config import (
     DEFAULT_WORK_TEMPLATES,
@@ -14,12 +15,13 @@ from backlink_publisher.config import (
     load_config,
     save_config,
 )
-from backlink_publisher.errors import InputValidationError
-from backlink_publisher.url_utils import (
+from backlink_publisher._util.errors import InputValidationError
+from backlink_publisher._util.url import (
     validate_https_url,
     validate_main_domain_url,
 )
-from backlink_publisher.work_scraper import fetch_work_metadata
+from backlink_publisher.content.scraper import fetch_work_metadata
+from backlink_publisher.logger import plan_logger
 
 from ..helpers import (
     _WORK_THEMED_RUNS,
@@ -153,7 +155,6 @@ def sites_save_three_url():
         try:
             tdk = fetch_full_tdk(main_url)
         except Exception as exc:
-            from backlink_publisher.logger import plan_logger
             plan_logger.warn("tdk_fetch_failed", url=main_url, reason=type(exc).__name__)
 
     if not list_url:
@@ -171,7 +172,7 @@ def sites_save_three_url():
 
     if not work_urls:
         try:
-            from backlink_publisher.work_scraper import fetch_work_urls_from_list
+            from backlink_publisher.content.scraper import fetch_work_urls_from_list
             discovered = fetch_work_urls_from_list(
                 list_url, main_url=main_url, max_candidates=10,
                 insecure_tls=raw["insecure_tls"],
@@ -180,7 +181,6 @@ def sites_save_three_url():
                 work_urls = discovered
                 fields_derived.append("work_urls")
         except Exception as exc:
-            from backlink_publisher.logger import plan_logger
             plan_logger.warn(
                 "work_urls_discovery_failed",
                 main_url=main_url, list_url=list_url,
@@ -188,7 +188,6 @@ def sites_save_three_url():
             )
 
     if fields_derived:
-        from backlink_publisher.logger import plan_logger
         plan_logger.recon(
             "sites_save_autofilled", main_url=main_url, fields=fields_derived,
         )
@@ -208,7 +207,6 @@ def sites_save_three_url():
 
     redirect_url = f"/sites?saved={domain_key}"
     if fields_derived:
-        from urllib.parse import quote as _quote
         redirect_url += f"&autofilled={_quote(','.join(fields_derived))}"
     return redirect(redirect_url)
 
@@ -240,13 +238,11 @@ def sites_run():
 
     main_url = (request.form.get("main_url") or "").strip().rstrip("/")
     if not main_url:
-        from flask import abort
         abort(400)
 
     cfg = load_config()
     entry = cfg.target_three_url.get(main_url)
     if entry is None:
-        from flask import abort
         abort(400)
 
     seed_row = {
@@ -310,7 +306,6 @@ def _parse_run_result_local(stdout: str, entry) -> list[dict]:
 def sites_run_result(run_id: str):
     run = _WORK_THEMED_RUNS.get(run_id)
     if run is None:
-        from flask import abort
         abort(404)
     return render_template(
         "result.html",

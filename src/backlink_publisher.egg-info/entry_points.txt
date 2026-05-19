@@ -1,4 +1,6 @@
 [console_scripts]
+footprint = backlink_publisher.cli.footprint:main
+phase0-seal = backlink_publisher.cli.phase0_seal:main
 plan-backlinks = backlink_publisher.cli.plan_backlinks:main
 publish-backlinks = backlink_publisher.cli.publish_backlinks:main
 report-anchors = backlink_publisher.cli.report_anchors:main

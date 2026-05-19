@@ -30,7 +30,6 @@ import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from backlink_publisher.config import ANCHOR_TYPES, _cache_dir
 from backlink_publisher._util.io import atomic_write_json
