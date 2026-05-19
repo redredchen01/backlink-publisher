@@ -838,6 +838,7 @@
                             <select class="form-select" name="platform">
                                 <option value="medium" {% if config.platform == 'medium' %}selected{% endif %}>Medium</option>
                                 <option value="blogger" {% if config.platform == 'blogger' %}selected{% endif %}>Blogger</option>
+                                <option value="velog" {% if config.platform == 'velog' %}selected{% endif %}>Velog</option>
                                 <option value="wordpress" {% if config.platform == 'wordpress' %}selected{% endif %}>WordPress</option>
                             </select>
                         </div>
@@ -1253,12 +1254,13 @@
                             <button type="button" class="filter-chip active" data-filter-group="platform" data-filter-value="all">全部 <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="blogger">Blogger <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="medium">Medium <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="velog">Velog <span class="chip-count">0</span></button>
                             <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="other">其他 <span class="chip-count">0</span></button>
                         </div>
                         {% for item in history %}
                         {% set s = item.status %}
                         {% set norm_status = 'published' if s in ('success', 'published') else (s if s in ('drafted', 'failed') else 'other') %}
-                        {% set norm_platform = item.platform if item.platform in ('blogger', 'medium') else 'other' %}
+                        {% set norm_platform = item.platform if item.platform in ('blogger', 'medium', 'velog') else 'other' %}
                         <div class="history-item {% if s in ('success','published') %}success{% elif s == 'failed' %}failed{% else %}pending{% endif %}"
                              data-status="{{ norm_status }}" data-platform="{{ norm_platform }}">
                             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
