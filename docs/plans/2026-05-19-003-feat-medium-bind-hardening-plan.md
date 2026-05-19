@@ -7,6 +7,39 @@ deepened: 2026-05-19
 origin: docs/brainstorms/2026-05-19-medium-browser-bind-flow-requirements.md
 depends_on: docs/plans/2026-05-19-001-feat-settings-browser-binding-plan.md
 revision: 3
+rebaselined: 2026-05-19
+---
+
+## Re-baseline Note (2026-05-19, post-ce:work setup)
+
+While setting up the worktree for implementation, discovered Plan 001 has shipped Units 4-7 since this plan was written:
+
+- **Plan 001 Unit 4** (`79d2441`): `webui_app/routes/bind.py` blueprint with loopback assertion + CSRF on POST + channel allow-list against CHANNELS. **Subsumes my Unit 3 partially** — loopback + CSRF already done.
+- **Plan 001 Unit 5** (`147b0ac`): `webui_app/templates/_settings_channel_binding.html` shared partial (3 states: bound/expired/unbound) + `bind_channel.js` (~150 lines) + `BIND_ERROR_MESSAGES` Chinese mapping + 8 tests. **Subsumes most of my Unit 4** — Settings UI integration done for the 3 base states.
+- **Plan 001 Unit 6** (`3f71abe`): `medium_api.py` + `blogger_api.py` translate HTTP 401/403 to `AuthExpiredError`. **Does NOT touch `medium_browser.py`** — my Unit 6 (storage convergence `launch_persistent_context` → `new_context(storage_state=...)`) is **still fully needed**.
+- **Plan 001 Unit 7** (`f859e62`): AGENTS.md + README docs.
+
+### Updated unit scope (for next session)
+
+| Unit | Status after Plan 001 4-7 ship |
+|---|---|
+| **Unit 0** (schema extension + spikes) | Still needed. `last_verified_at` + `identity_mismatch` state are new additions to `channel_status.py` schema. |
+| **Unit 1** (recipe hardening + IdentityMismatch) | Still fully needed. |
+| **Unit 3** (security helpers) | **REDUCED**: drop the loopback helper (Plan 001 Unit 4 already wires loopback). Keep `_check_bind_origin_or_abort` (Origin/Referer + DNS rebind defense) + `_refuse_when_allow_network` (ALLOW_NETWORK=1 refuse). Both still missing from Plan 001's bind blueprint. |
+| **Unit 4** (Settings UI integration) | **REDUCED**: 3 base states already rendered by `_settings_channel_binding.html`. Only need to extend the partial (or add a Medium-specific override) for the `identity_mismatch` state with confirm prompt. |
+| **Unit 5** (liveness probe + probe-copy) | Still fully needed. Plan 001 did not ship liveness probing. |
+| **Unit 6** (adapter convergence for browser adapter) | Still fully needed. Plan 001 Unit 6 covers API adapters (`medium_api`, `blogger_api`) only; `medium_browser.py` untouched. |
+
+### Next session starting point
+
+- Worktree: `bp-medium-bind-hardening/`, branch `feat/medium-bind-hardening` based on `feat/settings-browser-binding @ f859e62`
+- Recommended start: Unit 0 (smallest unblock), then Unit 1 (test-first per Execution note)
+- Order option (parallel-safe): Units 1 + 5 + 6 don't share files; Unit 0 unblocks all three
+- Plan 001 author may push more commits on `feat/settings-browser-binding`; rebase when needed
+- Main `backlink-publisher/` worktree has foreign-session WIP — do not touch unless coordinated
+- BIND_ERROR_MESSAGES dict already in `webui_app/services/bind_job.py` — Unit 1 must add Chinese message for `identity_mismatch` error_code (coordinate with Plan 001 author)
+- `_settings_channel_binding.html` is a shared partial per channel — Unit 4's identity_mismatch state should be added at the partial level (benefits velog + blogger when their recipes get the same hardening), not Medium-specific override
+
 ---
 
 # Medium browser-bind recipe hardening + adapter convergence
