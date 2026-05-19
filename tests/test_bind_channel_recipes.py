@@ -129,12 +129,29 @@ class TestMediumCookieSanity:
         }
 
     def test_whitelisted_cookie_passes(self):
-        # Whitelist constant lives in the recipe module; we exercise it
-        # via a known candidate name. If the whitelist is empty (no Unit 0
-        # spike data yet), this test exercises the structural fallback —
-        # both behaviors are acceptable and the assertion holds.
-        cookies = [self._make(name="sid")]
-        assert self.check(cookies) is True
+        # Spike 3a populated the whitelist with {"sid", "rid"}. Either
+        # name on its own — even with short expires + not HttpOnly —
+        # passes the whitelist arm (the whitelist takes precedence over
+        # the structural gates).
+        from backlink_publisher.cli._bind.recipes.medium import (
+            MEDIUM_AUTH_COOKIE_WHITELIST,
+        )
+        assert MEDIUM_AUTH_COOKIE_WHITELIST == frozenset({"sid", "rid"})
+        assert self.check([self._make(name="sid")]) is True
+        assert self.check([self._make(name="rid")]) is True
+
+    def test_cf_clearance_rejected_even_when_long_lived(self):
+        # Spike 3a found cf_clearance is HttpOnly + ~1-year expires on
+        # logged-OUT visitors that pass Cloudflare's challenge. Must NOT
+        # count as auth.
+        cookies = [self._make(name="cf_clearance", expires_in_days=365)]
+        assert self.check(cookies) is False
+
+    def test_xsrf_rejected_even_when_long_lived(self):
+        # Spike 3a found xsrf is HttpOnly + ~1-year expires. It's a CSRF
+        # token, not auth — must not stand alone as proof.
+        cookies = [self._make(name="xsrf", expires_in_days=365)]
+        assert self.check(cookies) is False
 
     def test_structural_fallback_accepts_long_lived_httponly(self):
         # Unknown-name cookie that's HttpOnly + 90-day expires + not in

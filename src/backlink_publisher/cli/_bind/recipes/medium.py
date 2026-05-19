@@ -50,19 +50,23 @@ _LOGIN_URL = "https://medium.com/m/signin"
 _BOUND_URL_PATTERN = re.compile(r"https?://(?:[^/]*\.)?medium\.com/(?!m/signin)(?:.*)?$")
 
 # Plan 003 Unit 0 / R5. Whitelisted HttpOnly auth cookie names on
-# medium.com apex. Populated from Spike 3a output; empty for now (the
-# structural fallback below covers the v1 launch — a cookie passes
-# sanity if it's HttpOnly, has expires > now + 7 days, and its name is
-# NOT in the anonymous-tracking list).
-MEDIUM_AUTH_COOKIE_WHITELIST: frozenset[str] = frozenset()
+# medium.com apex. Populated from Spike 3a (2026-05-19): a logged-in
+# medium.com profile sets ``sid`` (session id) and ``rid`` (refresh id)
+# both HttpOnly with ~1.5-year expiry. These are the canonical Medium
+# auth pair — presence proves an authenticated session beyond doubt.
+# Structural fallback below still applies for cookies whose names rotate.
+MEDIUM_AUTH_COOKIE_WHITELIST: frozenset[str] = frozenset({"sid", "rid"})
 
-# Anonymous-tracking cookies Medium sets on logged-out + logged-in
-# sessions. Even if HttpOnly + long expires, these must NOT be accepted
-# as proof-of-auth — they exist for users who never logged in. Spike 3a
-# confirmed visible cookies on logged-OUT browsing include
-# ``_dd_s, _ga, g_state, nonce``; the HttpOnly-marked anonymous set
-# likely overlaps. Conservative: include known JS-visible names plus
-# known patterns.
+# Cookies Medium sets on logged-out + logged-in sessions that must NOT
+# count as proof-of-auth. Three families:
+#   1. Analytics / tracking (uid, _ga, _dd_s, …) — set for anonymous users
+#   2. Cloudflare anti-bot (cf_clearance, _cfuvid) — set on ANY visitor
+#      that passes Cloudflare's challenge, including logged-out
+#   3. Function tokens (xsrf) — CSRF token, ambient on logged-in sessions
+#      but emitted independently of auth and could appear without it
+# Without these in the blacklist, the structural fallback (httpOnly +
+# expires>7d + name not in this set) would accept them as auth and
+# false-positive a logged-out browser.
 MEDIUM_ANONYMOUS_TRACKING_NAMES: frozenset[str] = frozenset({
     "uid",                # legacy anonymous user identifier
     "_ga",                # Google Analytics
@@ -77,6 +81,9 @@ MEDIUM_ANONYMOUS_TRACKING_NAMES: frozenset[str] = frozenset({
     "optimizelyEndUserId",
     "lightstep_guid",
     "lightstep_guid/medium-web",
+    "cf_clearance",       # Cloudflare anti-bot clearance (Spike 3a)
+    "_cfuvid",            # Cloudflare visitor id (Spike 3a)
+    "xsrf",               # CSRF token, not auth (Spike 3a)
 })
 
 # Idle-detection timeouts (Plan 003 R7). Replace Plan 001 driver's

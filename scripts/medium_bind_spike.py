@@ -65,13 +65,12 @@ def spike_3a(profile_dir: Path) -> int:
         )
         page = ctx.new_page()
         page.goto("https://medium.com/me", wait_until="load")
-        print(f"Landed at: {page.url}")
-        if "/m/signin" in page.url:
-            print("Profile not logged in. Log in manually in the headed window,")
-            print("then press Enter here.")
-            input(">>> ready? ")
-            page.goto("https://medium.com/me", wait_until="load")
-            print(f"After login, landed at: {page.url}")
+        print(f"Landed at: {page.url}", flush=True)
+        # Also check any other tabs the operator may have opened during
+        # manual login, in case the script's original tab is stuck at
+        # /m/signin but a sibling tab is logged in.
+        for p in ctx.pages:
+            print(f"  open tab: {p.url}", flush=True)
 
         cookies = ctx.cookies(["https://medium.com"])
         print(f"\nTotal cookies on medium.com apex: {len(cookies)}")
