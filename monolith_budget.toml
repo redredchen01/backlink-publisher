@@ -16,8 +16,8 @@ ceiling = 1270
 rationale = "Largest file in the repo (SLOC 1231 at seed). Generation orchestrator: anchor handling, content-fetch gate wiring, work_themed callout. P1-queued decomposition will surface seams; lower ceiling in those landing PRs."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 730
-rationale = "Pipeline stage 3 (SLOC 694 at seed) -- OAuth pre-flight + retry_transient + Medium throttle (3 inlined copies pending F5 ThrottleClock extraction) + real-publish verification + link_attr_verifier converge here. F5 carve will drop ~60 SLOC; lower ceiling then."
+ceiling = 780
+rationale = "Pipeline stage 3 (SLOC 741 after plan 2026-05-19-001 Unit 6 — adds two AuthExpiredError catch handlers calling mark_expired + checkpoint write before the existing DependencyError handler at the resume + main dispatch sites). F5 ThrottleClock + AuthExpiredError-handler extraction will drop ~70 SLOC; lower ceiling then."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 370

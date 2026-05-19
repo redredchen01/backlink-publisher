@@ -18,7 +18,12 @@ from pathlib import Path
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from .. import checkpoint, config_echo
 from backlink_publisher.config import load_config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError, emit_error
+from backlink_publisher._util.errors import (
+    AuthExpiredError,
+    DependencyError,
+    ExternalServiceError,
+    emit_error,
+)
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher.linkcheck.http import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
 from backlink_publisher._util.logger import publish_logger
@@ -299,6 +304,32 @@ def _run_resume(args: Any) -> None:
                 config=config,
                 dry_run=False,
             )
+        except AuthExpiredError as exc:
+            # Plan 2026-05-19-001 Unit 6: flip channel status to expired so
+            # /settings shows the re-bind affordance, write the checkpoint
+            # row with error_class="auth_expired", then exit 3 (same exit
+            # semantic as the DependencyError parent class).
+            try:
+                from webui_store.channel_status import mark_expired
+                mark_expired(exc.channel)
+            except Exception as flip_exc:
+                publish_logger.warning(
+                    f"mark_expired({exc.channel!r}) failed: {flip_exc}"
+                )
+            try:
+                checkpoint.update_item(
+                    run_id, item["id"], "failed",
+                    error=str(exc),
+                    error_class="auth_expired",
+                )
+            except Exception as ckpt_exc:
+                print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+            publish_logger.error(
+                f"auth expired: {exc}",
+                extra={"id": item["id"], "platform": platform},
+            )
+            emit_error(str(exc), exit_code=3)
+            return
         except DependencyError as exc:
             emit_error(str(exc), exit_code=3)
             return
@@ -690,6 +721,31 @@ def main(argv: list[str] | None = None) -> None:
                 config=config,
                 dry_run=False,
             )
+        except AuthExpiredError as exc:
+            # Plan 2026-05-19-001 Unit 6: see resume-mode handler above for
+            # the same shape — flip → checkpoint → log → exit 3.
+            try:
+                from webui_store.channel_status import mark_expired
+                mark_expired(exc.channel)
+            except Exception as flip_exc:
+                publish_logger.warning(
+                    f"mark_expired({exc.channel!r}) failed: {flip_exc}"
+                )
+            if run_id is not None:
+                try:
+                    checkpoint.update_item(
+                        run_id, row.get("id", ""), "failed",
+                        error=str(exc),
+                        error_class="auth_expired",
+                    )
+                except Exception as ckpt_exc:
+                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+            publish_logger.error(
+                f"auth expired: {exc}",
+                extra={"id": row.get("id"), "platform": platform},
+            )
+            emit_error(str(exc), exit_code=3)
+            return  # unreachable but satisfies type checker
         except DependencyError as exc:
             emit_error(str(exc), exit_code=3)
             return  # unreachable but satisfies type checker

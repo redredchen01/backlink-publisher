@@ -8,7 +8,11 @@ from typing import Any
 import requests
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import (
+    AuthExpiredError,
+    DependencyError,
+    ExternalServiceError,
+)
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.content_negotiation import extract_publish_html
 from backlink_publisher.publishing.registry import Publisher
@@ -107,9 +111,9 @@ class MediumAPIAdapter(Publisher):
             ) from None
 
         if me_resp.status_code == 401:
-            raise ExternalServiceError(
-                "Medium integration token invalid (401). "
-                "Generate a new token at medium.com/me/settings/security."
+            raise AuthExpiredError(
+                channel="medium",
+                reason="Medium /me HTTP 401",
             )
         if not me_resp.ok:
             raise ExternalServiceError(
@@ -172,9 +176,9 @@ class MediumAPIAdapter(Publisher):
             ) from None
 
         if post_resp.status_code == 401:
-            raise ExternalServiceError(
-                "Medium integration token invalid (401). "
-                "Generate a new token at medium.com/me/settings/security."
+            raise AuthExpiredError(
+                channel="medium",
+                reason="Medium /posts HTTP 401",
             )
         if post_resp.status_code == 429:
             raise ExternalServiceError("Medium API rate-limited (429)")

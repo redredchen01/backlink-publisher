@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_id, load_blogger_token, save_blogger_token
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import (
+    AuthExpiredError,
+    DependencyError,
+    ExternalServiceError,
+)
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.content_negotiation import extract_publish_html
 from backlink_publisher.publishing.registry import Publisher
@@ -166,10 +170,9 @@ class BloggerAPIAdapter(Publisher):
                 if isinstance(exc, HttpError):
                     status = exc.resp.status if exc.resp else 0
                     if status in (401, 403):
-                        raise ExternalServiceError(
-                            f"Blogger authentication failed (HTTP {status}); "
-                            "re-run OAuth flow by deleting "
-                            "~/.config/backlink-publisher/blogger-token.json"
+                        raise AuthExpiredError(
+                            channel="blogger",
+                            reason=f"Blogger HTTP {status}",
                         ) from exc
                     if status == 429:
                         raise ExternalServiceError(
