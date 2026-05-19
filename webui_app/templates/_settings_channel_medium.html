@@ -4,10 +4,9 @@
                     对新用户，浏览器登录是唯一可用发布路径：首次点击下方按钮完成一次登录即可，后续发布自动复用登录态。
                 </p>
 
-                {# Phase B (Unit 4) will inject medium_browser_status; fallback hint until then #}
-                {% if medium_browser_status is defined %}
-                <div class="mb-3">
-                    {% set bs = medium_browser_status %}
+                {# Browser status badge + action buttons #}
+                {% set bs = medium_browser_status %}
+                <div class="mb-2">
                     {% if bs.state == 'not_installed' %}
                     <span class="badge-status err"><i class="bi bi-x-circle-fill"></i>未安装 Playwright</span>
                     <small class="text-muted ms-2">运行 <code>playwright install chromium</code> 后可使用浏览器登录</small>
@@ -15,13 +14,40 @@
                     <span class="badge-status ok"><i class="bi bi-check-circle-fill"></i>浏览器已登录</span>
                     {% elif bs.state == 'profile_exists_unverified' %}
                     <span class="badge-status warn"><i class="bi bi-exclamation-triangle-fill"></i>配置已就绪（未验证登录）</span>
+                    {% if bs.cookies_age_days is not none and bs.cookies_age_days > 30 %}
+                    <small class="text-muted ms-2">（陈旧，最后活动 {{ bs.cookies_age_days }} 天前）</small>
+                    {% endif %}
+                    {% if bs.singleton_lock_present %}
+                    <small class="text-warning ms-2"><i class="bi bi-exclamation-triangle-fill"></i> 检测到可能有 Chromium 实例在运行</small>
+                    {% endif %}
                     {% else %}
                     <span class="badge-status warn"><i class="bi bi-exclamation-triangle-fill"></i>浏览器配置未初始化</span>
                     {% endif %}
                 </div>
-                {% else %}
-                <div class="mb-3">
-                    <span class="badge-status warn"><i class="bi bi-exclamation-triangle-fill"></i>浏览器登录状态（升级至 Phase B 后显示）</span>
+
+                {% if bs.state != 'not_installed' %}
+                <div class="d-flex gap-2 flex-wrap mb-3">
+                    <form method="POST" action="/settings/medium/launch-browser-login" style="margin:0;">
+                        <input type="hidden" name="_csrf_token" value="{{ medium_csrf_token() }}">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-browser-chrome me-1"></i>打开浏览器登录
+                        </button>
+                    </form>
+                    <form method="POST" action="/settings/medium/probe-browser-login" style="margin:0;">
+                        <input type="hidden" name="_csrf_token" value="{{ medium_csrf_token() }}">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-search me-1"></i>测试登录状态
+                        </button>
+                    </form>
+                    {% if bs.profile_has_cookies %}
+                    <form method="POST" action="/settings/medium/clear-browser-login" style="margin:0;"
+                          onsubmit="return confirm('确认清除浏览器登录？下次发布前需重新登录。')">
+                        <input type="hidden" name="_csrf_token" value="{{ medium_csrf_token() }}">
+                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-trash me-1"></i>清除浏览器登录
+                        </button>
+                    </form>
+                    {% endif %}
                 </div>
                 {% endif %}
 

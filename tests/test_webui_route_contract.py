@@ -204,9 +204,9 @@ class TestGetRoutes:
         assert candidates, f"no settings templates under {templates_dir}"
         combined = b"".join(p.read_bytes() for p in candidates)
 
-        # 9 form action URLs (7 channel-related + 2 global).
+        # 12 form action URLs (10 channel-related + 2 global).
         # /settings/medium/oauth-start removed: Medium closed new app registration
-        # 2023-03-02; the route is no longer present. See Plan 013.
+        # 2023-03-02. Three browser-login routes added in Plan 013 Phase B.
         form_action_urls = [
             b'/settings/blogger/oauth-start',
             b'/settings/save-blogger-oauth',
@@ -215,6 +215,9 @@ class TestGetRoutes:
             b'/settings/save-medium-token',
             b'/settings/clear-medium-token',
             b'/settings/clear-medium-oauth',
+            b'/settings/medium/launch-browser-login',
+            b'/settings/medium/probe-browser-login',
+            b'/settings/medium/clear-browser-login',
             b'/settings/save-target-keywords',
             b'/settings/schedule',
         ]
@@ -296,13 +299,16 @@ class TestGetRoutes:
         panel = soup.find(id="channel-medium")
         assert panel is not None, "missing #channel-medium collapse panel"
 
-        # /settings/medium/oauth-start removed in Plan 013 Phase A (Medium API
-        # registration closed 2023-03-02).
-        # /settings/clear-medium-oauth is conditionally rendered only when
-        # medium_token_file_exists=True; omitted here (test env has no token file).
+        # /settings/medium/oauth-start removed in Plan 013 Phase A.
+        # /settings/clear-medium-oauth: conditionally rendered (medium_token_file_exists).
+        # /settings/medium/clear-browser-login: conditionally rendered (profile_has_cookies).
+        # Both omitted here; test env has neither token file nor cookies.
+        # launch + probe are rendered when state != 'not_installed' (Playwright installed).
         medium_urls = {
             "/settings/save-medium-token",
             "/settings/clear-medium-token",
+            "/settings/medium/launch-browser-login",
+            "/settings/medium/probe-browser-login",
         }
         for url in medium_urls:
             nodes = soup.select(
@@ -606,6 +612,25 @@ class TestSettingsRoutes:
 
     def test_clear_medium_oauth_redirects(self, client):
         resp = client.post("/settings/clear-medium-oauth")
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
+    # ── Plan 013 Phase B: browser-login routes ────────────────────────────────
+    # CSRF check: without a token, the before_request hook redirects back to
+    # /settings with a danger flash — that's still a 302.
+
+    def test_medium_launch_browser_login_no_csrf_redirects(self, client):
+        resp = client.post("/settings/medium/launch-browser-login", data={})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
+    def test_medium_probe_browser_login_no_csrf_redirects(self, client):
+        resp = client.post("/settings/medium/probe-browser-login", data={})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
+    def test_medium_clear_browser_login_no_csrf_redirects(self, client):
+        resp = client.post("/settings/medium/clear-browser-login", data={})
         assert resp.status_code == 302
         assert resp.headers["Location"].startswith("/settings?")
 
