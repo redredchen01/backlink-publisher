@@ -136,6 +136,70 @@ The project keeps lessons in two places:
 
 Next curation review: **2026-08-15**. Next `/ce:compound` run should scan recent `feedback_*.md` and promote what's worth keeping.
 
+## Plan-doc claims contract
+
+Plans authored on or after **2026-05-20** must carry a `claims:` block in their YAML frontmatter declaring the repo paths and SHAs that must still be reachable from `origin/main` at merge time. The `plan-check` CLI validates the block locally; the `plan-claims-gate` and `plan-claims-radar` workflows enforce it in CI and overnight. Plans dated before 2026-05-20 are grandfathered and silently skipped.
+
+### Authoring
+
+Frontmatter shape:
+
+```yaml
+---
+title: "feat: ..."
+type: feat
+status: active
+date: 2026-05-20            # ISO-8601; filename prefix must match (R11b lock)
+origin: docs/brainstorms/...
+claims:
+  paths:
+    - src/backlink_publisher/foo.py
+    - tests/test_foo.py
+  shas:
+    - 7387953                # 7..40 lowercase hex chars
+---
+```
+
+Two ways to opt out of drift detection on a plan that has no code anchors (governance docs, process changes):
+
+```yaml
+claims: {}                    # explicit empty escape hatch — still passes lint
+```
+
+The schema rejects unknown keys, glob characters (`*`, `?`, `[`) in paths, mixed-case or non-hex SHAs, and a frontmatter `date:` that disagrees with the filename's `YYYY-MM-DD-NNN-` prefix (the backdate exploit).
+
+### Running locally
+
+```bash
+plan-check docs/plans/2026-05-20-001-feat-foo-plan.md            # human output
+plan-check --json docs/plans/2026-05-20-001-feat-foo-plan.md     # JSON output
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---:|---|
+| 0 | pass, grandfathered, or empty-claims escape hatch |
+| 1 | `UsageError` (missing/bad argument) |
+| 2 | schema violation — malformed frontmatter, unknown key, glob in path, bad SHA format, filename/date mismatch |
+| 7 | drift — one or more paths missing or SHAs unreachable on `origin/main` |
+| 8 | post-cutoff plan with no `claims:` block |
+
+`plan-check` always emits a `RECON info fetch_head_age_seconds=<n>` line on stderr so freshness is visible. On offline fetch failure it emits `RECON warn fetch_skipped reason=<r> fetch_head_age_seconds=<n>` and still exits 0 — authoring should not be hostage to flaky networks (D16). CI never hits the skip path because its checkout step always succeeds.
+
+### CI surfaces
+
+- **`plan-claims-gate`** (`.github/workflows/plan-claims-gate.yml`) — runs on every PR with base `main`. Enumerates the plan-docs touched by the diff and runs `plan-check` against each. Non-required at ship; promote to required after 14 days clean (D9). Stack PRs whose base is not `main` won't fire this gate — workaround per `reference_ci_workflow_pr_filter` is `gh pr close && gh pr reopen` after rebasing onto `main`.
+- **`plan-claims-radar`** (`.github/workflows/plan-claims-radar.yml`) — runs on a 09:00 UTC cron (and `workflow_dispatch`). Enumerates all post-cutoff plans, files a single rolling open issue titled `plan-claims drift radar: open since YYYY-MM-DD` summarizing the drifting plans. The radar is **never** a required check — informational only. Operator closes the issue manually after acknowledging the drift.
+
+### Update-plan-on-ship discipline
+
+When an implementing PR lands, the author flips `status: active → shipped` and re-resolves the `claims:` block against post-merge `origin/main`. **Do NOT bump the `date:` field** — it stays pinned at the original authoring date, preserving grandfather status for plans that pre-date the cutoff. The R11b filename↔date lock also requires `date:` to match the filename prefix, so bumping it would break the lock.
+
+### Canonical reference
+
+Implementation plan: `docs/plans/2026-05-19-009-feat-plan-claims-and-head-drift-gate-plan.md`.
+
 ## Worktree Cleanup
 
 Accumulated `bp-<topic>/` worktrees can be cleaned with:

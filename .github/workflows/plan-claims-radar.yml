@@ -1,0 +1,183 @@
+name: Plan Claims Drift Radar
+
+on:
+  schedule:
+    # 09:00 UTC daily — outside US/EU peak so an outage doesn't paint
+    # over a workday. Phase 0 ship-seal cadence precedent.
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+# Minimum-viable scopes: issues:write to file/edit/comment, contents:read
+# to enumerate plan-docs. No PAT needed — same-repo issue ops.
+permissions:
+  issues: write
+  contents: read
+
+# A workflow_dispatch fired while a cron run is in-flight queues rather
+# than racing on issue creation (D19 idempotency invariant).
+concurrency:
+  group: plan-claims-radar
+  cancel-in-progress: false
+
+jobs:
+  radar:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch origin/main
+        # plan-check resolves paths/SHAs against origin/main (D8).
+        run: git fetch origin main
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install plan-check (base deps only)
+        run: pip install -e .
+
+      - name: Scan post-cutoff plan-docs and aggregate drift
+        id: scan
+        # Python-embed for path handling — workspace can have spaces and
+        # plan-check returns structured JSON. Result: /tmp/radar-body.md
+        # populated only when drift detected; /tmp/radar-empty marks the
+        # all-clear case.
+        run: |
+          python3 <<'PYEOF'
+          import json, subprocess, sys
+          from datetime import date, datetime, timezone
+          from pathlib import Path
+
+          CUTOFF = date(2026, 5, 20)
+          drift_rows = []  # (plan_path, status, summary)
+
+          for plan_path in sorted(Path("docs/plans").glob("*-plan.md")):
+              try:
+                  text = plan_path.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  drift_rows.append((str(plan_path), "schema_violation", "non-UTF8 file"))
+                  continue
+
+              # Cheap pre-filter: parse the date from frontmatter without
+              # invoking plan-check on grandfathered docs. plan-check itself
+              # would silently exit 0 on those — running it is harmless but
+              # wasteful at scale.
+              if not text.startswith("---"):
+                  continue  # plan-check will catch missing frontmatter on PR
+              end = text.find("\n---", 4)
+              if end < 0:
+                  continue
+              import re
+              m = re.search(r"^date:\s*(\d{4}-\d{2}-\d{2})", text[:end], re.MULTILINE)
+              if not m:
+                  continue
+              try:
+                  plan_date = date.fromisoformat(m.group(1))
+              except ValueError:
+                  continue
+              if plan_date < CUTOFF:
+                  continue
+
+              # Run plan-check --json; capture stdout regardless of exit.
+              result = subprocess.run(
+                  ["plan-check", "--json", str(plan_path)],
+                  capture_output=True,
+                  text=True,
+                  check=False,
+                  env={"LC_ALL": "C", "LANG": "C", **__import__("os").environ},
+              )
+              payload = None
+              if result.stdout.strip():
+                  try:
+                      payload = json.loads(result.stdout)
+                  except json.JSONDecodeError:
+                      pass
+
+              if result.returncode == 0:
+                  continue  # pass or grandfathered (already pre-filtered)
+
+              status = payload.get("status") if payload else f"exit_{result.returncode}"
+              if payload and payload.get("status") == "drift":
+                  d = payload.get("drift", {})
+                  summary = f"{len(d.get('paths_missing', []))} path(s) missing, {len(d.get('shas_unreachable', []))} sha(s) unreachable"
+              elif payload:
+                  summary = payload.get("status") or "drift"
+              else:
+                  summary = (result.stderr or "drift").splitlines()[0][:200]
+              drift_rows.append((str(plan_path), status, summary))
+
+          today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+          if drift_rows:
+              lines = [
+                  f"# Plan-claims drift radar — {len(drift_rows)} plan(s) drifting",
+                  "",
+                  f"_Last checked: {today} UTC_",
+                  "",
+                  "| Plan | Status | Summary |",
+                  "|------|--------|---------|",
+              ]
+              for plan, status, summary in drift_rows:
+                  # Escape pipe chars in the free-form summary so they don't
+                  # break the markdown table layout (self-review P2 autofix).
+                  safe_summary = summary.replace("|", "\\|")
+                  lines.append(f"| `{plan}` | `{status}` | {safe_summary} |")
+              lines.append("")
+              lines.append("Closure semantics: the operator closes this issue once each drift is acknowledged or resolved. Until then, the radar will keep appending daily comments below.")
+              Path("/tmp/radar-body.md").write_text("\n".join(lines), encoding="utf-8")
+              Path("/tmp/radar-state").write_text(f"drift:{len(drift_rows)}", encoding="utf-8")
+          else:
+              Path("/tmp/radar-state").write_text("clean", encoding="utf-8")
+
+          print(f"::notice::radar scan complete — {len(drift_rows)} drifting plan(s)")
+          PYEOF
+
+      - name: Reconcile rolling-issue state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          state=$(cat /tmp/radar-state)
+          today=$(date -u +%Y-%m-%d)
+
+          # Find at most one open radar issue (D19 idempotency).
+          existing=$(gh issue list \
+            --search 'in:title "plan-claims drift radar"' \
+            --state open \
+            --json number \
+            --limit 1 \
+            --jq '.[0].number // empty')
+
+          case "$state" in
+            drift:*)
+              if [ -z "$existing" ]; then
+                echo "Opening new radar issue (no open one found)"
+                gh issue create \
+                  --title "plan-claims drift radar: open since $today" \
+                  --body-file /tmp/radar-body.md
+              else
+                echo "Updating existing radar issue #$existing"
+                gh issue edit "$existing" --body-file /tmp/radar-body.md
+                gh issue comment "$existing" \
+                  --body "$today UTC: drift still present (${state#drift:} plan(s))."
+              fi
+              ;;
+            clean)
+              if [ -n "$existing" ]; then
+                echo "No drift today; commenting on open issue #$existing"
+                gh issue comment "$existing" \
+                  --body "$today UTC: no drift detected — operator may close once acknowledged-resolved."
+              else
+                echo "All clear, no open issue — nothing to do."
+              fi
+              ;;
+            *)
+              echo "::error::unexpected radar state: $state"
+              exit 1
+              ;;
+          esac
