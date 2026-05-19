@@ -66,18 +66,41 @@ class PersistIOError(RuntimeError):
     permission denied, etc)."""
 
 
+class IdentityMismatch(RuntimeError):
+    """Raised by a recipe's ``bound_predicate`` when the operator's current
+    login is for a different account than the previously-bound one (Plan
+    2026-05-19-003 Unit 1 / R6). Caught by ``run_bind`` and surfaced as a
+    BindResult with ``error_code='identity_mismatch'`` and an ``extras``
+    payload carrying ``old_account`` / ``new_account`` for the CLI to emit
+    on the terminal failed event."""
+
+    def __init__(self, *, old_account: str, new_account: str) -> None:
+        super().__init__(
+            f"identity mismatch: stored last_account={old_account!r}, "
+            f"current login={new_account!r}"
+        )
+        self.old_account = old_account
+        self.new_account = new_account
+
+
 # ───────── public types ─────────
 
 
 @dataclass(frozen=True)
 class BindResult:
     """Terminal outcome of ``run_bind``. Consumed by the CLI's ``main`` to
-    decide exit code and final event payload."""
+    decide exit code and final event payload.
+
+    ``extras`` carries auxiliary fields for the terminal ``channel.bind.failed``
+    JSONL event (e.g., ``{"old_account": "alice", "new_account": "bob"}`` for
+    ``error_code='identity_mismatch'``). Optional; defaults to ``None``.
+    """
 
     success: bool
     channel: str
     storage_state_path: Path | None
     error_code: str | None
+    extras: dict[str, Any] | None = None
 
 
 class BrowserRunner(Protocol):
@@ -261,6 +284,24 @@ def run_bind(
             storage_state_path=None,
             error_code="bound_predicate_timeout",
         )
+    except IdentityMismatch as exc:
+        # Plan 2026-05-19-003 Unit 1 / R6. Predicate detected the operator is
+        # logging in as a different account than the previously-bound one.
+        # CLI surfaces this on the terminal failed event via ``extras``; the
+        # webui's bind_job calls ``mark_identity_mismatch`` based on the
+        # error_code discriminator. Driver does NOT write storage_state
+        # (current cookies are for the wrong account) and does NOT call
+        # mark_bound.
+        return BindResult(
+            success=False,
+            channel=channel,
+            storage_state_path=None,
+            error_code="identity_mismatch",
+            extras={
+                "old_account": exc.old_account,
+                "new_account": exc.new_account,
+            },
+        )
 
     try:
         persisted = _persist_storage_state(
@@ -283,6 +324,14 @@ def run_bind(
             error_code="persist_io_error",
         )
 
+    # Plan 2026-05-19-003 Unit 1: if the recipe's predicate wrote a tentative
+    # last-account file, atomically promote it now (after storage_state is on
+    # disk, before mark_bound). Failure to promote is logged but does not
+    # block the bind from being marked successful — last_account is a UX
+    # signal for identity_mismatch detection on the NEXT bind cycle, not a
+    # security control.
+    _promote_last_account_if_pending(channel)
+
     # Status flip lives at the end — only AFTER the file is on disk 0600.
     from webui_store.channel_status import mark_bound
     mark_bound(channel, persisted)
@@ -299,6 +348,28 @@ def run_bind(
         storage_state_path=persisted,
         error_code=None,
     )
+
+
+def _promote_last_account_if_pending(channel: str) -> None:
+    """Atomically promote ``<config_dir>/<channel>-last-account.tentative`` to
+    ``<channel>-last-account.txt`` if the tentative exists.
+
+    Plan 2026-05-19-003 Unit 1. The recipe predicate writes the tentative
+    file BEFORE returning success; the driver does the atomic rename AFTER
+    storage_state persistence succeeds. This ordering ensures we never
+    record an account whose cookies aren't on disk.
+    """
+    cfg = _config_dir()
+    tentative = cfg / f"{channel}-last-account.tentative"
+    if not tentative.exists():
+        return
+    final = cfg / f"{channel}-last-account.txt"
+    try:
+        os.replace(tentative, final)
+    except OSError:
+        # Don't mask the successful bind on rename failure. The tentative
+        # orphan will be overwritten on the next bind attempt.
+        pass
 
 
 # ───────── real Playwright runner — lazy-imported ─────────
@@ -430,10 +501,12 @@ __all__ = [
     "BindResult",
     "BoundPredicateTimeout",
     "BrowserRunner",
+    "IdentityMismatch",
     "PersistIOError",
     "PlaywrightLaunchError",
     "_emit",
     "_persist_storage_state",
+    "_promote_last_account_if_pending",
     "_validate_storage_state_path",
     "run_bind",
 ]

@@ -33,10 +33,23 @@ from webui_store.channel_status import get_status
 
 @pytest.fixture(autouse=True)
 def _reset_status_store(tmp_path, monkeypatch):
-    """Each test gets a fresh channel-status.json next to the isolated config dir."""
-    fresh = _config_dir() / "channel-status.json"
+    """Each test gets a fresh channel-status.json + cleaned channel-side
+    artifacts (storage_state.json, last-account files) next to the isolated
+    config dir."""
+    cfg = _config_dir()
+    fresh = cfg / "channel-status.json"
     if fresh.exists():
         fresh.unlink()
+    # Clean per-channel artifacts that previous tests may have left.
+    for channel in ("velog", "medium", "blogger"):
+        for suffix in (
+            "storage-state.json",
+            "last-account.txt",
+            "last-account.tentative",
+        ):
+            artifact = cfg / f"{channel}-{suffix}"
+            if artifact.exists():
+                artifact.unlink()
     monkeypatch.setattr(channel_status_store, "path", fresh, raising=False)
 
 
@@ -268,10 +281,13 @@ class _FakeBrowserRunner:
         success: bool,
         launch_error: str | None = None,
         predicate_timeout: bool = False,
+        identity_mismatch: tuple[str, str] | None = None,
     ) -> None:
         self.success = success
         self.launch_error = launch_error
         self.predicate_timeout = predicate_timeout
+        # tuple of (old_account, new_account) → predicate raises IdentityMismatch
+        self.identity_mismatch = identity_mismatch
 
     def launch_and_wait(
         self,
@@ -285,5 +301,158 @@ class _FakeBrowserRunner:
         on_browser_ready()
         if self.predicate_timeout:
             raise drv.BoundPredicateTimeout()
+        if self.identity_mismatch is not None:
+            old, new = self.identity_mismatch
+            raise drv.IdentityMismatch(old_account=old, new_account=new)
         on_login_detected()
         return _FakeStorageStateProvider()
+
+
+# ─── Plan 2026-05-19-003 Unit 1 — IdentityMismatch driver arm ───
+
+
+class TestIdentityMismatchClass:
+    """IdentityMismatch carries old_account + new_account for the failed event."""
+
+    def test_exception_records_accounts(self):
+        exc = drv.IdentityMismatch(old_account="alice", new_account="bob")
+        assert exc.old_account == "alice"
+        assert exc.new_account == "bob"
+
+    def test_is_runtime_error_subclass(self):
+        # Subclass of RuntimeError so anything that catches generic Exception
+        # still cleans up the browser context in launch_and_wait.
+        assert issubclass(drv.IdentityMismatch, RuntimeError)
+
+
+class TestRunBindIdentityMismatchArm:
+    """run_bind catches IdentityMismatch and returns a BindResult that carries
+    old_account / new_account in extras for the CLI to surface via JSONL."""
+
+    def test_returns_identity_mismatch_error_code(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        result = drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(
+                success=True, identity_mismatch=("alice", "bob")
+            ),
+        )
+        assert result.success is False
+        assert result.error_code == "identity_mismatch"
+        assert result.storage_state_path is None
+
+    def test_extras_carry_old_and_new_account(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        result = drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(
+                success=True, identity_mismatch=("alice", "bob")
+            ),
+        )
+        assert result.extras == {"old_account": "alice", "new_account": "bob"}
+
+    def test_does_not_mark_bound(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(
+                success=True, identity_mismatch=("alice", "bob")
+            ),
+        )
+        status = get_status("medium")
+        # mark_identity_mismatch is webui's responsibility (bind_job reads
+        # JSONL and decides); driver only writes status if mark_bound runs.
+        assert status["status"] == "unbound"
+
+    def test_storage_state_file_not_written(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(
+                success=True, identity_mismatch=("alice", "bob")
+            ),
+        )
+        target = _config_dir() / "medium-storage-state.json"
+        assert not target.exists()
+
+
+class TestBindResultExtras:
+    """BindResult.extras is optional (default None) and carries auxiliary
+    payload for failure terminal events."""
+
+    def test_extras_defaults_to_none(self):
+        result = drv.BindResult(
+            success=True,
+            channel="velog",
+            storage_state_path=None,
+            error_code=None,
+        )
+        assert result.extras is None
+
+    def test_happy_path_has_no_extras(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        result = drv.run_bind(
+            channel="velog",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+        assert result.extras is None
+
+
+class TestTentativeLastAccountRename:
+    """On successful bind, the driver atomically renames
+    ``<config_dir>/<channel>-last-account.tentative`` to
+    ``<channel>-last-account.txt`` (after _persist_storage_state succeeds,
+    before mark_bound). Plan 003 Unit 1's predicate writes the tentative
+    file."""
+
+    def test_rename_happens_on_success(self, capsys):
+        # Pre-write a tentative file as the recipe predicate would have
+        tentative = _config_dir() / "medium-last-account.tentative"
+        tentative.parent.mkdir(parents=True, exist_ok=True)
+        tentative.write_text("alice\n")
+
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        result = drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+        assert result.success is True
+
+        final = _config_dir() / "medium-last-account.txt"
+        assert final.exists()
+        assert final.read_text() == "alice\n"
+        assert not tentative.exists()
+
+    def test_no_tentative_file_is_noop(self, capsys):
+        # No tentative file: bind still succeeds; no last-account file
+        # written by the driver.
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        result = drv.run_bind(
+            channel="velog",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+        assert result.success is True
+        assert not (_config_dir() / "velog-last-account.txt").exists()
+
+    def test_tentative_not_renamed_on_failure(self, capsys):
+        # Pre-write a tentative as if a prior bind crashed mid-flow
+        tentative = _config_dir() / "medium-last-account.tentative"
+        tentative.parent.mkdir(parents=True, exist_ok=True)
+        tentative.write_text("alice\n")
+
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True, predicate_timeout=True),
+        )
+        # On predicate_timeout, no rename happens; tentative stays.
+        assert tentative.exists()
+        assert not (_config_dir() / "medium-last-account.txt").exists()

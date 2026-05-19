@@ -144,15 +144,21 @@ def main(argv: Sequence[str] | None = None, *, _browser_runner=None) -> None:
         return  # unreachable
 
     if not result.success:
+        # Plan 2026-05-19-003 Unit 1: surface BindResult.extras (e.g.,
+        # old_account/new_account for identity_mismatch) on the terminal
+        # JSONL event so the webui's bind_job can call
+        # mark_identity_mismatch with the right discriminator.
+        extras = result.extras or {}
         driver._emit(
             "channel.bind.failed",
             channel=channel,
             error_code=result.error_code or "unknown",
+            **extras,
         )
         # Map error_code to PipelineError subclass for the exit code.
         # All our internal failure codes are dependency-class (exit 3) — the
         # operator needs to take an action (re-install Playwright, re-login,
-        # check disk).
+        # check disk, resolve identity-mismatch in the UI).
         from backlink_publisher._util.errors import DependencyError
         handle_error(
             DependencyError(

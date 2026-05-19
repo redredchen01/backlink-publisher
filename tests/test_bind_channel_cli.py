@@ -109,10 +109,12 @@ class _RecordingBrowserRunner:
         success: bool = True,
         launch_error: str | None = None,
         predicate_timeout: bool = False,
+        identity_mismatch: tuple[str, str] | None = None,
     ) -> None:
         self.success = success
         self.launch_error = launch_error
         self.predicate_timeout = predicate_timeout
+        self.identity_mismatch = identity_mismatch
 
     def launch_and_wait(self, *, recipe, on_browser_ready, on_login_detected):
         from backlink_publisher.cli._bind import driver as drv
@@ -121,6 +123,9 @@ class _RecordingBrowserRunner:
         on_browser_ready()
         if self.predicate_timeout:
             raise drv.BoundPredicateTimeout()
+        if self.identity_mismatch is not None:
+            old, new = self.identity_mismatch
+            raise drv.IdentityMismatch(old_account=old, new_account=new)
         on_login_detected()
         return _FakeStorageStateProvider()
 
@@ -129,3 +134,49 @@ class _FakeStorageStateProvider:
     def __call__(self, *, path):
         from pathlib import Path
         Path(path).write_text('{"cookies": [], "origins": []}')
+
+
+# ─── Plan 2026-05-19-003 Unit 1 — IdentityMismatch CLI emission ───
+
+
+class TestIdentityMismatchFailedEvent:
+    """When run_bind returns BindResult with error_code='identity_mismatch',
+    the CLI emits channel.bind.failed with error_code + old_account +
+    new_account in the payload, and exits 3 (DependencyError class)."""
+
+    def test_emits_failed_event_with_error_code(self, capsys):
+        fake = _RecordingBrowserRunner(
+            success=True, identity_mismatch=("alice", "bob")
+        )
+        with pytest.raises(SystemExit) as excinfo:
+            bc.main(["--channel", "medium"], _browser_runner=fake)
+        assert excinfo.value.code == 3
+
+        events = _collect_events(capsys.readouterr().out)
+        assert events[-1]["event"] == "channel.bind.failed"
+        assert events[-1]["error_code"] == "identity_mismatch"
+
+    def test_emits_extras_old_account_and_new_account(self, capsys):
+        fake = _RecordingBrowserRunner(
+            success=True, identity_mismatch=("alice", "bob")
+        )
+        with pytest.raises(SystemExit):
+            bc.main(["--channel", "medium"], _browser_runner=fake)
+
+        events = _collect_events(capsys.readouterr().out)
+        terminal = events[-1]
+        assert terminal["old_account"] == "alice"
+        assert terminal["new_account"] == "bob"
+
+    def test_non_identity_mismatch_failure_has_no_account_extras(self, capsys):
+        """Regression: existing failure paths (predicate timeout, launch
+        error) must not gain account extras."""
+        fake = _RecordingBrowserRunner(success=True, predicate_timeout=True)
+        with pytest.raises(SystemExit):
+            bc.main(["--channel", "medium"], _browser_runner=fake)
+
+        events = _collect_events(capsys.readouterr().out)
+        terminal = events[-1]
+        assert terminal["event"] == "channel.bind.failed"
+        assert "old_account" not in terminal
+        assert "new_account" not in terminal
