@@ -36,11 +36,12 @@ import fcntl
 import json
 import logging
 import os
+import random
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import requests
 
@@ -51,7 +52,6 @@ from backlink_publisher.publishing.adapters.telegraph_node import (
 )
 from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
-from .retry import retry_transient_call
 
 
 log = logging.getLogger(__name__)
@@ -163,9 +163,13 @@ def _load_token(config: Config) -> dict[str, str]:
             f"Cannot parse telegraph token: {exc}"
         ) from None
 
-    if "access_token" not in data:
+    if not data.get("access_token"):
+        # Catches both missing key and empty-string value — an empty
+        # access_token would silently slip through to Telegraph and trigger
+        # 401 self-heal as a side effect, masking the real (operator-caused)
+        # config error.  Fail loud instead.
         raise DependencyError(
-            f"telegraph-token.json missing 'access_token' field"
+            "telegraph-token.json missing or empty 'access_token' field"
         )
     return data
 
@@ -194,7 +198,7 @@ def _write_token_atomic(path: Path, data: dict[str, str]) -> None:
 
 
 @contextmanager
-def _token_lock(token_path: Path):
+def _token_lock(token_path: Path) -> Iterator[None]:
     """Advisory file lock around the rotate-write sequence.
 
     Two concurrent publish processes hitting 401 simultaneously would
@@ -205,6 +209,9 @@ def _token_lock(token_path: Path):
     The lock file lives next to the token file with a ``.lock`` suffix
     and is created if absent.  Lock is released and the file kept (no
     cleanup race needed).
+
+    Poll uses jittered sleep to avoid thundering-herd wakeups when
+    multiple peers hit the deadline together.
     """
     lock_path = _lock_path(token_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,7 +228,7 @@ def _token_lock(token_path: Path):
                         f"Could not acquire telegraph token lock "
                         f"(waited {_LOCK_TIMEOUT_S}s): {lock_path}"
                     )
-                time.sleep(0.1)
+                time.sleep(random.uniform(0.05, 0.15))
         yield
     finally:
         try:
@@ -243,8 +250,13 @@ def _archive_orphan_token(token_path: Path) -> Path | None:
     """
     if not token_path.exists():
         return None
-    # ISO 8601 UTC, ``-`` instead of ``:`` for filesystem safety.
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # ISO 8601 UTC with microseconds (``-`` instead of ``:`` for filesystem
+    # safety).  Microseconds avoid same-second collisions between two
+    # concurrent rotations that would otherwise let the second
+    # ``os.replace`` silently overwrite the first archive and lose the
+    # orphaned access_token (review finding: adversarial + security +
+    # reliability triple-flagged).
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     archive = token_path.with_suffix(token_path.suffix + f".orphaned-{stamp}")
     os.replace(token_path, archive)
     os.chmod(archive, 0o600)
@@ -290,11 +302,23 @@ def _create_account(short_name: str) -> str:
         raise ExternalServiceError(
             f"Telegraph createAccount rejected: {body.get('error', body)}"
         )
-    return body["result"]["access_token"]
+    # Defensive against unexpected response shape (Telegraph API change
+    # / proxy rewrite): a malformed ``result`` would otherwise surface as
+    # a bare KeyError instead of an actionable ExternalServiceError.
+    result = body.get("result") or {}
+    new_token = result.get("access_token")
+    if not new_token:
+        raise ExternalServiceError(
+            f"Telegraph createAccount returned malformed body: {body}"
+        )
+    return new_token
 
 
 def _create_page(
-    access_token: str, title: str, nodes: list, return_content: bool = False
+    access_token: str,
+    title: str,
+    nodes: list[dict[str, Any]],
+    return_content: bool = False,
 ) -> dict[str, Any]:
     """POST createPage.  Returns the raw Telegraph response body.
 
@@ -323,15 +347,6 @@ def _create_page(
         ) from exc
 
 
-def _is_retryable_5xx_or_429(exc: Exception) -> bool:
-    """Predicate for retry_transient_call: 429 + 5xx HTTPError."""
-    if not isinstance(exc, requests.HTTPError):
-        return False
-    if exc.response is None:
-        return False
-    return exc.response.status_code in {429, 500, 502, 503, 504}
-
-
 # ── Adapter ──────────────────────────────────────────────────────────────────
 
 
@@ -350,9 +365,16 @@ class TelegraphAPIAdapter(Publisher):
         log.info("telegraph_publish_start id=%s title=%r", article_id, title)
 
         # 1. Convert markdown → Node tree.  Pre-flight 60 KB budget check
-        #    before any network I/O.
+        #    before any network I/O.  Wrap conversion errors as
+        #    ExternalServiceError so callers see a consistent exception type
+        #    instead of HTMLParser internals bubbling out.
         md = payload.get("content_markdown") or payload.get("content_md") or ""
-        nodes, stats = markdown_to_telegraph_nodes(md)
+        try:
+            nodes, stats = markdown_to_telegraph_nodes(md)
+        except Exception as exc:
+            raise ExternalServiceError(
+                f"Telegraph markdown conversion failed: {exc}"
+            ) from exc
         if not nodes:
             raise ExternalServiceError(
                 "Telegraph payload is empty after markdown conversion"
@@ -403,7 +425,15 @@ class TelegraphAPIAdapter(Publisher):
                 f"Telegraph createPage rejected: {body.get('error', body)}"
             )
 
-        published_url = body["result"]["url"]
+        # Defensive against unexpected response shape — see same pattern in
+        # _create_account.  ``result.url`` is documented but a malformed
+        # body would otherwise raise bare KeyError.
+        result = body.get("result") or {}
+        published_url = result.get("url")
+        if not published_url:
+            raise ExternalServiceError(
+                f"Telegraph createPage returned malformed body: {body}"
+            )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log.info(
             "telegraph_publish_done id=%s url=%s elapsed_ms=%d",
@@ -416,7 +446,7 @@ class TelegraphAPIAdapter(Publisher):
             "anchors": stats.get("anchors", 0),
             "utf8_bytes": stats.get("utf8_bytes", 0),
             "downgrades": stats.get("downgrades", 0),
-            "telegraph_path": body["result"].get("path", ""),
+            "telegraph_path": result.get("path", ""),
         }
 
         if mode == "draft":
