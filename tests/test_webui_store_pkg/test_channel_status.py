@@ -25,6 +25,8 @@ from webui_store.channel_status import (
     list_all,
     mark_bound,
     mark_expired,
+    mark_identity_mismatch,
+    mark_verified,
 )
 
 
@@ -73,11 +75,11 @@ class TestGetStatusDefaults:
         # "unknown" is NOT in CHANNELS but get_status must not raise — it's
         # a read API for UI; we just report "unbound".
         rec = get_status("unknown")
-        assert rec == {"status": "unbound", "bound_at": None, "storage_state_path": None}
+        assert rec == {"status": "unbound", "bound_at": None, "storage_state_path": None, "last_verified_at": None}
 
     def test_known_unbound_channel_returns_default(self):
         rec = get_status("velog")
-        assert rec == {"status": "unbound", "bound_at": None, "storage_state_path": None}
+        assert rec == {"status": "unbound", "bound_at": None, "storage_state_path": None, "last_verified_at": None}
 
     def test_list_all_returns_dict_of_records(self):
         config_target = _config_dir() / "blogger-state.json"
@@ -184,3 +186,145 @@ class TestStoreSerialization:
             data = json.load(f)
         assert "velog" in data
         assert data["velog"]["status"] == "bound"
+
+
+# ─── Plan 2026-05-19-003 Unit 0 — schema extension ───
+
+
+class TestMarkBoundInitializesLastVerifiedAt:
+    """mark_bound writes last_verified_at=None so a fresh probe is needed."""
+
+    def test_new_bind_has_last_verified_at_none(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+
+        rec = get_status("medium")
+        assert "last_verified_at" in rec
+        assert rec["last_verified_at"] is None
+
+
+class TestMarkVerified:
+    """mark_verified updates only last_verified_at; leaves status untouched."""
+
+    def test_mark_verified_sets_iso_timestamp(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+
+        mark_verified("medium")
+
+        rec = get_status("medium")
+        assert rec["status"] == "bound"
+        assert rec["last_verified_at"] is not None
+        # ISO 8601 starts with year-month-day
+        assert rec["last_verified_at"].startswith("20")
+
+    def test_mark_verified_preserves_other_fields(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        bound_at_before = get_status("medium")["bound_at"]
+
+        mark_verified("medium")
+
+        rec = get_status("medium")
+        assert rec["bound_at"] == bound_at_before
+        assert rec["storage_state_path"] == str(target)
+
+    def test_mark_verified_rejects_unknown_channel(self):
+        with pytest.raises(UsageError):
+            mark_verified("twitter")
+
+    def test_mark_verified_on_unbound_channel_still_records_timestamp(self):
+        # Edge: operator clicks "Verify Now" on an unbound channel — should
+        # produce a verifiable record without claiming bound status.
+        mark_verified("velog")
+        rec = get_status("velog")
+        # Status stays whatever it was; last_verified_at gets set.
+        assert rec["last_verified_at"] is not None
+
+
+class TestMarkIdentityMismatch:
+    """mark_identity_mismatch flips status; records old/new accounts."""
+
+    def test_mark_identity_mismatch_records_accounts(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+
+        mark_identity_mismatch("medium", old_account="alice", new_account="bob")
+
+        rec = get_status("medium")
+        assert rec["status"] == "identity_mismatch"
+        assert rec["identity_mismatch_old"] == "alice"
+        assert rec["identity_mismatch_new"] == "bob"
+
+    def test_mark_identity_mismatch_preserves_bound_at(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        bound_at_before = get_status("medium")["bound_at"]
+
+        mark_identity_mismatch("medium", old_account="alice", new_account="bob")
+
+        rec = get_status("medium")
+        assert rec["bound_at"] == bound_at_before
+        assert rec["storage_state_path"] == str(target)
+
+    def test_mark_identity_mismatch_rejects_unknown_channel(self):
+        with pytest.raises(UsageError):
+            mark_identity_mismatch("twitter", old_account="a", new_account="b")
+
+
+class TestReconcileIgnoresIdentityMismatch:
+    """reconcile_on_load must not demote identity_mismatch records."""
+
+    def test_reconcile_leaves_identity_mismatch_alone(self):
+        from webui_store.channel_status import reconcile_on_load
+
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        mark_identity_mismatch("medium", old_account="alice", new_account="bob")
+
+        # Even if storage_state_path file disappears, identity_mismatch
+        # should NOT be demoted to expired by reconcile (operator must
+        # explicitly resolve it via Settings UI).
+        target.unlink()
+        reconcile_on_load()
+
+        rec = get_status("medium")
+        assert rec["status"] == "identity_mismatch"
+
+
+class TestSchemaBackwardCompat:
+    """Old records without last_verified_at must load without KeyError."""
+
+    def test_legacy_record_without_last_verified_at(self):
+        # Simulate a pre-extension record on disk
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+
+        legacy_data = {
+            "medium": {
+                "status": "bound",
+                "bound_at": "2026-01-01T00:00:00+00:00",
+                "storage_state_path": str(target),
+                # NOTE: no last_verified_at field
+            }
+        }
+        channel_status_store.save(legacy_data)
+
+        rec = get_status("medium")
+        # Reading must not raise; last_verified_at appears as None when
+        # callers request it via .get(...).
+        assert rec.get("last_verified_at") is None
+        assert rec["status"] == "bound"
