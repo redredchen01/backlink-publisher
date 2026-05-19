@@ -165,9 +165,25 @@ def spike_7(profile_dir: Path) -> int:
         page = ctx.new_page()
         page.on("framenavigated", lambda frame: nav_events.append(frame.url))
         page.goto("https://medium.com/m/signin", wait_until="load")
-        print("Walk through Google SSO + 2FA now. When you reach a logged-in")
-        print("page, press Enter here.")
-        input(">>> done? ")
+        print("Walk through Google SSO + 2FA in the headed window now.", flush=True)
+        print("Polling URL every 3s for up to 15 minutes; once URL leaves", flush=True)
+        print("/m/signin (login finished) the script dumps captured events.", flush=True)
+        deadline = time.time() + 900
+        while time.time() < deadline:
+            time.sleep(3)
+            try:
+                cur = page.url
+            except Exception:
+                cur = ""
+            if cur and "/m/signin" not in cur:
+                print(f"Login detected at: {cur}", flush=True)
+                # Give SPA a brief moment to finish post-login navigations
+                time.sleep(4)
+                break
+        else:
+            print("Timed out waiting for manual login (15 min).", flush=True)
+            ctx.close()
+            return 2
 
         print()
         print(f"Captured {len(nav_events)} framenavigated event(s):")
