@@ -105,6 +105,198 @@ class TestMediumHostFilter:
         assert self.filter("medium.com.attacker.tld") is False
 
 
+# ─── Plan 2026-05-19-003 Unit 1 — Medium recipe hardening ───
+
+
+class TestMediumCookieSanity:
+    """Cookie sanity = whitelist match OR (HttpOnly + long expires + not in
+    anonymous-tracking name list). Defends against false-positive 'bound'
+    state when Medium sets an anonymous HttpOnly tracking cookie on
+    logged-out page loads."""
+
+    def setup_method(self):
+        from backlink_publisher.cli._bind.recipes.medium import (
+            _cookie_sanity_passes,
+        )
+        self.check = _cookie_sanity_passes
+
+    def _make(self, *, name, httpOnly=True, expires_in_days=90):
+        import time as _t
+        return {
+            "name": name,
+            "httpOnly": httpOnly,
+            "expires": _t.time() + expires_in_days * 86400,
+        }
+
+    def test_whitelisted_cookie_passes(self):
+        # Whitelist constant lives in the recipe module; we exercise it
+        # via a known candidate name. If the whitelist is empty (no Unit 0
+        # spike data yet), this test exercises the structural fallback —
+        # both behaviors are acceptable and the assertion holds.
+        cookies = [self._make(name="sid")]
+        assert self.check(cookies) is True
+
+    def test_structural_fallback_accepts_long_lived_httponly(self):
+        # Unknown-name cookie that's HttpOnly + 90-day expires + not in
+        # tracking list → passes structural fallback.
+        cookies = [self._make(name="medium-session-v2", expires_in_days=90)]
+        assert self.check(cookies) is True
+
+    def test_rejects_anonymous_tracking_cookies(self):
+        # Anonymous tracking cookie names must NOT pass even if HttpOnly +
+        # long expires. Defeats the "any HttpOnly = bound" false positive.
+        cookies = [
+            self._make(name="uid", expires_in_days=365),
+            self._make(name="_ga", expires_in_days=365),
+            self._make(name="_dd_s", expires_in_days=365),
+        ]
+        assert self.check(cookies) is False
+
+    def test_rejects_short_lived_cookies(self):
+        # HttpOnly but session-scoped or <7 day expiry → not auth.
+        cookies = [self._make(name="medium-temp", expires_in_days=3)]
+        assert self.check(cookies) is False
+
+    def test_rejects_non_httponly(self):
+        # Non-HttpOnly cookies are visible to JS → not the auth path.
+        cookies = [
+            self._make(name="medium-session-v2", httpOnly=False, expires_in_days=90)
+        ]
+        assert self.check(cookies) is False
+
+    def test_empty_cookie_list_fails(self):
+        assert self.check([]) is False
+
+    def test_mixed_pass_takes_precedence(self):
+        # If one cookie passes, return True even if others fail.
+        cookies = [
+            self._make(name="_ga", expires_in_days=365),
+            self._make(name="medium-session-v2", expires_in_days=90),
+        ]
+        assert self.check(cookies) is True
+
+
+class TestMediumUsernameScrape:
+    """_scrape_username uses 3-tier fallback: DOM data-testid → og:url meta
+    → page.url parse. Returns None if all fail."""
+
+    def setup_method(self):
+        from backlink_publisher.cli._bind.recipes.medium import (
+            _scrape_username,
+        )
+        self.scrape = _scrape_username
+
+    def test_dom_data_testid_first(self):
+        page = _FakePage(
+            url="https://medium.com/@alice",
+            dom_user_link="https://medium.com/@alice_via_dom",
+        )
+        assert self.scrape(page) == "alice_via_dom"
+
+    def test_og_url_fallback(self):
+        page = _FakePage(
+            url="https://medium.com/some-path",
+            dom_user_link=None,
+            og_url="https://medium.com/@bob",
+        )
+        assert self.scrape(page) == "bob"
+
+    def test_url_parse_last_resort(self):
+        page = _FakePage(url="https://medium.com/@charlie", dom_user_link=None, og_url=None)
+        assert self.scrape(page) == "charlie"
+
+    def test_returns_none_when_all_fail(self):
+        page = _FakePage(url="https://medium.com/", dom_user_link=None, og_url=None)
+        assert self.scrape(page) is None
+
+
+class TestMediumLastAccountFile:
+    """_read_last_account + _write_last_account_tentative round-trip.
+
+    Uses the autouse ``_isolate_user_dirs`` fixture's env var indirection
+    via ``BACKLINK_PUBLISHER_CONFIG_DIR``. Cleans per-test artifacts to
+    isolate from other tests in this file.
+    """
+
+    def setup_method(self):
+        from backlink_publisher.cli._bind.recipes.medium import (
+            _read_last_account,
+            _write_last_account_tentative,
+        )
+        from backlink_publisher.config.loader import _config_dir
+        self._read = _read_last_account
+        self._write = _write_last_account_tentative
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        for name in ("medium-last-account.txt", "medium-last-account.tentative"):
+            p = cfg / name
+            if p.exists():
+                p.unlink()
+
+    def test_read_returns_none_when_file_absent(self):
+        assert self._read() is None
+
+    def test_write_then_read_after_promote(self):
+        from backlink_publisher.config.loader import _config_dir
+        cfg = _config_dir()
+
+        self._write("alice")
+        # Simulate driver promoting tentative → final
+        (cfg / "medium-last-account.tentative").rename(
+            cfg / "medium-last-account.txt"
+        )
+        assert self._read() == "alice"
+
+    def test_write_creates_tentative_with_mode_0600(self):
+        from backlink_publisher.config.loader import _config_dir
+        cfg = _config_dir()
+
+        self._write("alice")
+        tentative = cfg / "medium-last-account.tentative"
+        assert tentative.exists()
+        assert (tentative.stat().st_mode & 0o777) == 0o600
+
+
+# ─── Helpers for predicate testing ───
+
+
+class _FakePage:
+    """Minimal fake page that mimics the Playwright Page API surface that
+    the Medium predicate uses. Tests instantiate this with canned values
+    for URL, DOM scrape result, and og:url meta."""
+
+    def __init__(
+        self,
+        *,
+        url: str,
+        dom_user_link: str | None = None,
+        og_url: str | None = None,
+    ):
+        self.url = url
+        self._dom_user_link = dom_user_link
+        self._og_url = og_url
+
+    def query_selector(self, selector: str):
+        if "headerUserIcon" in selector and self._dom_user_link:
+            return _FakeElement(href=self._dom_user_link)
+        if 'og:url' in selector and self._og_url:
+            return _FakeElement(content=self._og_url)
+        return None
+
+
+class _FakeElement:
+    def __init__(self, *, href: str | None = None, content: str | None = None):
+        self._href = href
+        self._content = content
+
+    def get_attribute(self, name: str) -> str | None:
+        if name == "href":
+            return self._href
+        if name == "content":
+            return self._content
+        return None
+
+
 class TestBloggerHostFilter:
     def setup_method(self):
         self.filter = RECIPES["blogger"].cookie_host_filter
