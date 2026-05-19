@@ -118,3 +118,53 @@ def test_verify_medium_requires_token_or_playwright():
 def test_verify_medium_ok_with_token():
     cfg = Config(medium_integration_token="tok")
     verify_adapter_setup("medium", cfg)  # should not raise
+
+
+# ── Telegraph dispatcher integration (Plan 2026-05-19-002 U1) ─────────────────
+
+TELEGRAPH_PAYLOAD = {
+    "id": "tg-disp-1",
+    "platform": "telegraph",
+    "title": "Test Telegraph Routing",
+    "content_markdown": "# T\n\nBody with [link](https://x.com).\n",
+    "tags": [],
+    "main_domain": "https://x.com/",
+}
+
+TELEGRAPH_RESULT = AdapterResult(
+    status="published",
+    adapter="telegraph-api",
+    platform="telegraph",
+    published_url="https://telegra.ph/test-disp-01-01",
+)
+
+
+@patch("backlink_publisher.adapters.TelegraphAPIAdapter.publish", return_value=TELEGRAPH_RESULT)
+def test_telegraph_routes_to_telegraph_adapter(mock_pub):
+    result = publish(TELEGRAPH_PAYLOAD, mode="publish", config=Config())
+    assert result.adapter == "telegraph-api"
+    assert result.platform == "telegraph"
+    assert result.published_url == "https://telegra.ph/test-disp-01-01"
+    mock_pub.assert_called_once()
+
+
+def test_telegraph_dry_run_returns_sentinel():
+    result = publish(TELEGRAPH_PAYLOAD, mode="publish", config=Config(), dry_run=True)
+    assert result._dry_run is True
+    assert result.adapter == "telegraph-api"
+
+
+def test_verify_telegraph_ok_without_token(tmp_path, monkeypatch):
+    """No token + writable config_dir → verify passes (adapter will bootstrap)."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    verify_adapter_setup("telegraph", Config())  # should not raise
+
+
+def test_verify_telegraph_raises_on_unparseable_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    bad = tmp_path / "telegraph-token.json"
+    bad.write_text("not json {")
+    import os
+    os.chmod(bad, 0o600)
+    with pytest.raises(DependencyError, match="parse|access_token"):
+        verify_adapter_setup("telegraph", Config())
