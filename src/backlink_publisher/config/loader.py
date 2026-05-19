@@ -1,33 +1,19 @@
 """TOML loader + parser dispatcher."""
 from __future__ import annotations
 
-import json
 import logging
-import math
 import os
 import stat
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from backlink_publisher.errors import DependencyError, InputValidationError
-from backlink_publisher.logger import plan_logger
-from backlink_publisher.url_utils import validate_https_url, validate_main_domain_url
+from backlink_publisher.errors import DependencyError
 from .types import (
-    ANCHOR_TYPES,
-    AnchorAlarmConfig,
-    AnchorAlarmOverride,
     BloggerOAuthConfig,
     Config,
-    DEFAULT_WORK_TEMPLATES,
-    LLMProviderConfig,
     MediumOAuthConfig,
     ThreeUrlConfig,
-    _LLM_API_KEY_ENV_VAR,
-    _PROPORTIONS_SUM_TOLERANCE,
-    _SAFE_SEO_PROPORTIONS,
-    _UNSAFE_IN_ANCHOR,
+    VelogConfig,
 )
 
 if sys.version_info >= (3, 11):
@@ -167,6 +153,16 @@ def load_config(path: Path | None = None) -> Config:
 
     anchor_alarm = _parse_anchor_alarm(data.get("anchor_alarm"))
 
+    velog_section = data.get("velog")  # None when section absent
+    velog: VelogConfig | None = None
+    if velog_section is not None:
+        raw_path = velog_section.get("cookies_path", "")
+        if raw_path == "":
+            # [velog] present but cookies_path not set → use default
+            velog = VelogConfig()
+        else:
+            velog = VelogConfig(cookies_path=Path(raw_path).expanduser())
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -180,6 +176,7 @@ def load_config(path: Path | None = None) -> Config:
         llm_anchor_provider=llm_anchor_provider,
         target_three_url=target_three_url,
         anchor_alarm=anchor_alarm,
+        velog=velog,
     )
 
 
