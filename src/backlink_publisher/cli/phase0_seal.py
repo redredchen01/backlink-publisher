@@ -154,7 +154,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     try:
         allowlist = V.load_allowlist(repo_root)
     except (V.AllowlistFileMissingError, V.EmptyAllowlistError, V.AllowlistSchemaError) as exc:
-        print("phase0-seal init: {exc}", file=sys.stderr)
+        print(f"phase0-seal init: {exc}", file=sys.stderr)
         return EXIT_VERDICT
 
     # Build verdict_ref (routine or manual)
@@ -169,7 +169,7 @@ def _handle_init(args: argparse.Namespace) -> int:
                 repo_root=repo_root,
             )
     except _InitError as exc:
-        print("phase0-seal init: {exc}", file=sys.stderr)
+        print(f"phase0-seal init: {exc}", file=sys.stderr)
         return exc.exit_code
 
     # Discover staged worktrees
@@ -254,7 +254,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     if not args.yes:
         print("phase0-seal init: about to write seal notes:", file=sys.stderr)
         for sha, body in bodies.items():
-            print("  {sha}: {body[:160]}{'...' if len(body) > 160 else ''}", file=sys.stderr)
+            print(f"  {sha}: {body[:160]}{'...' if len(body) > 160 else ''}", file=sys.stderr)
         try:
             resp = input("Continue? [y/N]: ")
         except EOFError:
@@ -301,7 +301,7 @@ def _handle_init(args: argparse.Namespace) -> int:
     try:
         _post_push_verify(repo_root, bodies)
     except _NotesPushDidNotLand as exc:
-        print("phase0-seal init: {exc}", file=sys.stderr)
+        print(f"phase0-seal init: {exc}", file=sys.stderr)
         return EXIT_MISUSE
 
     print(
@@ -573,7 +573,7 @@ def _print_markdown_note(obj_sha: str, body: dict) -> None:
         val = _get_nested(body, field)
         if val is None:
             continue
-        label = field.split(".")[-1].rstrip("_short").replace("_", " ")
+        label = field.split(".")[-1].removesuffix("_short").replace("_", " ")
         print(f"- **{label}**: `{val}`")
 
 
@@ -697,6 +697,9 @@ def _handle_reseal(args: argparse.Namespace) -> int:
                 ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "add", "-f", "-m", new_body, new_sha],
                 capture_output=True, text=True,
             )
+            if proc.returncode != 0:
+                print(f"phase0-seal reseal: failed to overwrite note at {new_sha}: {proc.stderr.strip()}", file=sys.stderr)
+                return EXIT_MISUSE
         else:
             proc = subprocess.run(
                 ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "add", "-m", new_body, new_sha],
@@ -705,10 +708,13 @@ def _handle_reseal(args: argparse.Namespace) -> int:
             if proc.returncode != 0:
                 print(f"phase0-seal reseal: failed to add note at {new_sha}: {proc.stderr.strip()}", file=sys.stderr)
                 return EXIT_MISUSE
-            subprocess.run(
+            rm = subprocess.run(
                 ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "remove", old_sha],
                 capture_output=True, text=True,
             )
+            if rm.returncode != 0:
+                print(f"phase0-seal reseal: failed to remove old note at {old_sha}: {rm.stderr.strip()}", file=sys.stderr)
+                return EXIT_MISUSE
     push = subprocess.run(
         ["git", "-C", str(repo_root), "push", "origin", f"{_NOTES_REF}:{_NOTES_REF}"],
         capture_output=True, text=True,
@@ -740,7 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.handler(args) or EXIT_OK
     except NotImplementedError as exc:
-        print("phase0-seal: {exc}", file=sys.stderr)
+        print(f"phase0-seal: {exc}", file=sys.stderr)
         return EXIT_NOT_IMPLEMENTED
 
 
