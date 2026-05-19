@@ -22,8 +22,8 @@ ceiling = 780
 rationale = "Pipeline stage 3 (SLOC 741 after plan 2026-05-19-001 Unit 6 — adds two AuthExpiredError catch handlers calling mark_expired + checkpoint write before the existing DependencyError handler at the resume + main dispatch sites). F5 ThrottleClock + AuthExpiredError-handler extraction will drop ~70 SLOC; lower ceiling then."
 
 [files."src/backlink_publisher/content/fetch.py"]
-ceiling = 370
-rationale = "Grew rapidly via PRs #20/#25/#26/#27/#28 (cache TTL + stats + SSRF + soft-404 + prefetch) while still flat; relocated by PR #50 to content/ subpackage. SLOC 340 at seed. Future SSRF-guard extraction may shrink further; lower ceiling at that point."
+ceiling = 290
+rationale = "SSRF defence extracted to _util/net_safety.py in 2026-05-19 — SLOC dropped from 340 to 253. Ceiling 290 provides 30-SLOC headroom for minor accretion."
 
 [files."src/backlink_publisher/config/writer.py"]
 ceiling = 340
