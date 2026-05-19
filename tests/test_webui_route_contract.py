@@ -204,13 +204,14 @@ class TestGetRoutes:
         assert candidates, f"no settings templates under {templates_dir}"
         combined = b"".join(p.read_bytes() for p in candidates)
 
-        # 10 form action URLs (8 channel-related + 2 global).
+        # 9 form action URLs (7 channel-related + 2 global).
+        # /settings/medium/oauth-start removed: Medium closed new app registration
+        # 2023-03-02; the route is no longer present. See Plan 013.
         form_action_urls = [
             b'/settings/blogger/oauth-start',
             b'/settings/save-blogger-oauth',
             b'/settings/revoke-blogger',
             b'/settings/save-blog-ids',
-            b'/settings/medium/oauth-start',
             b'/settings/save-medium-token',
             b'/settings/clear-medium-token',
             b'/settings/clear-medium-oauth',
@@ -295,11 +296,13 @@ class TestGetRoutes:
         panel = soup.find(id="channel-medium")
         assert panel is not None, "missing #channel-medium collapse panel"
 
+        # /settings/medium/oauth-start removed in Plan 013 Phase A (Medium API
+        # registration closed 2023-03-02).
+        # /settings/clear-medium-oauth is conditionally rendered only when
+        # medium_token_file_exists=True; omitted here (test env has no token file).
         medium_urls = {
-            "/settings/medium/oauth-start",
             "/settings/save-medium-token",
             "/settings/clear-medium-token",
-            "/settings/clear-medium-oauth",
         }
         for url in medium_urls:
             nodes = soup.select(
@@ -354,17 +357,6 @@ class TestGetRoutes:
         finally:
             webui._WORK_THEMED_RUNS.pop(run_id, None)
         assert resp.status_code == 200
-
-    def test_medium_oauth_callback_missing_state_redirects(self, client):
-        """No session state → redirect with warning flash."""
-        resp = client.get("/settings/medium/oauth-callback")
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
-
-    def test_medium_oauth_callback_with_error_param_redirects(self, client):
-        resp = client.get("/settings/medium/oauth-callback?error=access_denied")
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
 
     def test_blogger_oauth_callback_missing_state_redirects(self, client):
         resp = client.get("/settings/blogger/oauth-callback")
@@ -611,22 +603,6 @@ class TestSettingsRoutes:
         resp = client.post("/settings/clear-medium-token")
         assert resp.status_code == 302
         assert resp.headers["Location"].startswith("/settings?")
-
-    def test_medium_oauth_start_missing_creds_redirects(self, client):
-        resp = client.post(
-            "/settings/medium/oauth-start", data={"client_id": "", "client_secret": ""},
-        )
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
-
-    def test_medium_oauth_start_with_creds_redirects(self, client):
-        resp = client.post(
-            "/settings/medium/oauth-start",
-            data={"client_id": "fake-id", "client_secret": "fake-secret"},
-        )
-        # Either redirects to Medium OAuth URL or back to /settings with flash —
-        # both are non-5xx; we just assert no server error.
-        assert resp.status_code == 302
 
     def test_clear_medium_oauth_redirects(self, client):
         resp = client.post("/settings/clear-medium-oauth")

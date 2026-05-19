@@ -524,6 +524,11 @@ def _settings_context(flash=None):
         blog_ids=cfg.blogger_blog_ids,
         medium_token_set=bool(token),
         medium_token_masked=masked if token else "",
+        # Single-source truth for whether a medium-token.json exists on disk.
+        # Used to show/hide the "clear OAuth token" button for legacy users.
+        # Avoids the AND-race where save_config drops [medium.oauth] block,
+        # causing medium_oauth_configured to silently flip False.
+        medium_token_file_exists=bool(medium_token_data),
         medium_oauth_configured=bool(medium_token_data and cfg.medium_oauth),
         config_path=str(cfg.config_dir / "config.toml"),
         token_path=str(cfg.blogger_token_path),
