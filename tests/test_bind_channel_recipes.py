@@ -411,3 +411,152 @@ class TestVelogBoundPattern:
     def test_rejects_suffix_confusion_host(self):
         # ``velog.io.attacker.tld`` must not satisfy the predicate.
         assert self.pat.match("https://velog.io.attacker.tld/") is None
+
+
+class TestMediumPostPersistHookWired:
+    """Plan 2026-05-19-005 Unit 1. Medium recipe must expose post_persist
+    so the driver flips canonical credential storage to cookies-only."""
+
+    def test_medium_recipe_has_post_persist(self):
+        assert RECIPES["medium"].post_persist is not None
+
+    def test_velog_recipe_has_no_post_persist(self):
+        assert RECIPES["velog"].post_persist is None
+
+    def test_blogger_recipe_has_no_post_persist(self):
+        assert RECIPES["blogger"].post_persist is None
+
+
+class TestMediumPostPersistConversion:
+    """Plan 2026-05-19-005 Unit 1. Tests the conversion logic directly,
+    no Playwright involved — feeds a fake storage_state file in."""
+
+    def test_writes_cookies_json_extracted_from_storage_state(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _medium_post_persist
+        import json
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+        storage_state = tmp_path / "medium-storage-state.json"
+        storage_state.write_text(
+            '{"cookies": [{"name": "sid", "value": "abc", "domain": "medium.com"}], '
+            '"origins": []}'
+        )
+
+        canonical = _medium_post_persist(tmp_path, storage_state)
+
+        assert canonical == tmp_path / "medium-cookies.json"
+        assert json.loads(canonical.read_text()) == {
+            "cookies": [{"name": "sid", "value": "abc", "domain": "medium.com"}]
+        }
+
+    def test_cookies_json_is_0600(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _medium_post_persist
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+        storage_state = tmp_path / "medium-storage-state.json"
+        storage_state.write_text('{"cookies": [], "origins": []}')
+
+        canonical = _medium_post_persist(tmp_path, storage_state)
+        assert (canonical.stat().st_mode & 0o777) == 0o600
+
+    def test_unlinks_storage_state_after_conversion(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _medium_post_persist
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+        storage_state = tmp_path / "medium-storage-state.json"
+        storage_state.write_text('{"cookies": [], "origins": []}')
+
+        _medium_post_persist(tmp_path, storage_state)
+        assert not storage_state.exists()
+
+    def test_promotes_meta_tentative_if_present(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _medium_post_persist
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+        storage_state = tmp_path / "medium-storage-state.json"
+        storage_state.write_text('{"cookies": [], "origins": []}')
+
+        tentative = tmp_path / "medium-meta.json.tentative"
+        tentative.write_text(
+            '{"user_agent": "Mozilla/5.0 ... Chrome/120.0.6099.71 ...", '
+            '"login_at": "2026-05-19T10:00:00+00:00", '
+            '"chromium_version": "120.0.6099.71"}'
+        )
+
+        _medium_post_persist(tmp_path, storage_state)
+
+        meta = tmp_path / "medium-meta.json"
+        assert meta.exists()
+        assert not tentative.exists()
+
+    def test_no_meta_tentative_is_fine(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _medium_post_persist
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+        storage_state = tmp_path / "medium-storage-state.json"
+        storage_state.write_text('{"cookies": [], "origins": []}')
+
+        canonical = _medium_post_persist(tmp_path, storage_state)
+        assert canonical.exists()
+        assert not (tmp_path / "medium-meta.json").exists()
+
+
+class TestMediumMetaTentativeFromPage:
+    """Plan 2026-05-19-005 Unit 1. ``_write_meta_tentative`` captures
+    UA + chromium_version from a live page (page.evaluate)."""
+
+    def test_writes_meta_with_extracted_chromium_version(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _write_meta_tentative
+        import json
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+
+        class _FakePage:
+            def evaluate(self, expr):
+                assert expr == "navigator.userAgent"
+                return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/120.0.6099.71 Safari/537.36"
+
+        _write_meta_tentative(_FakePage())
+        meta = json.loads((tmp_path / "medium-meta.json.tentative").read_text())
+        assert meta["chromium_version"] == "120.0.6099.71"
+        assert "Chrome/120.0.6099.71" in meta["user_agent"]
+        assert "T" in meta["login_at"]  # ISO timestamp
+
+    def test_writes_meta_with_blank_chromium_version_on_unknown_ua(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _write_meta_tentative
+        import json
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+
+        class _FakePage:
+            def evaluate(self, expr):
+                return "Firefox/120.0"
+
+        _write_meta_tentative(_FakePage())
+        meta = json.loads((tmp_path / "medium-meta.json.tentative").read_text())
+        assert meta["chromium_version"] == ""
+
+    def test_skips_when_ua_evaluation_fails(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _write_meta_tentative
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+
+        class _FakePage:
+            def evaluate(self, expr):
+                raise RuntimeError("page closed")
+
+        _write_meta_tentative(_FakePage())
+        assert not (tmp_path / "medium-meta.json.tentative").exists()
+
+    def test_meta_tentative_is_0600(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes.medium import _write_meta_tentative
+
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+
+        class _FakePage:
+            def evaluate(self, expr):
+                return "Mozilla/5.0 Chrome/120.0 ..."
+
+        _write_meta_tentative(_FakePage())
+        target = tmp_path / "medium-meta.json.tentative"
+        assert (target.stat().st_mode & 0o777) == 0o600

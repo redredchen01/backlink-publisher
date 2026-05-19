@@ -1,4 +1,5 @@
-"""Medium binding recipe — Plan 2026-05-19-001 Unit 2 + Plan 003 Unit 1.
+"""Medium binding recipe — Plan 2026-05-19-001 Unit 2 + Plan 003 Unit 1
++ Plan 005 Unit 1 (cookies-only hardcut + meta.json for GraphQL adapter).
 
 Channel: ``medium`` (medium.com).
 
@@ -19,23 +20,37 @@ Bound predicate (Plan 003 Unit 1 hardening):
      differs from current scraped username.
   6. Atomic write of ``<config_dir>/medium-last-account.tentative``;
      driver promotes to ``.txt`` after ``_persist_storage_state`` succeeds.
+  7. **Plan 005 Unit 1**: capture ``navigator.userAgent`` +
+     ``navigator.appVersion`` (chromium_version extracted from UA) while
+     the page is still alive, write to
+     ``<config_dir>/medium-meta.json.tentative``. ``post_persist`` promotes
+     it to ``medium-meta.json`` after the cookies-only conversion.
 
 Cookie host filter: exact-apex match against ``medium.com``. Subdomains
 not accepted (the auth cookie lives on the apex).
 
+Plan 005 Unit 1 hard-cut: ``post_persist`` (called by driver after
+``_persist_storage_state`` succeeds) reads the just-written
+``storage_state.json``, extracts the cookies array, writes
+``<config_dir>/medium-cookies.json`` (velog-style schema, 0600),
+promotes ``medium-meta.json.tentative`` → ``medium-meta.json``, then
+**unlinks** ``storage_state.json``. The canonical bound credential
+flips from storage_state.json (PR #83 contract) to cookies.json
+(Plan 005 contract) in this single PR — no double-write window.
+
 This recipe does NOT replace the existing Medium integration-token /
 OAuth flow in ``medium_api`` — see Plan 2026-05-19-001 Key Technical
-Decisions. Binding produces a parallel ``storage_state.json`` sentinel
-that ``reconcile_on_load`` watches; ``medium-token.json`` continues to
-be the source of truth for ``MediumAPIAdapter.publish``.
+Decisions.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -256,6 +271,150 @@ def _write_last_account_tentative(account: str) -> None:
         raise
 
 
+# Plan 005 Unit 1: extract the Chrome major version from the UA string.
+# Cloudflare's bot-score weights ``User-Agent`` + JA3 + HTTP/2 settings;
+# recording the exact UA captured during login lets the future
+# ``MediumGraphQLAdapter`` replay it byte-for-byte, and recording the
+# numeric major version lets us warn the operator when ``playwright install
+# chromium`` upgrades Chromium under their feet (UA staleness check).
+_CHROMIUM_VERSION_RE = re.compile(r"Chrome/(\d+(?:\.\d+){0,3})")
+
+
+def _meta_path() -> Path:
+    """``<config_dir>/medium-meta.json`` — the promoted UA/version file."""
+    return _config_dir() / "medium-meta.json"
+
+
+def _meta_tentative_path() -> Path:
+    """``<config_dir>/medium-meta.json.tentative`` — written by the predicate
+    before returning success; ``_medium_post_persist`` promotes it after the
+    storage_state → cookies conversion succeeds."""
+    return _config_dir() / "medium-meta.json.tentative"
+
+
+def _write_meta_tentative(page) -> None:
+    """Capture UA + Chromium version from the live page and persist them
+    atomically to the tentative meta file (mode 0600).
+
+    Called by ``_medium_bound_predicate`` right after
+    ``_write_last_account_tentative`` so we record the same browser instance
+    the operator just authed in. If ``page.evaluate`` fails (e.g., page
+    crashed mid-flow), we silently skip — meta.json is a best-effort signal
+    consumed by the future GraphQL adapter; missing meta downgrades that
+    adapter to ``available() == False`` (the Browser fallback still works
+    fine without it).
+    """
+    try:
+        ua = page.evaluate("navigator.userAgent") or ""
+    except Exception:
+        ua = ""
+    if not ua:
+        return
+
+    match = _CHROMIUM_VERSION_RE.search(ua)
+    chromium_version = match.group(1) if match else ""
+
+    payload = {
+        "user_agent": ua,
+        "login_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "chromium_version": chromium_version,
+    }
+
+    target = _meta_tentative_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".medium-meta.",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        # Don't fail the bind on a meta-write hiccup — proceed without meta.
+        return
+
+
+# ───────── Plan 005 Unit 1: post_persist hook (cookies-only hardcut) ─────────
+
+
+def _medium_post_persist(config_dir: Path, storage_state_path: Path) -> Path:
+    """Convert the just-written ``medium-storage-state.json`` into the
+    cookies-only credential layout the future ``MediumGraphQLAdapter`` and
+    the post-Plan-005 ``MediumBrowserAdapter`` both consume.
+
+    Steps (in order, atomic where it matters):
+      1. Read storage_state.json, extract ``cookies[]`` (already
+         apex-filtered by driver's host filter).
+      2. Atomically write ``<config_dir>/medium-cookies.json`` (0600) with
+         velog-style ``{"cookies": [...]}`` schema.
+      3. If ``medium-meta.json.tentative`` exists (predicate wrote it),
+         atomically rename to ``medium-meta.json``.
+      4. Unlink ``storage_state.json`` — Plan 005 hard-cut, no fallback.
+      5. Return cookies.json path so the driver records it as the canonical
+         credential in ``channel_status_store``.
+
+    Failures in steps 1-2 propagate; the bind is NOT marked successful if
+    we can't produce the canonical cookies.json. Failures in steps 3-4 are
+    swallowed because the canonical credential is already on disk — leftover
+    meta tentative or stale storage_state.json will get overwritten / cleaned
+    on the next bind.
+    """
+    raw = storage_state_path.read_text(encoding="utf-8")
+    state = json.loads(raw)
+    cookies = state.get("cookies", []) or []
+    if not isinstance(cookies, list):
+        cookies = []
+
+    cookies_path = config_dir / "medium-cookies.json"
+    cookies_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".medium-cookies.",
+        suffix=".tmp",
+        dir=str(cookies_path.parent),
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(
+            json.dumps({"cookies": cookies}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, cookies_path)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    # Best-effort meta promotion. Already 0600 from _write_meta_tentative.
+    meta_tentative = _meta_tentative_path()
+    if meta_tentative.exists():
+        try:
+            os.replace(meta_tentative, _meta_path())
+        except OSError:
+            pass
+
+    # Hard-cut: unlink storage_state.json. Cookies.json is canonical now.
+    try:
+        storage_state_path.unlink()
+    except OSError:
+        pass
+
+    return cookies_path
+
+
 def _medium_bound_predicate(page) -> None:
     """Plan 003 Unit 1 predicate. See module docstring for the full flow.
 
@@ -332,6 +491,11 @@ def _medium_bound_predicate(page) -> None:
         # First-bind or same-account rebind: record the tentative file;
         # driver promotes to the final path after persisting storage_state.
         _write_last_account_tentative(username)
+        # Plan 005 Unit 1: capture UA + chromium_version while the page is
+        # still alive so the future ``MediumGraphQLAdapter`` can replay them
+        # byte-for-byte (Cloudflare bot-score input). Best-effort — failure
+        # here doesn't fail the bind.
+        _write_meta_tentative(page)
         return  # predicate success
 
 
@@ -339,4 +503,5 @@ RECIPE = ChannelRecipe(
     login_url=_LOGIN_URL,
     bound_predicate=_medium_bound_predicate,
     cookie_host_filter=_medium_cookie_host_filter,
+    post_persist=_medium_post_persist,
 )
