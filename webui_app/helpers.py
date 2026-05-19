@@ -210,14 +210,16 @@ def fetch_full_tdk(url):
 
 
 def detect_platform(url):
+    # Plan 2026-05-19-002 U2 / R10b SPLIT: wordpress branch removed (no
+    # backing adapter ever existed) but unknown-domain fallback stays at
+    # 'medium' — flipping that to None is a separate decision deferred
+    # to a follow-up (scope-guardian F1 / adversarial F8).
     parsed = urlparse(url)
     domain = parsed.netloc.lower()
     if 'medium.com' in domain:
         return 'medium'
     if 'blogspot.com' in domain or 'blogger.com' in domain:
         return 'blogger'
-    if 'wordpress.com' in domain:
-        return 'wordpress'
     return 'medium'
 
 
