@@ -148,3 +148,60 @@ def _disable_real_network() -> None:
             enable_socket()
     else:
         yield
+
+
+# ── Shared registry fixture (Plan 2026-05-19-002 U2: promoted from
+#    tests/test_r9_extension_readiness.py to prevent copy-paste drift,
+#    per adversarial F7).
+#
+#    Provides a ``fake_platform_registered`` fixture that registers a
+#    ``FakeAdapter`` under the slug ``"fake"`` for the test duration and
+#    restores ``_REGISTRY`` on teardown.  Used by R9 acceptance tests and
+#    by ``test_webui_platforms_context.py`` to prove the registry → WebUI
+#    reverse-driven contract holds for any future ``register(...)`` call.
+
+
+from typing import Any as _Any  # noqa: E402
+
+from backlink_publisher.publishing.adapters.base import (  # noqa: E402
+    AdapterResult as _AdapterResult,
+)
+from backlink_publisher.publishing.registry import (  # noqa: E402
+    Publisher as _Publisher,
+    register as _register,
+    _REGISTRY as __REGISTRY,
+)
+
+
+class FakeAdapter(_Publisher):
+    """Stub publisher shared across registry/WebUI contract tests."""
+
+    @classmethod
+    def available(cls, config: _Any) -> bool:
+        return True
+
+    def publish(self, payload: dict[str, _Any], mode: str, config: _Any) -> _AdapterResult:
+        return _AdapterResult(
+            status="drafted",
+            adapter="fake",
+            platform="fake",
+            draft_url="https://fake.example/p/1",
+        )
+
+
+@pytest.fixture
+def fake_platform_registered():
+    """Register ``FakeAdapter`` as platform ``"fake"`` for one test.
+
+    Snapshots and restores the prior ``_REGISTRY["fake"]`` entry so
+    parallel/repeat test runs cannot leak adapter state across cases.
+    """
+    previous = __REGISTRY.get("fake")
+    _register("fake", FakeAdapter)
+    try:
+        yield
+    finally:
+        if previous is None:
+            __REGISTRY.pop("fake", None)
+        else:
+            __REGISTRY["fake"] = previous
