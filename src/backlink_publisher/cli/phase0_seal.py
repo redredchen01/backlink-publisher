@@ -513,16 +513,217 @@ def _post_push_verify(repo_root: Path, expected_bodies: dict[str, str]) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Unit 4 helpers
+# ---------------------------------------------------------------------------
+
+
+def _read_all_seal_notes(repo_root: Path) -> list[tuple[str, dict]]:
+    """Return [(object_sha, body_dict)] for every note in the phase0-seal namespace."""
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "list"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return []
+    results = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split()
+        if len(parts) != 2:
+            continue
+        _blob_sha, obj_sha = parts
+        show = subprocess.run(
+            ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "show", obj_sha],
+            capture_output=True, text=True,
+        )
+        if show.returncode != 0:
+            continue
+        try:
+            body = json.loads(show.stdout.strip())
+        except json.JSONDecodeError:
+            continue
+        results.append((obj_sha, body))
+    return results
+
+
+def _get_nested(d: dict, dotted_key: str) -> object:
+    """Get a value from a nested dict using a dotted key path.
+
+    A trailing ``_short`` suffix on the last segment returns the first 12 chars
+    of the value (used for sha256 display in markdown output).
+    """
+    short = dotted_key.endswith("_short")
+    key = dotted_key[: -len("_short")] if short else dotted_key
+    val: object = d
+    for k in key.split("."):
+        if not isinstance(val, dict):
+            return None
+        val = val.get(k)
+        if val is None:
+            return None
+    if short and isinstance(val, str):
+        return val[:12]
+    return val
+
+
+def _print_markdown_note(obj_sha: str, body: dict) -> None:
+    unit = body.get("unit", "?")
+    print(f"\n## {unit} — sealed SHA `{obj_sha[:12]}`\n")
+    for field in V.MARKDOWN_FIELDS:
+        val = _get_nested(body, field)
+        if val is None:
+            continue
+        label = field.split(".")[-1].removesuffix("_short").replace("_", " ")
+        print(f"- **{label}**: `{val}`")
+
+
+def _get_main_sha_safe(repo_root: Path) -> str | None:
+    try:
+        return _get_main_sha(repo_root)
+    except _InitError:
+        return None
+
+
 def _handle_show(args: argparse.Namespace) -> int:
-    raise NotImplementedError("phase0-seal show: not yet implemented (lands in Unit 4)")
+    repo_root = V.find_main_worktree_root()
+    notes = _read_all_seal_notes(repo_root)
+    if not notes:
+        print("phase0-seal show: no seal notes found; run 'phase0-seal init' first", file=sys.stderr)
+        return EXIT_MISUSE
+    if args.unit:
+        notes = [(sha, body) for sha, body in notes if body.get("unit") == args.unit]
+        if not notes:
+            print(f"phase0-seal show: no seal note found for unit {args.unit!r}", file=sys.stderr)
+            return EXIT_MISUSE
+    notes.sort(key=lambda x: x[1].get("unit", ""))
+    for obj_sha, body in notes:
+        if args.format == "json":
+            print(json.dumps(body, indent=2, sort_keys=True))
+        else:
+            _print_markdown_note(obj_sha, body)
+    return EXIT_OK
 
 
 def _handle_verify(args: argparse.Namespace) -> int:
-    raise NotImplementedError("phase0-seal verify: not yet implemented (lands in Unit 4)")
+    repo_root = V.find_main_worktree_root()
+    notes = _read_all_seal_notes(repo_root)
+    if not notes:
+        print("phase0-seal verify: no seal notes found; run 'phase0-seal init' first", file=sys.stderr)
+        return EXIT_MISUSE
+    entries = discover_worktree_heads(V.TELEGRAPH_BRANCH_PATTERN, repo_root=repo_root)
+    current_by_branch: dict[str, WorktreeEntry] = {e.branch: e for e in entries}
+    current_main = _get_main_sha_safe(repo_root)
+    all_ok = True
+    for obj_sha, body in sorted(notes, key=lambda x: x[1].get("unit", "")):
+        unit = body.get("unit", "?")
+        branch = body.get("branch", "?")
+        sealed_main = body.get("main_sha", "?")
+        current = current_by_branch.get(branch)
+        if current is None:
+            sha_sym, sha_detail = "?", f"no worktree for {branch!r}"
+        elif current.sha == obj_sha:
+            sha_sym, sha_detail = "OK", f"{obj_sha[:12]}"
+        else:
+            sha_sym, sha_detail = "DRIFT", f"{obj_sha[:12]} → {current.sha[:12]}"
+            all_ok = False
+        if current_main is None:
+            main_sym, main_detail = "?", "could not resolve origin/main"
+        elif current_main == sealed_main:
+            main_sym, main_detail = "OK", f"{sealed_main[:12]}"
+        else:
+            main_sym, main_detail = "DRIFT", f"{sealed_main[:12]} → {current_main[:12]}"
+            all_ok = False
+        print(f"{unit}  unit-sha={sha_sym} ({sha_detail})  main={main_sym} ({main_detail})")
+        if args.check_comment and body.get("verdict_ref", {}).get("kind") == "routine_comment":
+            vref = body["verdict_ref"]
+            comment_url = vref.get("comment_url", "")
+            print(f"  --check-comment: re-fetching {comment_url!r}")
+            try:
+                allowlist = V.load_allowlist(repo_root)
+                owner, repo_name, pr_num, comment_id = _parse_comment_url(comment_url)
+                comment = V._run_gh(f"repos/{owner}/{repo_name}/issues/comments/{comment_id}")
+                V.validate_verdict_comment(comment, expected_pr=pr_num, allowlist=allowlist)
+                print(f"  --check-comment: verdict comment still valid")
+            except Exception as exc:
+                print(f"  --check-comment: FAIL — {exc}")
+                all_ok = False
+    return EXIT_OK if all_ok else EXIT_MISUSE
 
 
 def _handle_reseal(args: argparse.Namespace) -> int:
-    raise NotImplementedError("phase0-seal reseal: not yet implemented (lands in Unit 4)")
+    repo_root = V.find_main_worktree_root()
+    notes = _read_all_seal_notes(repo_root)
+    if not notes:
+        print("phase0-seal reseal: no seal notes found; run 'phase0-seal init' first", file=sys.stderr)
+        return EXIT_MISUSE
+    entries = discover_worktree_heads(V.TELEGRAPH_BRANCH_PATTERN, repo_root=repo_root)
+    current_by_branch: dict[str, WorktreeEntry] = {e.branch: e for e in entries}
+    new_main = _get_main_sha_safe(repo_root)
+    resealed_at = _now_iso()
+    migrations: list[tuple[str, str, str]] = []  # (old_sha, new_sha, new_body_json)
+    for old_sha, body in notes:
+        branch = body.get("branch", "")
+        current = current_by_branch.get(branch)
+        if current is None:
+            print(f"phase0-seal reseal: no current worktree for {branch!r} — skipping", file=sys.stderr)
+            continue
+        new_body = {
+            **body,
+            "main_sha": new_main or body["main_sha"],
+            "last_resealed_at": resealed_at,
+            "sealed_by": "operator:reseal",
+            # verdict_ref and sealed_at intentionally preserved via **body
+        }
+        V.validate_seal_schema(new_body)
+        migrations.append((old_sha, current.sha, json.dumps(new_body, sort_keys=True, separators=(",", ":"))))
+    if not migrations:
+        print("phase0-seal reseal: nothing to reseal (no matching worktrees)", file=sys.stderr)
+        return EXIT_OK
+    if not args.yes:
+        print("phase0-seal reseal: about to reseal:", file=sys.stderr)
+        for old, new, _ in migrations:
+            label = f"{old[:12]} → {new[:12]}" if old != new else f"{old[:12]} (same SHA)"
+            print(f"  {label}", file=sys.stderr)
+        try:
+            resp = input("Continue? [y/N]: ")
+        except EOFError:
+            resp = ""
+        if resp.strip().lower() not in ("y", "yes"):
+            print("phase0-seal reseal: cancelled", file=sys.stderr)
+            return EXIT_OK
+    for old_sha, new_sha, new_body in migrations:
+        if old_sha == new_sha:
+            proc = subprocess.run(
+                ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "add", "-f", "-m", new_body, new_sha],
+                capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                print(f"phase0-seal reseal: failed to overwrite note at {new_sha}: {proc.stderr.strip()}", file=sys.stderr)
+                return EXIT_MISUSE
+        else:
+            proc = subprocess.run(
+                ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "add", "-m", new_body, new_sha],
+                capture_output=True, text=True,
+            )
+            if proc.returncode != 0:
+                print(f"phase0-seal reseal: failed to add note at {new_sha}: {proc.stderr.strip()}", file=sys.stderr)
+                return EXIT_MISUSE
+            rm = subprocess.run(
+                ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "remove", old_sha],
+                capture_output=True, text=True,
+            )
+            if rm.returncode != 0:
+                print(f"phase0-seal reseal: failed to remove old note at {old_sha}: {rm.stderr.strip()}", file=sys.stderr)
+                return EXIT_MISUSE
+    push = subprocess.run(
+        ["git", "-C", str(repo_root), "push", "origin", f"{_NOTES_REF}:{_NOTES_REF}"],
+        capture_output=True, text=True,
+    )
+    if push.returncode != 0:
+        print(f"phase0-seal reseal: push failed: {push.stderr.strip()}", file=sys.stderr)
+        return EXIT_MISUSE
+    print(f"phase0-seal reseal: resealed {len(migrations)} unit(s); last_resealed_at={resealed_at}", file=sys.stderr)
+    return EXIT_OK
 
 
 def _handle_verify_hook(args: argparse.Namespace) -> int:

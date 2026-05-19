@@ -1,0 +1,44 @@
+schema_version: 1
+
+# Authorized GitHub accounts allowed to post Phase 0 verdict comments that
+# the ship-seal CLI (`phase0-seal init`) will accept.
+#
+# Schema: each entry requires `login` + `routine_id`. The remaining fields
+# (captured_at, captured_by, run_id_observed) are audit metadata.
+#
+# Unit 0 bootstrap (plan docs/plans/2026-05-18-009-feat-telegraph-phase0-ship-seal-plan.md):
+# "fire each of 3 RemoteTrigger routines once and capture each comment's user.login
+# via gh api repos/.../issues/comments/<id> + cross-check created_at ±60s"
+#
+# STATUS: GitHub OAuth broken on env_01SZV66MxSWAueB7niox9Mbn as of 2026-05-18.
+# Routines cannot fire until re-authorized. Fix: browser → https://claude.ai/code/routines
+# → any routine in this env → Settings → Re-authorize GitHub.
+#
+# Pre-bootstrap inference: CCR env uses the user's own GitHub OAuth token
+# (redredchen01/backlink-publisher owner). Confirmed via repo comment history —
+# only redredchen01 + chatgpt-codex-connector[bot] have ever commented, no
+# Claude service account present. Login pre-populated as redredchen01 pending
+# post-T+7 verification on 2026-05-25.
+#
+# After T+7 fires (2026-05-25): verify the PR #36 comment author via
+#   gh api repos/redredchen01/backlink-publisher/issues/comments/<id> --jq '.user.login'
+# Update run_id_observed to the actual run_id from the marker comment.
+
+authorized_authors:
+  - login: redredchen01
+    routine_id: trig_01GKGPjL9uaWQfm65fhUZxpf
+    captured_at: pending-t7-2026-05-25
+    captured_by: pre-bootstrap-inferred-github-oauth
+    run_id_observed: pending-t7-2026-05-25
+
+  - login: redredchen01
+    routine_id: trig_01U8Wc8f5sai6shXwiYJDAZk
+    captured_at: pending-t14-2026-06-01
+    captured_by: pre-bootstrap-inferred-github-oauth
+    run_id_observed: pending-t14-2026-06-01
+
+  - login: redredchen01
+    routine_id: trig_01JpjiDKJNEXUr1mfQFacg6b
+    captured_at: pending-t21-2026-06-08
+    captured_by: pre-bootstrap-inferred-github-oauth
+    run_id_observed: pending-t21-2026-06-08

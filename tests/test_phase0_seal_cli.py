@@ -1,13 +1,13 @@
-"""Tests for the `phase0-seal` CLI dispatcher — Unit 2.
+"""Tests for the `phase0-seal` CLI dispatcher — Unit 2 (parser) + Unit 4 smoke.
 
-Smoke: parser builds, subcommands dispatch, NotImplementedError handlers
-return exit code 99 (EXIT_NOT_IMPLEMENTED). Real subcommand behavior lands
-in Units 3-5.
+Smoke: parser builds, all subcommands dispatch correctly. Unit 4 landed
+show/verify/reseal; verify-hook stub still returns EXIT_NOT_IMPLEMENTED.
 """
 
 from __future__ import annotations
-
 import pytest
+from unittest.mock import patch, MagicMock
+
 
 from backlink_publisher.cli import phase0_seal as CLI
 
@@ -29,19 +29,24 @@ def test_init_requires_either_verdict_comment_or_manual(capsys: pytest.CaptureFi
     assert excinfo.value.code == 2  # argparse error
 
 
-def test_show_handler_stub_returns_not_implemented() -> None:
-    rc = CLI.main(["show", "--format", "markdown"])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED
-
-
-def test_verify_handler_stub_returns_not_implemented() -> None:
-    rc = CLI.main(["verify"])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED
-
-
-def test_reseal_handler_stub_returns_not_implemented() -> None:
-    rc = CLI.main(["reseal", "-y"])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED
+def test_show_no_notes_returns_misuse_not_not_implemented(tmp_path, monkeypatch) -> None:
+    """show is now implemented: returns EXIT_MISUSE (no notes), not EXIT_NOT_IMPLEMENTED."""
+    import subprocess
+    bare = tmp_path / "r.git"
+    main = tmp_path / "main"
+    bare.mkdir(); main.mkdir()
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main"], cwd=bare, check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main"], cwd=main, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=main, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=main, check=True, capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=main, check=True, capture_output=True)
+    (main / "f.txt").write_text("x\n")
+    subprocess.run(["git", "add", "."], cwd=main, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=main, check=True, capture_output=True)
+    monkeypatch.chdir(main)
+    rc = CLI.main(["show"])
+    assert rc == CLI.EXIT_MISUSE
+    assert rc != CLI.EXIT_NOT_IMPLEMENTED
 
 
 def test_verify_hook_handler_stub_returns_not_implemented() -> None:
