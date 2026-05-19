@@ -24,13 +24,23 @@ from . import ChannelRecipe
 
 _LOGIN_URL = "https://velog.io/login"
 
-# URL pattern that signals "user is logged in" — any velog.io page that
-# isn't the login, signup, or OAuth-callback route. The driver passes this
-# to Playwright's ``wait_for_url``. Excluding ``login`` is load-bearing:
-# without it, navigating to ``_LOGIN_URL`` itself satisfies the predicate
-# instantly and the operator never gets a chance to complete OAuth.
+# URL pattern that signals "user is logged in" — an apex ``velog.io``
+# page that isn't the login, signup, or OAuth-callback route. The driver
+# passes this to Playwright's ``wait_for_url``. Two load-bearing pieces:
+#
+# 1. Excluding ``login`` / ``signup`` / ``auth`` — without these, the
+#    very URL the driver navigates to (``_LOGIN_URL = .../login``) or
+#    velog's own ``/auth/callback`` intermediate satisfies the predicate
+#    before the operator has authenticated.
+#
+# 2. Apex-only — no ``*.velog.io`` subdomain wildcard. The OAuth dance
+#    transits ``v3.velog.io/api/auth/v3/social/redirect/<provider>``
+#    *before* the social provider login completes. A subdomain wildcard
+#    would treat that intermediate redirect as success and persist a
+#    storage state with no apex session cookie. Mirrors the strict
+#    exact-apex contract enforced by ``_velog_cookie_host_filter``.
 _BOUND_URL_PATTERN = re.compile(
-    r"https?://(?:[^/]*\.)?velog\.io/(?!(?:auth|login|signup))(?:.*)?$"
+    r"https://velog\.io/(?!(?:auth|login|signup))(?:.*)?$"
 )
 
 

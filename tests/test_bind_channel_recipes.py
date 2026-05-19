@@ -380,3 +380,34 @@ class TestVelogBoundPattern:
 
     def test_matches_post_url_after_login(self):
         assert self.pat.match("https://velog.io/@myuser/some-post") is not None
+
+    # ── Apex-only enforcement (Codex P1 on PR #86) ─────────────────────────
+
+    def test_rejects_oauth_redirect_on_v3_subdomain(self):
+        # Velog's OAuth dance transits v3.velog.io/api/auth/v3/social/
+        # redirect/<provider> before the social login completes. A
+        # subdomain-permissive regex would treat this intermediate URL
+        # as "logged in" and persist an empty storage state.
+        assert self.pat.match(
+            "https://v3.velog.io/api/auth/v3/social/redirect/google?provider=google"
+        ) is None
+
+    def test_rejects_oauth_redirect_on_v2_subdomain(self):
+        assert self.pat.match(
+            "https://v2.velog.io/api/v2/auth/social/redirect/github"
+        ) is None
+
+    def test_rejects_any_subdomain(self):
+        # Apex-only contract mirrors _velog_cookie_host_filter's
+        # exact-apex match. Logged-in session lives on the apex.
+        assert self.pat.match("https://api.velog.io/anything") is None
+        assert self.pat.match("https://www.velog.io/") is None
+        assert self.pat.match("https://anything.velog.io/@user") is None
+
+    def test_rejects_prefix_confusion_host(self):
+        # ``evilvelog.io`` must not satisfy the predicate.
+        assert self.pat.match("https://evilvelog.io/") is None
+
+    def test_rejects_suffix_confusion_host(self):
+        # ``velog.io.attacker.tld`` must not satisfy the predicate.
+        assert self.pat.match("https://velog.io.attacker.tld/") is None
