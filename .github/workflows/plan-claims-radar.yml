@@ -123,7 +123,10 @@ jobs:
                   "|------|--------|---------|",
               ]
               for plan, status, summary in drift_rows:
-                  lines.append(f"| `{plan}` | `{status}` | {summary} |")
+                  # Escape pipe chars in the free-form summary so they don't
+                  # break the markdown table layout (self-review P2 autofix).
+                  safe_summary = summary.replace("|", "\\|")
+                  lines.append(f"| `{plan}` | `{status}` | {safe_summary} |")
               lines.append("")
               lines.append("Closure semantics: the operator closes this issue once each drift is acknowledged or resolved. Until then, the radar will keep appending daily comments below.")
               Path("/tmp/radar-body.md").write_text("\n".join(lines), encoding="utf-8")
