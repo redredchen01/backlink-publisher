@@ -28,7 +28,7 @@ tags:
 
 On medium.com apex, **not every long-lived HttpOnly cookie is an auth cookie**. The structural heuristic that Plan 003 R5 ships (`httpOnly == True` AND `expires - now > 7 days` AND `name NOT in tracking-blacklist`) is a safety net for the case where Medium rotates its auth cookie names — but it is *only* safe if the blacklist stays current with whatever ambient HttpOnly cookies Medium and its anti-bot vendor add.
 
-Spike 3a (2026-05-19, against logged-in `@redredchen01`) enumerated medium.com's HttpOnly cookies. The result is six entries split into three families. **Only two are auth**:
+Spike 3a (2026-05-19, against a logged-in test account) enumerated medium.com's HttpOnly cookies. The result is six entries split into three families. **Only two are auth**:
 
 | Cookie          | Expires        | Family          | Counts as auth? | Rationale |
 |-----------------|----------------|-----------------|-----------------|-----------|
