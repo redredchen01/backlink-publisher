@@ -26,6 +26,7 @@ from pathlib import Path
 from .base import JsonStore, Store
 from .channel_status import channel_status_store
 from .drafts import DraftsStore
+from .history import HistoryStore
 from .queue_store import QueueStore
 
 _CONFIG_DIR = Path.home() / ".config" / "backlink-publisher"
@@ -35,8 +36,8 @@ _CONFIG_DIR = Path.home() / ".config" / "backlink-publisher"
 # without rippling type annotations across the route + service layers.
 # Plan 2026-05-18-001 Unit 8 — see ``base.py`` for the protocol contract
 # and a worked SqliteStore swap example.
-history_store: Store = JsonStore(
-    _CONFIG_DIR / "publish-history.json", default_factory=list,
+history_store: HistoryStore = HistoryStore(
+    _CONFIG_DIR / "publish-history.json",
 )
 profiles_store: Store = JsonStore(
     _CONFIG_DIR / "campaign-profiles.json", default_factory=list,
@@ -56,6 +57,7 @@ __all__ = [
     "Store",
     "JsonStore",
     "DraftsStore",
+    "HistoryStore",
     "QueueStore",
     "history_store",
     "profiles_store",

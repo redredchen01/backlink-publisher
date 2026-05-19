@@ -534,6 +534,42 @@ class TestDraftRoutes:
         assert resp.status_code == 302
         assert "/?tab=draft" in resp.headers["Location"]
 
+    # Plan 2026-05-19-006 Unit 3 — bulk operations
+    def test_draft_bulk_delete_empty_redirects(self, client):
+        resp = client.post("/ce:draft/bulk-delete", data={})
+        assert resp.status_code == 302
+        assert "/?tab=draft" in resp.headers["Location"]
+
+    def test_draft_bulk_publish_now_empty_redirects(self, client):
+        resp = client.post("/ce:draft/bulk-publish-now", data={})
+        assert resp.status_code == 302
+        assert "/?tab=draft" in resp.headers["Location"]
+
+    def test_draft_bulk_cancel_empty_redirects(self, client):
+        resp = client.post("/ce:draft/bulk-cancel", data={})
+        assert resp.status_code == 302
+        assert "/?tab=draft" in resp.headers["Location"]
+
+
+class TestHistoryBulkRoutes:
+    """Plan 2026-05-19-006 Unit 4+5 — bulk + recheck history routes."""
+
+    def test_history_bulk_delete_empty_redirects(self, client):
+        resp = client.post("/ce:history/bulk-delete", data={})
+        assert resp.status_code == 302
+
+    def test_history_purge_failed_redirects(self, client):
+        resp = client.post("/ce:history/purge-failed", data={})
+        assert resp.status_code == 302
+
+    def test_history_recheck_missing_id_redirects(self, client):
+        resp = client.post("/ce:history/recheck", data={})
+        assert resp.status_code == 302
+
+    def test_history_bulk_recheck_empty_redirects(self, client):
+        resp = client.post("/ce:history/bulk-recheck", data={})
+        assert resp.status_code == 302
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Settings POST routes — /settings/* and /profiles/*
