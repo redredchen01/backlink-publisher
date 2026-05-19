@@ -32,12 +32,14 @@ from .blogger_api import BloggerAPIAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
+from .velog_graphql import VelogGraphQLAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
 # more ``register(...)`` call — no dispatcher changes.
 register("blogger", BloggerAPIAdapter)
 register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
+register("velog", VelogGraphQLAdapter)
 
 
 def publish(
@@ -76,6 +78,19 @@ def verify_adapter_setup(platform: str, config: Config) -> None:
             raise DependencyError(
                 "Medium requires either an integration_token in config.toml "
                 "or Playwright installed (run: playwright install chromium)."
+            )
+        return
+
+    if platform == "velog":
+        velog_cfg = config.velog
+        cookies_path = (
+            velog_cfg.cookies_path if velog_cfg else
+            config.config_dir / "velog-cookies.json"
+        )
+        if not cookies_path.exists():
+            raise DependencyError(
+                f"velog cookies not found: {cookies_path}\n"
+                "Run: backlink-publisher velog-login"
             )
         return
 
