@@ -159,8 +159,8 @@ class Config:
     """Per-target SEO anchor keyword pool, keyed by main_domain (trailing slash
     stripped). Populated from ``[targets."<main_domain>"].anchor_keywords`` in
     config.toml. Empty pool / missing entry triggers fallback to bare domain
-    label at link-rendering time. Used by the en/ru long-form path. Must be
-    edited by hand — ``save_config`` does not write this section back."""
+    label at link-rendering time. Used by the en/ru long-form path.
+    Round-tripped by ``save_config(target_anchor_keywords=...)``."""
 
     site_url_categories: dict[str, dict[str, str]] = field(default_factory=dict)
     """Per-site URL category → URL mapping for the zh-CN short-form path.
@@ -171,7 +171,9 @@ class Config:
     requires at least ``home`` plus one non-``home`` category to engage).
 
     Populated from ``[sites."<main_domain>".url_categories]`` in config.toml.
-    Not round-tripped by ``save_config`` — manual edit only."""
+    Operator-edit-only; not modeled in ``Config`` for rewrite. Preserved
+    verbatim by ``save_config`` (unmanaged root). See also
+    :func:`merge_site_url_categories` for in-place key updates."""
 
     target_anchor_pools_v2: dict[str, dict[str, dict[str, list[str]]]] = field(
         default_factory=dict,
@@ -184,7 +186,8 @@ class Config:
     Empty inner pools are valid and signal the anchor resolver to fall back to
     LLM-generated candidates. Populated from
     ``[sites."<main_domain>".anchor_pools.<url_category>.<anchor_type>]`` in
-    config.toml. Not round-tripped by ``save_config``."""
+    config.toml. Operator-edit-only; not modeled in ``Config`` for rewrite.
+    Preserved verbatim by ``save_config`` (unmanaged root)."""
 
     anchor_proportions: dict[str, float] = field(
         default_factory=lambda: dict(_SAFE_SEO_PROPORTIONS),
@@ -193,8 +196,9 @@ class Config:
 
     Defaults to Safe SEO (Branded 55% / Partial 25% / Exact 10% / LSI 10%).
     Sum must equal 1.0 ± 0.001 — validated at load time. Override by setting
-    ``[anchor.proportions]`` in config.toml. Not round-tripped by
-    ``save_config``."""
+    ``[anchor.proportions]`` in config.toml. Operator-edit-only; not modeled
+    in ``Config`` for rewrite. Preserved verbatim by ``save_config``
+    (unmanaged root)."""
 
     llm_anchor_provider: LLMProviderConfig | None = None
     """Optional OpenAI-compatible LLM provider used to generate anchor candidates
@@ -203,7 +207,9 @@ class Config:
     Populated from ``[llm.anchor_provider]`` in config.toml. ``api_key`` is
     loaded with priority ``BACKLINK_LLM_API_KEY`` env var > toml value.
     ``base_url`` is required to use ``https://`` — ``http://`` raises
-    ``InputValidationError`` at load time. Not round-tripped by ``save_config``."""
+    ``InputValidationError`` at load time. Operator-edit-only; not modeled
+    in ``Config`` for rewrite. Preserved verbatim by ``save_config``
+    (unmanaged root)."""
 
     target_three_url: dict[str, ThreeUrlConfig] = field(default_factory=dict)
     """Three-URL target config for the work-themed backlinks path (Plan
@@ -216,7 +222,8 @@ class Config:
     """Operator-tunable thresholds for ``report-anchors`` distribution alarm.
 
     Populated from ``[anchor_alarm]`` in config.toml. Globals + per-target
-    overrides. Not round-tripped by ``save_config`` — manual edit only.
+    overrides. Operator-edit-only; not modeled in ``Config`` for rewrite.
+    Preserved verbatim by ``save_config`` (unmanaged root).
     See ``anchor_metrics.resolve_thresholds`` for precedence rules."""
 
     velog: VelogConfig | None = None

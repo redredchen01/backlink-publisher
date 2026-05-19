@@ -57,12 +57,12 @@ def test_heading_root_non_heading_returns_none():
 
 
 def test_preserve_empty_input():
-    assert _preserve_unknown_sections("", _SAVE_CONFIG_KNOWN_ROOTS) == ""
+    assert _preserve_unknown_sections("", _SAVE_CONFIG_KNOWN_ROOTS, frozenset()) == ""
 
 
 def test_preserve_only_known_sections():
     raw = '[blogger]\n"x.com" = "1"\n[medium]\nintegration_token = "tok"\n'
-    assert _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS) == ""
+    assert _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset()) == ""
 
 
 def test_preserve_anchor_alarm_section_verbatim():
@@ -76,7 +76,7 @@ exact_ratio_ceiling = 0.05
 [medium]
 integration_token = "tok"
 """
-    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS)
+    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset())
     assert "[anchor_alarm]" in out
     assert "entropy_floor = 1.8" in out
     assert "exact_ratio_ceiling = 0.05" in out
@@ -100,7 +100,7 @@ match = "https://other.com/page"
 scope = "url"
 top3_concentration_ceiling = 0.20
 """
-    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS)
+    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset())
     assert out.count("[[anchor_alarm.override]]") == 2
     assert 'match = "money.example.com"' in out
     assert 'match = "https://other.com/page"' in out
@@ -114,7 +114,7 @@ entropy_floor = 1.8
 # Following ceiling is intentionally tight
 exact_ratio_ceiling = 0.05
 """
-    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS)
+    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset())
     assert "# Operator note: tuned for the 51acgs.com profile" in out
     assert "# Following ceiling is intentionally tight" in out
 
@@ -127,7 +127,7 @@ hot = "https://51acgs.com/hot"
 [sites."51acgs.com".anchor_pools.home.branded]
 items = ["51漫画", "51acgs"]
 """
-    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS)
+    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset())
     assert '[sites."51acgs.com".url_categories]' in out
     assert '[sites."51acgs.com".anchor_pools.home.branded]' in out
     assert 'items = ["51漫画", "51acgs"]' in out
@@ -141,7 +141,7 @@ def test_preserve_drops_file_preamble():
 [anchor_alarm]
 entropy_floor = 1.5
 """
-    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS)
+    out = _preserve_unknown_sections(raw, _SAVE_CONFIG_KNOWN_ROOTS, frozenset())
     assert "This is a top-level comment" not in out
     assert "[anchor_alarm]" in out
 

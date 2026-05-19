@@ -218,8 +218,11 @@ normally.
 exposing the opener window. (Note: Medium's renderer may strip these
 attributes — behaviour on Medium is best-effort.)
 
-`save_config` does **not** write the `[targets]` section back. Edit
-`config.toml` by hand to add or update keyword pools.
+`save_config` rewrites `[targets."<domain>"]` blocks from the resolved
+`Config` (the `target_anchor_keywords` and `target_three_url` kwargs follow
+the three-state `None` / `{}` / non-empty contract). Operator-added
+`[targets.X]` subsections — where `X` is not a managed domain — are
+preserved verbatim on save.
 
 ## Work-Themed Backlinks (Three-URL Form)
 
@@ -248,7 +251,9 @@ tokens and the page is bound to `127.0.0.1` by default — set
 `BACKLINK_PUBLISHER_ALLOW_NETWORK=1` to bind to a non-loopback address
 (only do this on a trusted network). The save button persists the
 configuration via the same `save_config` that `[blogger.oauth]` uses, so
-existing credentials and the legacy `[sites.*]` block are preserved.
+existing credentials, the legacy `[sites.*]` block, and any operator-added
+depth-2 subsections under managed roots (e.g. `[medium.oauth]`,
+`[medium.browser]`, `[targets.X]`) are preserved verbatim.
 
 ### Configuring via `config.toml`
 
@@ -366,8 +371,10 @@ The report shows the rolling type distribution vs. target, a
 with ⚠️ when above 10%. JSON output is available via `--json` for
 scripting.
 
-`save_config` does not round-trip `[sites.*]`, `[anchor.proportions]`,
-`[anchor_alarm]`, or `[llm.anchor_provider]` — edit `config.toml` by hand.
+`[anchor.proportions]`, `[anchor_alarm]`, and `[llm.anchor_provider]` are
+operator-edit-only and preserved verbatim by `save_config` (unmanaged
+roots). See the **Managing SEO keywords** section above for the full
+`save_config` taxonomy and credential-lifecycle notes.
 
 ### Anchor Distribution Visibility
 

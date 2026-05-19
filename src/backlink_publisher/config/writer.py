@@ -68,6 +68,48 @@ _TOML_HEADING_RE = re.compile(
     re.VERBOSE,
 )
 
+# Extends ``_TOML_HEADING_RE`` with an optional second segment so the lexer
+# can distinguish depth-1 vs depth-2 headings under a managed root. The
+# second segment is captured WITH surrounding double-quotes when quoted so
+# the canonical form matches what ``save_config`` emits via ``_toml_str``.
+# Depth-3+ headings collapse to depth-2 from the state-machine's view — the
+# second segment is captured, deeper segments are ignored (R2: depth-3 OUT
+# of scope for this preservation pass).
+_TOML_HEADING_PATH_RE = re.compile(
+    r"""
+    ^\s*\[\[?           # opening [ or [[
+    \s*
+    (?:
+        "([^"]+)"       # quoted root → group 1
+        |
+        ([^.\]\s"]+)    # bare root → group 2
+    )
+    (?:                 # optional second segment after a dot
+        \.
+        (?:
+            ("[^"]+")   # quoted sub WITH surrounding quotes → group 3
+            |
+            ([^.\]\s"]+)# bare sub → group 4
+        )
+    )?
+    """,
+    re.VERBOSE,
+)
+
+
+def _canon_subsection_key(segment: str) -> str:
+    """Canonical form of a TOML heading sub-segment.
+
+    Single source of truth shared by ``_toml_heading_path`` (lexer side) and
+    ``save_config``'s ``known_subsections`` builder (emit side) so that
+    frozenset membership of ``(root, sub)`` tuples is correct by construction.
+    Today this is identity — quoted segments arrive already wrapped in
+    literal double-quote characters (matching ``_toml_str``'s output), and
+    bare segments arrive verbatim. The function reserves a normalization
+    seam for future refactors.
+    """
+    return segment
+
 
 def _toml_heading_root(line: str) -> str | None:
     """Extract the root segment of a TOML heading line, or None if not a heading."""
@@ -77,28 +119,67 @@ def _toml_heading_root(line: str) -> str | None:
     return m.group(1) or m.group(2)
 
 
-def _preserve_unknown_sections(raw_text: str, known_roots: frozenset[str]) -> str:
-    """Return verbatim text of top-level sections whose root is not in ``known_roots``.
+def _toml_heading_path(line: str) -> tuple[str, str | None] | None:
+    """Extract ``(root, subsection)`` for a TOML heading line.
 
-    Walks the input line-by-line. When a TOML heading is encountered, the
-    section-membership state flips based on whether the root is known. Lines
-    inside an "unknown" section are appended verbatim — preserving comments,
-    key order, and whitespace. Lines before the first heading (file-level
-    comments) are dropped because save_config rewrites the file's preamble.
+    Returns ``None`` for non-heading lines. Depth-1 headings (e.g.
+    ``[blogger]``) return ``(root, None)``. Depth-2+ headings (e.g.
+    ``[blogger.oauth]``, ``[targets."example.com"]``) return
+    ``(root, _canon_subsection_key(sub))`` — depth-3+ collapses to depth-2.
+    """
+    m = _TOML_HEADING_PATH_RE.match(line)
+    if not m:
+        return None
+    root = m.group(1) or m.group(2)
+    sub_raw = m.group(3) or m.group(4)
+    if sub_raw is None:
+        return (root, None)
+    return (root, _canon_subsection_key(sub_raw))
+
+
+def _preserve_unknown_sections(
+    raw_text: str,
+    known_roots: frozenset[str],
+    known_subsections: frozenset[tuple[str, str]],
+) -> str:
+    """Return verbatim text of sections the writer did not emit on this call.
+
+    Walks the input line-by-line. State flips on each TOML heading based on
+    a two-predicate rule:
+
+    - Heading under an unknown root → preserve (existing behavior).
+    - Heading under a known root with ``sub is None`` (depth-1, e.g.
+      ``[blogger]``) → skip; the writer just rewrote it.
+    - Heading under a known root with ``(root, sub)`` in ``known_subsections``
+      → skip; the writer just emitted this depth-2 block.
+    - Heading under a known root with ``sub`` NOT in ``known_subsections``
+      (operator-added or loader-only subsection like ``[medium.oauth]``,
+      ``[medium.browser]``, ``[targets.tier_b]``, dormant ``[blogger.oauth]``)
+      → preserve verbatim. This closes the symmetric depth-2 drop documented
+      in Plan 2026-05-19-010.
+
+    Lines inside a preserved section are appended verbatim. Lines before the
+    first heading (file preamble) are dropped because save_config rewrites
+    the file's preamble.
 
     Edge cases:
     - Empty input → empty output.
-    - Input with only known sections → empty output.
-    - Heading inside a string literal would fool the regex; we accept that
-      risk because TOML values rarely span lines or contain `[` at column 0,
-      and load_config would have rejected such a file at parse time anyway.
+    - Input with only known sections (depth-1 and known depth-2) → empty.
+    - Heading inside a string literal would fool the regex; accepted risk —
+      load_config would have rejected such a file at parse time.
     """
     out: list[str] = []
     keep_current = False  # before the first heading, drop preamble
     for line in raw_text.splitlines():
-        root = _toml_heading_root(line)
-        if root is not None:
-            keep_current = root not in known_roots
+        path = _toml_heading_path(line)
+        if path is not None:
+            root, sub = path
+            if root in known_roots:
+                # Depth-1 heading or a depth-2 block the writer emitted →
+                # skip. Otherwise (depth-2 not emitted) → preserve.
+                keep_current = sub is not None and (root, sub) not in known_subsections
+            else:
+                keep_current = True
             if keep_current:
                 out.append(line)
         elif keep_current:
@@ -202,14 +283,43 @@ def save_config(
     - ``{}`` — explicitly clear the corresponding section
     - non-empty dict — write exactly the provided contents (overrides disk)
 
-    Sections this function manages (and therefore rewrites):
-    ``[blogger]``, ``[blogger.oauth]``, ``[medium]``, ``[targets."<domain>"]``.
+    Section taxonomy (Plan 2026-05-19-010):
 
-    All other sections present in the existing file (``[sites.*]``,
-    ``[anchor.*]``, ``[llm.*]``, ``[medium.oauth]``, ``[medium.browser]``,
-    user-added tables, comments interleaved between unmanaged tables) are
-    preserved verbatim. This closes the P0 data-loss footgun documented in
-    feedback_config-save-overwrite-pattern.md (Plan 2026-05-13-004 Unit 3).
+    (a) **Emitted on every call (rewritten from in-memory Config):**
+        ``[blogger]``, ``[medium]``, and one ``[targets."<domain>"]`` per
+        resolved domain in the anchor-keywords/three-URL emit set.
+    (b) **Emitted conditionally:** ``[blogger.oauth]`` only when at least
+        one of ``client_id`` / ``client_secret`` is non-empty.
+    (c) **Depth-2 subsections under managed roots NOT emitted on this
+        call** (e.g. ``[medium.oauth]``, ``[medium.browser]``, operator-
+        added ``[targets.X]`` / ``[blogger.X]`` / ``[medium.X]``, dormant
+        ``[blogger.oauth]`` when credentials are absent) are preserved
+        verbatim by the section-preservation pass below.
+    (d) **Unmanaged top-level sections** (``[sites.*]``, ``[anchor.*]``,
+        ``[anchor_alarm]`` / ``[[anchor_alarm.override]]``, ``[llm.*]``,
+        arbitrary operator-added tables) are preserved verbatim when they
+        carry key=value data.
+    (e) **Pure-placeholder sections** (header + comments only, no data)
+        are intentionally not preserved — design choice locked by
+        ``test_save_config_inplace_preserves_sections_with_keyvalue_data``.
+
+    Operator note: ``merge_site_url_categories`` is a second writer that
+    text-edits ``[sites."<main>".url_categories]`` blocks in place and
+    does not interact with this preservation pass.
+
+    Operator note (credential lifecycle): post-2026-05-19, managed-root
+    credential subsections (``[medium.oauth]``, ``[blogger.oauth]``)
+    persist on save and propagate into ``.config-history/`` rolling
+    snapshots (cap 20). After credential rotation, up to 20 historical
+    copies of revoked secrets remain on disk until aged out. If
+    ``BACKLINK_PUBLISHER_CONFIG_DIR`` points to synced storage (Dropbox,
+    NFS, dotfiles repo), credentials now propagate through the sync
+    surface — keep the config dir on local-only storage.
+
+    This closes the P0 data-loss footgun documented in
+    feedback_config-save-overwrite-pattern.md (Plan 2026-05-13-004 Unit
+    3 closed the root-level case; Plan 2026-05-19-010 closed the
+    symmetric depth-2-subsection case).
 
     The write is atomic: contents go to ``<path>.tmp`` first, ``fsync``'d, then
     ``os.replace``'d onto the target path. A mid-write crash leaves the
@@ -217,6 +327,14 @@ def save_config(
     """
     config_path = path or (_resolve_config_dir() / "config.toml")
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    # Best-effort directory mode (matches ``.config-history/`` chmod
+    # pattern at _snapshot_config). Pre-fix the dir defaulted to 0o755 and
+    # managed-root credentials dropped on save anyway; post-fix credentials
+    # persist on disk so directory-level access matters. Failure is benign.
+    try:
+        os.chmod(config_path.parent, 0o700)
+    except OSError:
+        pass
 
     # Load parsed config (for merge logic on managed fields).
     existing = load_config(config_path)
@@ -309,17 +427,41 @@ def save_config(
                 lines.append("insecure_tls = true")
         lines.append("")
 
-    # Preserve every top-level section save_config does not know how to write
-    # (e.g. [anchor.proportions], [anchor_alarm], [anchor_alarm.override],
-    # [llm.anchor_provider], [sites.*], [medium.browser], [medium.oauth]).
-    # This is the structural fix for the documented save_config data-loss bug —
-    # see feedback_config-save-overwrite-pattern.md.
+    # Preserve every section save_config did not emit on this call:
+    #   - top-level sections under unmanaged roots (``[anchor.proportions]``,
+    #     ``[anchor_alarm]``, ``[anchor_alarm.override]``, ``[llm.anchor_provider]``,
+    #     ``[sites.*]``, arbitrary operator-added tables)
+    #   - depth-2 subsections under MANAGED roots that this call did not emit
+    #     (``[medium.oauth]``, ``[medium.browser]``, operator-added ``[targets.X]``,
+    #     dormant ``[blogger.oauth]`` when credentials are absent)
+    # Depth-1 managed headings (``[blogger]``, ``[medium]``, ``[targets]``) and
+    # depth-2 blocks the writer just emitted are skipped — they are owned by
+    # the rewrite path above. The ``known_subsections`` set encodes which
+    # depth-2 blocks fell into the writer's emit set on this call.
+    known_subsections: set[tuple[str, str]] = set()
+    if client_id or client_secret:
+        known_subsections.add(("blogger", "oauth"))
+    for domain in all_target_domains:
+        known_subsections.add(("targets", _toml_str(domain)))
+    # Three-state clear/overwrite intent for [targets."<domain>"]: domains
+    # that were on disk before this call but did not land in the resolved
+    # emit set are implicit clears. Add them to known_subsections so the
+    # preservation pass drops them — honors the documented {}-clears /
+    # non-empty-overwrites contract of the two targets kwargs.
+    on_disk_target_domains = (
+        set(existing.target_anchor_keywords) | set(existing.target_three_url)
+    )
+    for domain in on_disk_target_domains - set(all_target_domains):
+        known_subsections.add(("targets", _toml_str(domain)))
+
     preserved = ""
     if config_path.exists():
         try:
             existing_raw = config_path.read_text(encoding="utf-8")
             preserved = _preserve_unknown_sections(
-                existing_raw, _SAVE_CONFIG_KNOWN_ROOTS,
+                existing_raw,
+                _SAVE_CONFIG_KNOWN_ROOTS,
+                frozenset(known_subsections),
             )
         except OSError as exc:
             plan_logger.warn(

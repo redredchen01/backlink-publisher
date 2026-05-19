@@ -26,8 +26,8 @@ ceiling = 290
 rationale = "SSRF defence extracted to _util/net_safety.py in 2026-05-19 — SLOC dropped from 340 to 253. Ceiling 290 provides 30-SLOC headroom for minor accretion."
 
 [files."src/backlink_publisher/config/writer.py"]
-ceiling = 340
-rationale = "Largest piece of the post-PR48 config-subpackage split (SLOC 310 at seed). Holds atomic-write + snapshot + section-quarantine. R5 F3 safe_write carve will lift atomic-write + snapshot into a shared persistence module consumed by JsonStore + events/store; lower ceiling in that landing PR."
+ceiling = 360
+rationale = "Extension of save_config preservation pass to depth-2 subsection granularity under managed roots (Plan 2026-05-19-010 — closes the symmetric subsection drop after Plan 2026-05-13-004 Unit 3 closed the root-level case). Adds _toml_heading_path + _canon_subsection_key helpers (~20 SLOC) and known_subsections threading + emit-set + clear-intent computation inside save_config (~10 SLOC) + parent-dir 0o700 chmod. New SLOC 350. R5 F3 safe_write carve will still lift atomic-write + snapshot into a shared persistence module and lower this ceiling."
 
 [files."src/backlink_publisher/_util/markdown.py"]
 ceiling = 240

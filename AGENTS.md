@@ -56,7 +56,23 @@ stdout = clean JSONL; stderr = diagnostics; exit code 0 on success. No human-rea
 
 ### Config
 
-`~/.config/backlink-publisher/config.toml` (override via `BACKLINK_PUBLISHER_CONFIG_DIR`). Template: `config.example.toml`. `save_config` does NOT round-trip `[targets.*]`, `[sites.*]`, `[anchor_alarm]`, `[anchor.proportions]`, or `[llm.anchor_provider]`.
+`~/.config/backlink-publisher/config.toml` (override via `BACKLINK_PUBLISHER_CONFIG_DIR`). Template: `config.example.toml`.
+
+`save_config` taxonomy (Plan 2026-05-19-010):
+
+- (a) **Emitted every call:** `[blogger]`, `[medium]`, one `[targets."<domain>"]` per resolved domain in the kwargs/Config emit set.
+- (b) **Emitted conditionally:** `[blogger.oauth]` only when at least one credential field is non-empty.
+- (c) **Depth-2 subsections under managed roots not emitted on this call** (`[medium.oauth]`, `[medium.browser]`, operator-added `[targets.X]` / `[blogger.X]` / `[medium.X]`, dormant `[blogger.oauth]`) — **preserved verbatim**.
+- (d) **Unmanaged top-level sections** (`[sites.*]`, `[anchor.*]`, `[anchor_alarm]`, `[llm.*]`, arbitrary operator-added tables) — preserved verbatim when carrying key=value data.
+- (e) **Pure-placeholder sections** (header + comments only, no data) — intentionally not preserved.
+
+Note: `merge_site_url_categories` is a second writer that text-edits `[sites."<main>".url_categories]` blocks in place and does not interact with the preservation pass.
+
+**Credential-lifecycle note (post-2026-05-19):** managed-root credential subsections (`[medium.oauth]`, `[blogger.oauth]`) now persist on save and propagate into `.config-history/` rolling snapshots (cap 20). After credential rotation, up to 20 historical copies of revoked secrets remain on disk until aged out. If `BACKLINK_PUBLISHER_CONFIG_DIR` points to synced storage (Dropbox, NFS, dotfiles repo), credentials now propagate through the sync surface — keep the config dir on local-only storage.
+
+**Medium sidecar precedence:** when both `[medium.oauth]` in `config.toml` and the sidecar file from Plan 2026-05-18-013 are populated, `[medium.oauth]` wins. The sidecar continues to provide fallback for operators who haven't migrated.
+
+Note: operator-archival `[targets_meta.<domain>]` blocks are preserved-only — no pipeline code reads them; treat as documentation, not a functional override.
 
 ## Import Conventions
 
