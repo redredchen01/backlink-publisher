@@ -30,8 +30,8 @@ ceiling = 340
 rationale = "Largest piece of the post-PR48 config-subpackage split (SLOC 310 at seed). Holds atomic-write + snapshot + section-quarantine. R5 F3 safe_write carve will lift atomic-write + snapshot into a shared persistence module consumed by JsonStore + events/store; lower ceiling in that landing PR."
 
 [files."src/backlink_publisher/_util/markdown.py"]
-ceiling = 320
-rationale = "Markdown rendering helpers (SLOC 282 at seed): _safe_anchor, <a> template, link-density paragraph builder. Stable shape; no extraction planned. Ceiling held against accumulated render-time helper accretion."
+ceiling = 240
+rationale = "Post-split: body templates (9 functions, ~130 SLOC) extracted to _body_templates.py in 2026-05-19. markdown.py now holds render+link+zh_short utilities at 210 SLOC; ceiling 240 provides 30-SLOC headroom for minor accretion."
 
 [files."src/backlink_publisher/events/projector.py"]
 ceiling = 580
