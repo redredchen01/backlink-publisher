@@ -22,11 +22,12 @@ Behaviour preserved verbatim:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, Optional
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
-from ..registry import dispatch, register
+from ..registry import dispatch, register, registered_platforms
+from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .medium_api import MediumAPIAdapter
@@ -55,14 +56,40 @@ def publish(
     return dispatch(payload, mode, config, dry_run=dry_run)
 
 
-def verify_adapter_setup(platform: str, config: Config) -> None:
-    """Raise ``DependencyError`` if the adapter for this platform cannot
-    function. Called before the publish loop when not in dry-run mode.
+def verify_adapter_setup(
+    platform: str,
+    config: Config,
+    *,
+    mode: Literal["offline", "live", "dry-run"] = "offline",
+    payload: Optional[dict[str, Any]] = None,
+) -> Optional[VerifyResult]:
+    """Verify a platform adapter can do its job. Three modes (Plan 2026-05-19-006 U2):
 
-    Kept as a module function (not on the ABC) per Plan D8 — only ``publish``
-    needs to be ABC-bound today; promoting this to the ABC waits for the
-    third platform that actually needs it.
+    - ``mode='offline'`` (default): Backward-compatible. Raises ``DependencyError``
+      on failure, returns ``None`` on success. The 14+ pre-Unit-2 call sites
+      (``cli/publish_backlinks.py:357``, ``cli/_resume.py:126``, test @patch sites)
+      rely on this contract and continue to work unchanged.
+
+    - ``mode='live'``: Calls the platform's lightweight verify endpoint (e.g.
+      Telegraph ``getAccountInfo``). Returns ``VerifyResult``; never raises for
+      auth failures. Used by ``/api/<channel>/verify`` dashboard endpoint.
+      Per-channel live impls land per-adapter — Unit 2 ships stubs returning
+      ``last_verify_result='never'`` (for known-unbound) or ``'unverifiable_live'``.
+
+    - ``mode='dry-run'``: Runs the publish path under ``dry_run_intercept()``
+      which monkey-patches ``requests.Session.send`` to raise. Returns
+      ``VerifyResult``; guarantees zero real HTTP. Defense-in-depth per SEC-5
+      review: even an adapter that forgets the flag cannot leak a real publish.
+      ``payload`` kwarg supplies the would-be publish content.
+
+    Kept as a module function (not on the ABC) per Plan D8.
     """
+    if mode == "live":
+        return _verify_live(platform, config)
+    if mode == "dry-run":
+        return _verify_dry_run(platform, config, payload or {})
+
+    # mode == "offline" — backward-compat path
     if platform == "blogger":
         if not config.blogger_oauth:
             raise DependencyError(
@@ -115,3 +142,81 @@ def verify_adapter_setup(platform: str, config: Config) -> None:
         return
 
     raise DependencyError(f"No adapter configured for platform: {platform}")
+
+
+def _verify_live(platform: str, config: Config) -> VerifyResult:
+    """Live verify stub — returns 'never' if known-unbound, 'unverifiable_live'
+    if bound-but-no-live-impl-yet. Per-channel real live verify lands per
+    adapter in follow-up Unit 2 commits + Unit 6 backfill.
+    """
+    if platform not in registered_platforms():
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"no adapter configured for platform: {platform}"],
+        )
+
+    # Probe offline-readiness first — if not even configured, no point pinging API.
+    try:
+        verify_adapter_setup(platform, config, mode="offline")
+    except DependencyError as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[str(e)],
+        )
+
+    # Configured but live-verify-endpoint not yet wired. Surface honestly rather
+    # than fake-green. Per-adapter live impls (Telegraph getAccountInfo, Medium
+    # /me, Blogger users.get) land in follow-up commits.
+    return VerifyResult(
+        ok=True,
+        last_verify_result="unverifiable_live",
+        blockers=["live verify endpoint not yet implemented for this platform"],
+    )
+
+
+def _verify_dry_run(
+    platform: str, config: Config, payload: dict[str, Any]
+) -> VerifyResult:
+    """Dry-run mode: build payload via adapter.publish() under intercept.
+
+    The intercept (``dry_run_intercept()``) monkey-patches ``Session.send`` to
+    raise ``DryRunInterceptError``, so even if the adapter forgets to honor
+    any dry-run flag, the HTTP send is blocked. Adapters using non-``requests``
+    HTTP libs (e.g. SDKs / urllib3 direct) are NOT caught — those fall through
+    to ``last_verify_result='unverifiable_live'``.
+
+    Unit 2 scope: ship the contract + intercept. Full per-adapter dry-run
+    fidelity (anchor validation, content sanity, image rejection preview)
+    lands in Unit 6 backfill.
+    """
+    if platform not in registered_platforms():
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"no adapter configured for platform: {platform}"],
+        )
+
+    try:
+        with dry_run_intercept():
+            # Today: just validate the platform routes via the existing
+            # dispatch. Real adapter.publish() invocation under intercept is
+            # the Unit 6 deliverable (needs payload-shape validation per
+            # adapter). Surface as 'unverifiable_live' to signal "intercept
+            # works but per-adapter dry-run not yet wired".
+            pass
+    except DryRunInterceptError as e:
+        # Should never reach here for the no-op body above; future per-adapter
+        # logic may.
+        return VerifyResult(
+            ok=False,
+            last_verify_result="payload_invalid",
+            blockers=[f"dry-run intercept fired: {e}"],
+        )
+
+    return VerifyResult(
+        ok=True,
+        last_verify_result="unverifiable_live",
+        blockers=["per-adapter dry-run not yet implemented (Unit 6 deliverable)"],
+    )

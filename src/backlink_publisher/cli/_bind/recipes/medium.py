@@ -89,6 +89,31 @@ MEDIUM_ANONYMOUS_TRACKING_NAMES: frozenset[str] = frozenset({
 # Idle-detection timeouts (Plan 003 R7). Replace Plan 001 driver's
 # BIND_TIMEOUT_MS = 5 * 60 * 1000 default for Medium only by polling
 # wait_for_url in short windows + tracking nav-event idleness.
+#
+# Spike 7 verdict (2026-05-19, two attempts against Google SSO + 2FA):
+# in BOTH runs the script's ``page.on("framenavigated")`` listener and
+# ``page.url`` polling failed to observe the SSO completion — the
+# operator successfully authenticated (cookies fully persisted to disk,
+# sid + rid + cf_clearance all present, restart goto /me lands at
+# /@username) but the listener-bearing Page object was apparently
+# orphaned by a popup / SPA cross-origin transition during the SSO
+# flow. Conclusion: ``framenavigated`` is NOT a reliable bound signal
+# when the login chain crosses origins (Google → Medium). Therefore:
+#
+#   - The 20-min ``_ABSOLUTE_TIMEOUT_SECONDS`` wall-clock IS the
+#     load-bearing safety floor. Operators get full SSO+2FA budget
+#     even when nav events go missing entirely.
+#   - The 90s ``_IDLE_TIMEOUT_SECONDS`` is a *secondary fast-path* —
+#     it shortens the happy case but is never the only ceiling.
+#   - URL match against ``_BOUND_URL_PATTERN`` is the *positive*
+#     signal that actually fires success; the timers are only there
+#     to bound the wait.
+#
+# Do not raise ``_IDLE_TIMEOUT_SECONDS`` to compensate for missing
+# nav events — that just enlarges the silent-failure window. If a
+# future driver change makes framenavigated reliable end-to-end
+# (e.g. enumerate ctx.pages on each tick), document the new evidence
+# here before lowering the absolute timeout.
 _IDLE_TIMEOUT_SECONDS = 90.0
 _ABSOLUTE_TIMEOUT_SECONDS = 1200.0
 _INNER_WAIT_TIMEOUT_MS = 1000  # per-iteration wait_for_url timeout
@@ -238,8 +263,8 @@ def _medium_bound_predicate(page) -> None:
         IdentityMismatch: scraped @username differs from stored
             last_account. Driver maps to BindResult(error_code=
             'identity_mismatch', extras=...).
-        BoundPredicateTimeout: idle (90s no nav) OR absolute (1200s
-            wall) timeout exceeded.
+        BoundPredicateTimeout: idle (90s no nav since *first* observed nav)
+            OR absolute (1200s wall) timeout exceeded.
     """
     # Lazy-import Playwright's TimeoutError so the recipe module is
     # importable in non-Playwright contexts (e.g., webui process that
@@ -249,7 +274,13 @@ def _medium_bound_predicate(page) -> None:
     from backlink_publisher.cli._bind.driver import BoundPredicateTimeout
 
     started_at = time.monotonic()
-    last_nav_at = [started_at]  # list-ref to mutate from closure
+    # last_nav_at is None until the first ``framenavigated`` event lands.
+    # Idle-timeout enforcement is gated on this — see Spike 7 verdict
+    # in the module docstring: in cross-origin SSO scenarios the listener
+    # may never observe a single nav event despite a successful login.
+    # If we treated "no nav events" as 90s of idleness, the predicate
+    # would raise long before the absolute floor the docstring promises.
+    last_nav_at: list[float | None] = [None]
 
     def _on_nav(_frame) -> None:
         last_nav_at[0] = time.monotonic()
@@ -258,7 +289,10 @@ def _medium_bound_predicate(page) -> None:
 
     while True:
         now = time.monotonic()
-        if now - last_nav_at[0] > _IDLE_TIMEOUT_SECONDS:
+        if (
+            last_nav_at[0] is not None
+            and now - last_nav_at[0] > _IDLE_TIMEOUT_SECONDS
+        ):
             raise BoundPredicateTimeout()
         if now - started_at > _ABSOLUTE_TIMEOUT_SECONDS:
             raise BoundPredicateTimeout()

@@ -335,3 +335,79 @@ class TestBloggerHostFilter:
 
     def test_rejects_google_suffix_confusion(self):
         assert self.filter("google.com.attacker.tld") is False
+
+
+class TestVelogBoundPattern:
+    """Velog bound-URL pattern semantics.
+
+    Regression: prior version landed on ``https://velog.io/`` and the
+    pattern only excluded ``/auth*``, so the very URL Playwright navigated
+    to satisfied the predicate instantly — ``wait_for_url`` returned with
+    zero cookies and the operator never saw a "logged in" event.
+    """
+
+    def setup_method(self):
+        from backlink_publisher.cli._bind.recipes.velog import (
+            _BOUND_URL_PATTERN,
+            _LOGIN_URL,
+        )
+        self.pat = _BOUND_URL_PATTERN
+        self.login_url = _LOGIN_URL
+
+    def test_login_url_does_not_match_pattern(self):
+        # The URL the driver navigates to must NOT match the predicate, or
+        # the wait_for_url call returns instantly.
+        assert self.pat.match(self.login_url) is None
+
+    def test_does_not_match_login_route(self):
+        assert self.pat.match("https://velog.io/login") is None
+
+    def test_does_not_match_login_with_query(self):
+        assert self.pat.match("https://velog.io/login?next=/") is None
+
+    def test_does_not_match_signup_route(self):
+        assert self.pat.match("https://velog.io/signup") is None
+
+    def test_does_not_match_auth_callback(self):
+        assert self.pat.match("https://velog.io/auth/callback?code=x") is None
+
+    def test_matches_home_feed_after_login(self):
+        # /  is the most common post-login landing — must resolve the predicate.
+        assert self.pat.match("https://velog.io/") is not None
+
+    def test_matches_user_profile_after_login(self):
+        assert self.pat.match("https://velog.io/@myuser") is not None
+
+    def test_matches_post_url_after_login(self):
+        assert self.pat.match("https://velog.io/@myuser/some-post") is not None
+
+    # ── Apex-only enforcement (Codex P1 on PR #86) ─────────────────────────
+
+    def test_rejects_oauth_redirect_on_v3_subdomain(self):
+        # Velog's OAuth dance transits v3.velog.io/api/auth/v3/social/
+        # redirect/<provider> before the social login completes. A
+        # subdomain-permissive regex would treat this intermediate URL
+        # as "logged in" and persist an empty storage state.
+        assert self.pat.match(
+            "https://v3.velog.io/api/auth/v3/social/redirect/google?provider=google"
+        ) is None
+
+    def test_rejects_oauth_redirect_on_v2_subdomain(self):
+        assert self.pat.match(
+            "https://v2.velog.io/api/v2/auth/social/redirect/github"
+        ) is None
+
+    def test_rejects_any_subdomain(self):
+        # Apex-only contract mirrors _velog_cookie_host_filter's
+        # exact-apex match. Logged-in session lives on the apex.
+        assert self.pat.match("https://api.velog.io/anything") is None
+        assert self.pat.match("https://www.velog.io/") is None
+        assert self.pat.match("https://anything.velog.io/@user") is None
+
+    def test_rejects_prefix_confusion_host(self):
+        # ``evilvelog.io`` must not satisfy the predicate.
+        assert self.pat.match("https://evilvelog.io/") is None
+
+    def test_rejects_suffix_confusion_host(self):
+        # ``velog.io.attacker.tld`` must not satisfy the predicate.
+        assert self.pat.match("https://velog.io.attacker.tld/") is None

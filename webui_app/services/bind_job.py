@@ -155,7 +155,12 @@ class BindJobRegistry:
                     if payload.get("error_code") == "identity_mismatch":
                         old = payload.get("old_account")
                         new = payload.get("new_account")
-                        if old and new:
+                        # PR #83 adversarial review: reject same-string and
+                        # empty payloads before reaching the store. The
+                        # store also guards (mark_identity_mismatch returns
+                        # early on these), but skipping the import + lock
+                        # acquisition is cheap and makes the intent local.
+                        if old and new and old != new:
                             try:
                                 from webui_store.channel_status import (
                                     mark_identity_mismatch,

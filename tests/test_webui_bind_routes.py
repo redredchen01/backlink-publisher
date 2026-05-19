@@ -29,6 +29,21 @@ def _isolated_config_dir(tmp_path):
         yield fake_config_dir
 
 
+@pytest.fixture(autouse=True)
+def _reset_channel_status_store():
+    """The channel_status_store singleton's path is resolved at import
+    time from the session-scope BACKLINK_PUBLISHER_CONFIG_DIR env var
+    (conftest.py:_isolated_user_dirs) — so the store file is SHARED
+    across every test in the session. Without this autouse reset, a
+    test that leaves status=identity_mismatch will collide with PR #83
+    Unit 4's new start_bind guard (409 on subsequent POST /bind for
+    that channel) in any later test."""
+    from webui_store import channel_status_store
+    channel_status_store.update(lambda _: {})
+    yield
+    channel_status_store.update(lambda _: {})
+
+
 @pytest.fixture
 def app():
     from webui_app import create_app
@@ -156,6 +171,48 @@ class TestStartBindRoute:
             environ_overrides={"REMOTE_ADDR": "10.0.0.5"},
         )
         assert resp.status_code == 403
+
+    def test_post_rejects_when_channel_in_identity_mismatch(
+        self, client, fake_subprocess
+    ):
+        # PR #83 adversarial review (P1 #3): if the channel is in
+        # identity_mismatch, a fresh bind must NOT be allowed to run
+        # in parallel with the keep/replace decision. The TOCTOU window
+        # otherwise lets the bind subprocess complete between
+        # get_status() and the resolution closure, silently accepting
+        # the new account under "keep old".
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store import channel_status_store
+        from webui_store.channel_status import (
+            mark_bound, mark_identity_mismatch,
+        )
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        storage = cfg / "medium-storage-state.json"
+        storage.write_text('{"cookies": [], "origins": []}')
+        mark_bound("medium", storage)
+        mark_identity_mismatch(
+            "medium", old_account="alice", new_account="bob"
+        )
+
+        try:
+            fake_subprocess(_events_jsonl(
+                {"event": "channel.bind.start", "channel": "medium"},
+            ))
+            token = _seed_csrf(client)
+            resp = client.post(
+                "/settings/channels/medium/bind",
+                data={"csrf_token": token},
+                headers=_bind_origin_headers(),
+            )
+            assert resp.status_code == 409, resp.data[:200]
+            body = resp.get_json()
+            assert body["error"] == "identity_mismatch_unresolved"
+        finally:
+            # Test leaves identity_mismatch state in the SESSION-shared
+            # channel_status_store; wipe so following tests in this
+            # module start clean (otherwise their /bind POSTs 409).
+            channel_status_store.update(lambda _: {})
 
 
 class TestPollBindRoute:
@@ -327,6 +384,70 @@ class TestIdentityMismatchKeep:
             headers=_bind_origin_headers(),
         )
         assert resp.status_code == 400
+
+    def test_keep_with_missing_storage_state_demotes_to_expired(self, client):
+        # PR #83 adversarial review (P1 #4): if the operator wiped
+        # storage_state.json externally, "keep" cannot literally
+        # preserve the old credential — but the previous code path
+        # silently called _execute_replace, which ALSO deletes
+        # last_account.txt + .tentative. The UI button says "keep";
+        # silent escalation to destructive replace is the bug.
+        # Correct behavior: demote to expired (semantically honest:
+        # "you used to be bound, credential is gone, please rebind")
+        # WITHOUT touching sibling files.
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store.channel_status import (
+            get_status, mark_bound, mark_identity_mismatch,
+        )
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        storage = cfg / "medium-storage-state.json"
+        storage.write_text('{"cookies": []}')
+        (cfg / "medium-last-account.txt").write_text("alice\n")
+        mark_bound("medium", storage)
+        mark_identity_mismatch("medium", old_account="alice", new_account="bob")
+        storage.unlink()  # external wipe between mismatch + operator click
+
+        token = _seed_csrf(client)
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+        assert resp.status_code in (302, 303)
+
+        rec = get_status("medium")
+        assert rec["status"] == "expired"
+        # Sibling artifact must NOT have been deleted — the UI said "keep".
+        assert (cfg / "medium-last-account.txt").exists()
+
+    def test_keep_noop_when_state_changed_under_us(self, client):
+        # PR #83 adversarial review (P1 #3 second half): if a concurrent
+        # bind subprocess landed status=bound between the operator's
+        # render and click, "keep" must NOT silently rewrite that new
+        # bound record. The atomic-closure check should observe the
+        # changed status and no-op.
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store.channel_status import get_status, mark_bound
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        storage = cfg / "medium-storage-state.json"
+        storage.write_text('{"cookies": []}')
+        # Status is bound (not identity_mismatch) by the time keep fires.
+        mark_bound("medium", storage)
+        bound_at_before = get_status("medium")["bound_at"]
+
+        token = _seed_csrf(client)
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+        assert resp.status_code in (302, 303)
+        rec = get_status("medium")
+        # Status unchanged; bound_at unchanged — closure no-op'd cleanly.
+        assert rec["status"] == "bound"
+        assert rec["bound_at"] == bound_at_before
 
 
 class TestIdentityMismatchReplace:
