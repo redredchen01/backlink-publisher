@@ -82,6 +82,66 @@ class TestPartialStates:
         assert "未绑定" in html
 
 
+# ─── Plan 2026-05-19-003 Unit 4 — identity_mismatch state ───
+
+
+class TestIdentityMismatchBranch:
+    """When the channel record carries status=identity_mismatch, the partial
+    renders a confirmation card with two CSRF'd POST forms (keep old /
+    replace with new) instead of the standard bind button."""
+
+    def _identity_mismatch_record(self):
+        return {
+            "status": "identity_mismatch",
+            "bound_at": "2026-05-19T10:00:00+00:00",
+            "storage_state_path": "/tmp/medium-storage-state.json",
+            "last_verified_at": "2026-05-19T10:00:00+00:00",
+            "identity_mismatch_old": "alice",
+            "identity_mismatch_new": "bob",
+        }
+
+    def test_renders_account_names(self, app):
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        assert "alice" in html
+        assert "bob" in html
+
+    def test_renders_warn_badge_with_mismatch_text(self, app):
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        # Should be a distinct badge — NOT the standard "已绑定" or "未绑定"
+        assert "账号变更" in html or "identity_mismatch" in html.lower() or "账户" in html
+
+    def test_renders_two_action_forms(self, app):
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        # Two POST forms — one keep, one replace
+        assert "identity-mismatch/keep" in html
+        assert "identity-mismatch/replace" in html
+
+    def test_forms_include_csrf_token(self, app):
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        # CSRF hidden input present in BOTH forms (count >= 2)
+        assert html.count('name="csrf_token"') >= 2
+
+    def test_standard_bind_button_hidden_in_mismatch_state(self, app):
+        """When in identity_mismatch state, don't show the regular
+        "绑定/重新绑定" button — operator must resolve first."""
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        # The bind-channel-btn class is the standard re-bind button
+        assert 'class="btn btn-outline-primary btn-sm bind-channel-btn"' not in html
+
+    def test_keep_button_is_non_destructive_default(self, app):
+        """The "保留旧账号" button (keep) should appear BEFORE "替换为新账号"
+        (replace) in document order — Tab moves to keep first, Enter
+        defaults to non-destructive action."""
+        html = _render(app, "medium", {"medium": self._identity_mismatch_record()})
+        keep_idx = html.find("identity-mismatch/keep")
+        replace_idx = html.find("identity-mismatch/replace")
+        assert keep_idx != -1
+        assert replace_idx != -1
+        assert keep_idx < replace_idx, (
+            "non-destructive (keep) action must come first in DOM"
+        )
+
+
 class TestA11y:
     def test_role_status_and_aria_live_present(self, app):
         html = _render(app, "medium", {"medium": {"status": "bound"}})

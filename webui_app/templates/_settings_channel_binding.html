@@ -18,15 +18,20 @@
 {% set _rec = channel_statuses.get(channel) or {"status": "unbound", "bound_at": None} %}
 {% set _status = _rec.get("status", "unbound") %}
 {% set _bound_at = _rec.get("bound_at") %}
+{# Plan 2026-05-19-003 Unit 4 — identity_mismatch state context vars. #}
+{% set _identity_old = _rec.get("identity_mismatch_old") %}
+{% set _identity_new = _rec.get("identity_mismatch_new") %}
 {% set _badge_class = {
-    "bound":   "ok",
-    "expired": "warn",
-    "unbound": "err",
+    "bound":             "ok",
+    "expired":           "warn",
+    "unbound":           "err",
+    "identity_mismatch": "warn",
 }.get(_status, "err") %}
 {% set _badge_text = {
-    "bound":   "已绑定 ✓",
-    "expired": "已过期 ⚠",
-    "unbound": "未绑定",
+    "bound":             "已绑定 ✓",
+    "expired":           "已过期 ⚠",
+    "unbound":           "未绑定",
+    "identity_mismatch": "账号变更 ⚠",
 }.get(_status, "未绑定") %}
 {% set _button_text = "重新绑定" if _status in ("bound", "expired") else "绑定" %}
 
@@ -50,6 +55,54 @@
         {% endif %}
     </div>
 
+    {% if _status == "identity_mismatch" %}
+    {# Plan 2026-05-19-003 Unit 4 — identity_mismatch confirm prompt.
+
+       The standard "绑定 / 重新绑定" button is suppressed; operator must
+       explicitly choose keep-old vs replace-with-new. Non-destructive
+       "保留旧账号" is rendered first so Tab moves to it and Enter
+       defaults to the safe action.
+
+       Routes `/settings/channels/<channel>/identity-mismatch/{keep,replace}`
+       are owned by Plan 001 Unit 4 followup (or Plan 003 Unit 4
+       extension if Plan 001 author defers). Coordination via PR review;
+       template can land first because Plan 001 Unit 4's bind blueprint
+       has the right url_prefix shape.
+    #}
+    <div class="identity-mismatch-card" style="margin-bottom:8px; padding:12px;
+                background:#fffbeb; border:1px solid #fde68a; border-radius:6px;">
+        <p style="margin:0 0 8px 0; font-size:13px;">
+            <strong>⚠ 检测到登录账号变更</strong>
+        </p>
+        <p style="margin:0 0 12px 0; font-size:13px; color:#92400e;">
+            上次绑定为 <code>@{{ _identity_old or "(unknown)" }}</code>，
+            本次登录为 <code>@{{ _identity_new or "(unknown)" }}</code>。
+            请选择如何处理：
+        </p>
+        <div class="d-flex gap-2">
+            <form method="POST"
+                  action="/settings/channels/{{ channel }}/identity-mismatch/keep"
+                  style="margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+                <button type="submit"
+                        class="btn btn-outline-secondary btn-sm"
+                        aria-label="保留旧账号 @{{ _identity_old or 'unknown' }}（{{ channel }} 渠道）">
+                    <i class="bi bi-shield-check me-1" aria-hidden="true"></i>保留旧账号
+                </button>
+            </form>
+            <form method="POST"
+                  action="/settings/channels/{{ channel }}/identity-mismatch/replace"
+                  style="margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+                <button type="submit"
+                        class="btn btn-outline-danger btn-sm"
+                        aria-label="替换为新账号 @{{ _identity_new or 'unknown' }}（{{ channel }} 渠道）">
+                    <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>替换为新账号
+                </button>
+            </form>
+        </div>
+    </div>
+    {% else %}
     <div class="d-flex gap-2" style="margin-bottom:8px;">
         <button type="button"
                 class="btn btn-outline-primary btn-sm bind-channel-btn"
@@ -58,6 +111,7 @@
             <i class="bi bi-box-arrow-in-right me-1" aria-hidden="true"></i>{{ _button_text }}
         </button>
     </div>
+    {% endif %}
 
     <div class="bind-log small text-muted"
          id="bind-log-{{ channel }}"
