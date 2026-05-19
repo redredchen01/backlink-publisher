@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
-import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.logger import plan_logger
 
 from flask import Blueprint, request, session
 
+from webui_store import history_store
+
 from ..helpers import (
     _normalize_url,
+    _parse_publish_results,
     _persist_three_tier_config,
     _render,
     _verify_urls_or_error,
@@ -62,7 +69,7 @@ def ce_plan():
 
     tier_urls = [u for u in (main_url, category_url, work_url) if u]
     gate_urls = tier_urls + extra_urls
-    _survivors, gate_err = _verify_urls_or_error(gate_urls, "URL")
+    _, gate_err = _verify_urls_or_error(gate_urls, "URL")
     if gate_err:
         return _render(
             'index.html', error=gate_err,
@@ -73,7 +80,6 @@ def ce_plan():
         try:
             _persist_three_tier_config(main_url, category_url, work_url)
         except Exception as exc:
-            from backlink_publisher.logger import plan_logger
             plan_logger.warn(
                 "homepage_form_persist_failed",
                 main=main_url, reason=type(exc).__name__, detail=str(exc)[:120],
@@ -90,16 +96,25 @@ def ce_plan():
     target_url = main_url
     target_language = request.form.get('target_language', detect_language(target_url))
 
+    # Fetch TDK if enabled and add suggested anchors
+    fetch_tdk = request.form.get('fetch_tdk', 'yes')
+    suggested_anchors = []
+    if fetch_tdk == 'yes':
+        tdk_data = fetch_full_tdk(target_url)
+        if tdk_data.get('status') == 'success':
+            suggested_anchors = tdk_data.get('suggested_anchors', [])
+
     config = {
         'target_url': target_url,
         'main_domain': get_main_domain(target_url),
         'platform': detect_platform(target_url),
-        'url_mode': 'A',
+        'url_mode': 'C',
         'publish_mode': 'draft',
         'target_language': target_language,
         'custom_title': '',
         'custom_tags': '',
-        'fetch_tdk': 'yes',
+        'fetch_tdk': fetch_tdk,
+        'suggested_anchors': suggested_anchors,
         'urls': url_inputs,
         'meta_info': meta_info,
     }
@@ -158,11 +173,10 @@ def ce_generate():
         seed['custom_tags'] = custom_tags
     if extra_urls:
         seed['extra_urls'] = extra_urls
-    if tdk_data:
-        seed['system_prompt'] = tdk_data.get('system_prompt', '')
-        seed['tdk_title'] = tdk_data.get('title', '')
-        seed['tdk_description'] = tdk_data.get('description', '')
-        seed['tdk_keywords'] = tdk_data.get('keywords', '')
+    if tdk_data and tdk_data.get('status') == 'success':
+        suggested = tdk_data.get('suggested_anchors', [])
+        if suggested:
+            seed['suggested_anchors'] = suggested
 
     seed_json = json.dumps(seed, ensure_ascii=False)
 
@@ -171,7 +185,8 @@ def ce_generate():
         plans = result['stdout']
         if not plans.strip():
             error_msg = result['stderr'] or "生成失败，没有输出"
-            return _render('index.html', target_url=main_url, error=error_msg)
+            return _render('index.html', target_url=main_url, error=error_msg,
+                           config=stored_config)
 
         plans_list = []
         for line in plans.strip().split('\n'):
@@ -179,12 +194,12 @@ def ce_generate():
                 try:
                     plans_list.append(json.loads(line))
                 except json.JSONDecodeError as je:
-                    print(f"JSON parse error: {je}, line: {line[:100]}",
-                          file=sys.stderr)
+                    plan_logger.warn("json_parse_error", error=str(je), line=line[:100])
 
         if not plans_list:
             return _render('index.html', target_url=main_url,
-                error=f"解析生成结果失败。原始输出: {plans[:200]}")
+                           error=f"解析生成结果失败。原始输出: {plans[:200]}",
+                           config=stored_config)
 
         config = {
             'platform': platform, 'target_language': target_language,
@@ -238,11 +253,6 @@ def ce_publish():
                 error=result['stderr'] or "发布失败",
                 config=config, history_active=True)
 
-        from ..helpers import _parse_publish_results
-        from webui_store import history_store
-        from datetime import datetime
-        import uuid
-
         publish_results = _parse_publish_results(published)
         article_urls = [r.get('published_url') or r.get('draft_url', '')
                         for r in publish_results if r]
@@ -262,3 +272,33 @@ def ce_publish():
     except Exception as e:
         return _render('index.html', error=f"发布失败: {str(e)}",
                        config=config, history_active=True)
+
+@bp.route('/ce:preview', methods=['POST'])
+def ce_preview():
+    urls_json = request.form.get('urls_json', '[]')
+    try:
+        urls = json.loads(urls_json)
+    except json.JSONDecodeError:
+        return "Invalid URLs"
+        
+    seed = {
+        'target_url': urls[0],
+        'main_domain': get_main_domain(urls[0]),
+        'platform': request.form.get('platform', 'medium'),
+        'language': request.form.get('target_language', 'zh-CN'),
+        'url_mode': request.form.get('url_mode', 'A'),
+        'publish_mode': 'draft',
+        'custom_title': request.form.get('custom_title', ''),
+        'custom_tags': request.form.get('custom_tags', ''),
+        'extra_urls': urls[1:],
+    }
+    if request.form.get('fetch_tdk') == 'yes':
+        seed['tdk'] = fetch_full_tdk(urls[0])
+        
+    pipe_out = run_pipe(['plan-backlinks', '-'], json.dumps([seed]))
+    content = pipe_out.get('stdout', '')
+    
+    fmt = request.args.get('format', 'md')
+    if fmt == 'html':
+        return render_to_html(content)
+    return content

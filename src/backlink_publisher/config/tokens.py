@@ -3,39 +3,18 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import stat
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backlink_publisher.errors import DependencyError, InputValidationError
-from backlink_publisher.logger import plan_logger
-from backlink_publisher.url_utils import validate_https_url, validate_main_domain_url
-from .types import (
-    ANCHOR_TYPES,
-    AnchorAlarmConfig,
-    AnchorAlarmOverride,
-    BloggerOAuthConfig,
-    Config,
-    DEFAULT_WORK_TEMPLATES,
-    LLMProviderConfig,
-    MediumOAuthConfig,
-    ThreeUrlConfig,
-    _LLM_API_KEY_ENV_VAR,
-    _PROPORTIONS_SUM_TOLERANCE,
-    _SAFE_SEO_PROPORTIONS,
-    _UNSAFE_IN_ANCHOR,
-)
 
 if sys.version_info >= (3, 11):
-    import tomllib
+    pass
 else:
-    import tomli as tomllib  # type: ignore[no-redef]
+    pass  # type: ignore[no-redef]
 
-from .loader import _config_dir
 
 
 def _resolve_config_dir():

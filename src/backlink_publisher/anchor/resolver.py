@@ -77,12 +77,15 @@ _UNSAFE_ANCHOR_CHARS = re.compile(
 # anchor text to be PREDOMINANTLY (≥50%) CJK so the resolver doesn't surface
 # transliterations or English brand strings the scheduler would mis-bucket as
 # Chinese anchor text.
-_CJK_CHAR = re.compile(r"[一-鿿]")
+_CJK_BMP_START: int = 0x4E00
+_CJK_BMP_END: int = 0x9FFF
+_CJK_CHAR = re.compile(f"[\\u{_CJK_BMP_START:04X}-\\u{_CJK_BMP_END:04X}]")
 
 # Hangul Syllables block — used by the ko branch of _passes_filters. Plan
 # 2026-05-18-006 Unit 4 R13: only Syllables (U+AC00..U+D7AF); Jamo
 # (U+1100..U+11FF) deferred to a follow-up brainstorm.
-_HANGUL_BMP_START, _HANGUL_BMP_END = 0xAC00, 0xD7AF
+_HANGUL_BMP_START: int = 0xAC00
+_HANGUL_BMP_END: int = 0xD7AF
 
 _MIN_ANCHOR_LEN: int = 2
 _MAX_ANCHOR_LEN: int = 8

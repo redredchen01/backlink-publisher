@@ -128,7 +128,6 @@ class BloggerAPIAdapter(Publisher):
         try:
             from googleapiclient.discovery import build
             from googleapiclient.errors import HttpError
-            import google.auth.transport.requests as google_requests
 
             service = build("blogger", "v3", credentials=creds)
             # Plan 2026-05-18-006 Unit 5 R9: extract_publish_html selects the

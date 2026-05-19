@@ -6,6 +6,9 @@ routes consumed by the dashboard JS in Unit 5.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 from backlink_publisher.config import load_config, save_config
@@ -184,3 +187,28 @@ def settings_revoke_blogger():
         return redirect('/settings?flash_type=success&flash_msg=Blogger 授权已撤销#channel-blogger')
     except Exception as e:
         return redirect(f'/settings?flash_type=danger&flash_msg=撤销失败: {e}#channel-blogger')
+
+
+@bp.route('/api/velog/login', methods=['POST'])
+def api_velog_login():
+    """Spawn velog-login in a detached subprocess (headed Playwright).
+
+    The operator completes social login in the popped-up Chromium window.
+    Returns JSON {ok: true} immediately — the login is async.
+    """
+    try:
+        subprocess.Popen(
+            [sys.executable, '-m', 'backlink_publisher.cli.velog_login'],
+            env={**__import__('os').environ, 'PYTHONPATH': 'src'},
+            start_new_session=True,
+        )
+        return jsonify({'ok': True})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+
+@bp.route('/api/velog/status', methods=['GET'])
+def api_velog_status():
+    """Return current velog channel status as JSON for polling."""
+    from ..helpers import _get_velog_status
+    return jsonify(_get_velog_status())

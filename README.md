@@ -413,10 +413,11 @@ zero exit code is not mistaken for "no breach detected".
 
 Publishing is API-first with a browser fallback for Medium.
 
-| Platform | Primary | Fallback |
-|---|---|---|
-| **Blogger** | Blogger API v3 (OAuth2) | — |
-| **Medium** | Medium API v1 (Integration Token) | Playwright browser automation |
+| Platform | Primary | Fallback | Auth |
+|---|---|---|---|
+| **Blogger** | Blogger API v3 (OAuth2) | — | OAuth2 token |
+| **Medium** | Medium API v1 (Integration Token) | Playwright browser automation | Integration token / browser |
+| **Velog** | Internal GraphQL `writePost` | — | Cookie jar (30-day window) |
 
 ### Blogger Setup
 
@@ -435,6 +436,40 @@ client_secret = "..."
 
 4. Run any Blogger publish — a browser window opens once for OAuth authorization.
    The token is saved automatically for future runs.
+
+### Velog Setup
+
+velog.io has no official API; we publish via its internal `v2.velog.io/graphql`
+GraphQL endpoint using a cookie jar from social login.
+
+1. Install Playwright (required once):
+
+```bash
+pip install playwright && playwright install chromium
+```
+
+2. Run the login command (opens a headed Chromium window):
+
+```bash
+velog-login
+```
+
+3. Complete social login (Google / GitHub / Facebook) in the browser.
+   Credentials are saved to `~/.config/backlink-publisher/velog-cookies.json` (0600).
+
+4. Publish:
+
+```bash
+cat seeds.jsonl | plan-backlinks | validate-backlinks \
+  | publish-backlinks --platform velog --mode publish
+```
+
+**Notes:**
+- Cookie TTL: access_token 24 h (auto-refreshed); refresh_token **30 days**.
+  Re-run `velog-login` once per 30 days.
+- Phase 1 cap: **5 posts/day** until 2026-06-02, then 30/day.
+- Cross-machine: daily cap is per-machine. Coordinate manually if using multiple machines.
+- See `docs/operations/velog-login.md` for full operator guide.
 
 ### Medium Setup
 

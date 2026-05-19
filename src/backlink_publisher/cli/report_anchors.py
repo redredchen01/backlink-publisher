@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from .. import config_echo
+from backlink_publisher._util.jsonl import read_jsonl
 from backlink_publisher.anchor.metrics import (
     _ALARM_SAMPLE_MIN_PER_TARGET,
     compute_window_metrics,
@@ -467,15 +468,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     fh = args.input or sys.stdin
-    rows: list[dict[str, Any]] = []
-    for lineno, raw in enumerate(fh, start=1):
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            rows.append(json.loads(raw))
-        except json.JSONDecodeError as exc:
-            print(f"WARN: line {lineno}: malformed JSON — {exc}", file=sys.stderr)
+    rows = list(read_jsonl(fh, strict=False))
 
     stats = _build_report(rows)
 

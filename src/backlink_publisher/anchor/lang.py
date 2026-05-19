@@ -21,22 +21,19 @@ Public entry: :func:`check_anchor_language`. Exemption order is:
 
 from __future__ import annotations
 
+from backlink_publisher.anchor.resolver import (
+    _CJK_BMP_START,
+    _CJK_BMP_END,
+    _HANGUL_BMP_START,
+    _HANGUL_BMP_END,
+)
 from backlink_publisher.linkcheck.language import SUPPORTED_LANGUAGES
 
 __all__ = ["check_anchor_language"]
 
 
-#: CJK Unified Ideographs BMP block. Extension A (U+3400..U+4DBF) and beyond
-#: are deferred until a real-world false-negative surfaces (see plan §Scope).
-_CJK_BMP_START, _CJK_BMP_END = 0x4E00, 0x9FFF
-
-#: Cyrillic block.
+#: Cyrillic block (only defined in lang.py — no other module uses it).
 _CYR_START, _CYR_END = 0x0400, 0x04FF
-
-#: Hangul Syllables block. Jamo (U+1100..U+11FF) deferred to follow-up
-#: (plan 2026-05-18-006 Unit 3 §Scope — widen on first real-world
-#: false-negative).
-_HANGUL_BMP_START, _HANGUL_BMP_END = 0xAC00, 0xD7AF
 
 #: Link kinds whose anchor text is subject to R4. Anything else is exempt.
 _GATED_KINDS = frozenset({"main_domain", "target"})

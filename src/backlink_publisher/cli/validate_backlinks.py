@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import unicodedata
 from datetime import datetime, timezone
@@ -14,11 +13,9 @@ import backlink_publisher.publishing.adapters  # noqa: F401  populate registry b
 from .. import config_echo, errors
 from backlink_publisher.anchor.lang import check_anchor_language
 from backlink_publisher.config import Config, get_anchor_pool_v2, load_config
-from backlink_publisher._util.errors import emit_error, InputValidationError
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher.linkcheck.language import (
     SUPPORTED_LANGUAGES,
-    detect_language,
     detect_language_from_html,
     detect_language_from_markdown,
     language_matches,
@@ -26,8 +23,7 @@ from backlink_publisher.linkcheck.language import (
 from backlink_publisher.linkcheck.http import check_urls_strict
 from backlink_publisher.publishing.content_negotiation import route_tier_for
 from backlink_publisher._util.logger import validate_logger
-from backlink_publisher._util.markdown import validate_markdown_convertible
-from ..schema import _is_field_present, reject_unsupported_platform, supported_platforms, validate_output_payload
+from ..schema import _is_field_present, reject_unsupported_platform, validate_output_payload
 
 
 def _resolve_branded_pool(row: dict[str, Any], config: Config | None) -> list[str]:

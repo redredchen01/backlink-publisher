@@ -916,9 +916,17 @@
                             <label class="form-label">文章标题 (留空自动生成)</label>
                             <input type="text" class="form-control" name="custom_title" value="{{ config.custom_title }}" placeholder="自定义标题">
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="mb-3">
                             <label class="form-label">自定义标签 (逗号分隔)</label>
-                            <input type="text" class="form-control" name="custom_tags" value="{{ config.custom_tags }}" placeholder="tech,news,guide">
+                            <input type="text" class="form-control" name="custom_tags" value="{{ config.custom_tags }}" placeholder="留空则自动生成">
+                            {% if config.suggested_anchors %}
+                            <div class="mt-2">
+                                <small class="text-muted">锚文本建议:</small>
+                                {% for anchor in config.suggested_anchors %}
+                                <span class="badge bg-light text-dark border cursor-pointer" onclick="document.getElementsByName('custom_tags')[0].value += '{{ anchor }},'" style="cursor:pointer; margin-right: 5px;">{{ anchor }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                     </div>
                     

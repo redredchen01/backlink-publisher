@@ -1,0 +1,98 @@
+{% set vs = velog_status if velog_status is defined else {'state': 'err', 'label': '未绑定', 'guide': 'velog-login', 'count': 0, 'cap': 5, 'cookies_path': ''} %}
+
+<!-- 连接状态徽章 -->
+<div class="mb-3 d-flex align-items-center gap-3">
+    <span class="fw-semibold" style="font-size:14px;">当前状态：</span>
+    {% if vs.state == 'fresh' %}
+        <span class="badge-status ok"><i class="bi bi-stars me-1"></i>{{ vs.label }}</span>
+    {% elif vs.state == 'ok' %}
+        <span class="badge-status ok"><i class="bi bi-check-circle-fill me-1"></i>{{ vs.label }}</span>
+    {% elif vs.state == 'warn' %}
+        <span class="badge-status warn"><i class="bi bi-exclamation-triangle-fill me-1"></i>{{ vs.label }}</span>
+    {% elif vs.state == 'cap_reached' %}
+        <span class="badge-status" style="background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;">
+            <i class="bi bi-pause-circle-fill me-1"></i>{{ vs.label }}
+        </span>
+    {% elif vs.state == 'permission_denied' %}
+        <span class="badge-status" style="background:#faf5ff;color:#7c3aed;border:1px solid #c4b5fd;">
+            <i class="bi bi-lock-fill me-1"></i>{{ vs.label }}
+        </span>
+    {% else %}
+        <span class="badge-status err"><i class="bi bi-x-circle-fill me-1"></i>{{ vs.label }}</span>
+    {% endif %}
+</div>
+
+<!-- 状态说明 -->
+{% if vs.state in ('err', 'warn') %}
+<div class="alert alert-warning" style="margin-bottom:16px;">
+    <strong>需要操作：</strong>
+    在终端运行：<code>velog-login</code><br/>
+    <small class="text-muted">会弹出 Chromium，完成 velog 社交登录后凭证自动保存。</small>
+</div>
+{% elif vs.state == 'cap_reached' %}
+<div class="alert alert-secondary" style="margin-bottom:16px;">
+    <i class="bi bi-pause-circle me-1"></i><strong>今日发布上限已达。</strong>
+    计数在 UTC 午夜自动重置。
+</div>
+{% elif vs.state == 'permission_denied' %}
+<div class="alert" style="background:#faf5ff;border:1px solid #c4b5fd;margin-bottom:16px;">
+    <i class="bi bi-lock-fill me-1" style="color:#7c3aed;"></i>
+    <strong style="color:#7c3aed;">WebUI 无法读取 Cookie 文件（uid 不匹配）</strong><br/>
+    <code>{{ vs.guide }}</code>
+</div>
+{% elif vs.state == 'ok' %}
+<div class="row g-2 mb-3" style="font-size:13px;">
+    <div class="col-auto">
+        <span class="text-muted">今日已发：</span>
+        <strong>{{ vs.count }} / {{ vs.cap }}</strong>
+    </div>
+    <div class="col-auto text-muted">·</div>
+    <div class="col-auto">
+        <span class="text-muted">重置时间：</span>UTC 午夜
+    </div>
+</div>
+{% endif %}
+
+<hr style="margin:14px 0;">
+
+<!-- 操作按钮 -->
+<div class="d-flex align-items-center gap-3 flex-wrap">
+    <a href="#" class="btn btn-outline-primary btn-sm"
+       onclick="runVelogLogin(event)"
+       title="在终端启动 velog-login — 会弹出 Chromium 完成社交登录">
+        <i class="bi bi-box-arrow-in-right me-1"></i>
+        {% if vs.state == 'err' %}绑定 velog{% else %}重新绑定{% endif %}
+    </a>
+
+    {% if vs.state in ('ok', 'fresh') %}
+    <span class="text-muted" style="font-size:12px;">
+        凭证文件：<code>{{ vs.cookies_path }}</code>
+    </span>
+    {% endif %}
+</div>
+
+<div class="mt-3">
+    <small class="text-muted">
+        velog.io 通过内部 <code>v2.velog.io/graphql</code> 的 <code>writePost</code> mutation 发布。
+        凭证存放于 <code>~/.config/backlink-publisher/velog-cookies.json</code>（0600），
+        有效期 30 天（access_token 自动隐式续期）。<br/>
+        发布上限：Phase 1 期间 <strong>5 篇/天</strong>；
+        {% if vs.cap == 30 %}已解锁 30 篇/天。{% else %}解锁日期：2026-06-02。{% endif %}
+    </small>
+</div>
+
+<script>
+function runVelogLogin(e) {
+    e.preventDefault();
+    fetch('/api/velog/login', {method: 'POST'})
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                alert('velog-login 已启动。\n请在弹出的 Chromium 窗口完成登录，完成后刷新本页。');
+            } else {
+                alert('启动失败：' + (d.error || '未知错误'));
+            }
+        })
+        .catch(() => alert('网络错误，请手动在终端运行：\nvelog-login'));
+}
+</script>

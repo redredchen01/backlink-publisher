@@ -58,9 +58,19 @@
 <body>
     <nav class="navbar" style="display:flex;justify-content:space-between;align-items:center;">
         <h1><i class="bi bi-gear me-2"></i>设置</h1>
-        <a href="/" class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.5);">
-            <i class="bi bi-arrow-left me-1"></i>返回
-        </a>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <!-- LLM Status Badge -->
+            {% if llm_settings and llm_settings.api_key and llm_settings.endpoint %}
+            <span style="display:flex;align-items:center;gap:5px;
+                background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.5);
+                color:white;padding:4px 10px;border-radius:20px;font-size:12px;" title="LLM 进阶功能已启用">
+                <i class="bi bi-cpu"></i> LLM: {{ llm_settings.model or '已连接' }}
+            </span>
+            {% endif %}
+            <a href="/" class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.5);">
+                <i class="bi bi-arrow-left me-1"></i>返回
+            </a>
+        </div>
     </nav>
 
     <div class="container-fluid" style="max-width:860px;">
@@ -130,17 +140,231 @@
             </div>
         </div>
 
+        <!-- Velog 渠道折叠卡 -->
+        <div class="card channel-card">
+            <div class="card-header p-0">
+                <button type="button" class="channel-toggle"
+                        data-bs-toggle="collapse" data-bs-target="#channel-velog"
+                        aria-expanded="false" aria-controls="channel-velog">
+                    <i class="bi bi-pencil-square" style="color:#20c997;" aria-hidden="true"></i>
+                    <span>Velog</span>
+                    <span class="badges">
+                        {% if velog_status is defined %}
+                            {% set vs = velog_status %}
+                            {% if vs.state == 'fresh' or vs.state == 'ok' %}
+                                <span class="badge-status ok"><i class="bi bi-check-circle-fill"></i> {{ vs.label }}</span>
+                            {% elif vs.state == 'cap_reached' %}
+                                <span class="badge-status" style="background:#f3f4f6;color:#6b7280;border:1px solid #d1d5db;">
+                                    <i class="bi bi-pause-circle-fill"></i> {{ vs.label }}
+                                </span>
+                            {% elif vs.state == 'permission_denied' %}
+                                <span class="badge-status" style="background:#faf5ff;color:#7c3aed;border:1px solid #c4b5fd;">
+                                    <i class="bi bi-lock-fill"></i> 权限错误
+                                </span>
+                            {% elif vs.state == 'warn' %}
+                                <span class="badge-status warn"><i class="bi bi-exclamation-triangle-fill"></i> {{ vs.label }}</span>
+                            {% else %}
+                                <span class="badge-status err"><i class="bi bi-x-circle-fill"></i> 未绑定</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge-status warn">加载中…</span>
+                        {% endif %}
+                    </span>
+                    <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="channel-velog" class="collapse">
+                <div class="card-body">
+                    {% include '_settings_channel_velog.html' %}
+                </div>
+            </div>
+        </div>
+
         <h2 class="section-heading">全局设置</h2>
 
         {% include '_settings_global_keywords.html' %}
 
         {% include '_settings_global_schedule.html' %}
 
-        <!-- 配置文件位置 -->
+        <h2 class="section-heading">AI 内容生成引擎 (PRO Mode)</h2>
+
+        <!-- AI Dashboard -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card bg-primary text-white p-3">
+                    <h6 class="mb-0">今日生成次数</h6>
+                    <h3 class="mt-2" id="aiUsageCount">0</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-success text-white p-3">
+                    <h6 class="mb-0">生成成功率</h6>
+                    <h3 class="mt-2" id="aiSuccessRate">100%</h3>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-warning text-dark p-3">
+                    <h6 class="mb-0">系统延迟 (Avg)</h6>
+                    <h3 class="mt-2" id="aiLatency">0ms</h3>
+                </div>
+            </div>
+        </div>
+
+        <!-- ⑥ 进阶 LLM 整合 -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-cpu me-2"></i>进阶 LLM 整合 (可选)</span>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-xs dropdown-toggle" data-bs-toggle="dropdown" style="font-size:11px;padding:2px 8px;">
+                        快速填入预设
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end" style="font-size:12px;">
+                        <li><a class="dropdown-item" href="#" onclick="applyLlmPreset('openai')">OpenAI (gpt-4o)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="applyLlmPreset('deepseek')">DeepSeek (deepseek-chat)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="applyLlmPreset('openrouter')">OpenRouter (auto)</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="applyLlmPreset('groq')">Groq (llama3-70b)</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" onclick="applyLlmPreset('local')">Local (Ollama/LMStudio)</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted" style="font-size:13px;">
+                    配置自定义 LLM 端口以获得更优质的文章生成效果。支持所有 OpenAI 兼容格式的 API。
+                </p>
+                <form method="POST" action="/settings/save-llm-config">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">LLM Endpoint (Base URL)</label>
+                            <input type="text" class="form-control" name="endpoint" id="llmEndpointInput"
+                                   placeholder="https://api.openai.com/v1"
+                                   value="{{ llm_settings.endpoint }}">
+                            <div class="form-text">LLM 服务的基础 API 地址，末尾通常包含 <code>/v1</code></div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">API Key</label>
+                            <div class="input-group">
+                                <input type="password" class="form-control" name="api_key"
+                                       id="llmApiKeyInput"
+                                       placeholder="sk-..."
+                                       value="{{ llm_settings.api_key }}">
+                                <button type="button" class="btn btn-outline-secondary"
+                                        onclick="toggleLlmSecret()">
+                                    <i class="bi bi-eye" id="llmSecretEye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Model Name</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="model"
+                                       id="llmModelInput"
+                                       placeholder="gpt-4o"
+                                       value="{{ llm_settings.model }}">
+                                <button type="button" class="btn btn-outline-secondary d-none" 
+                                        id="modelSelectBtn" data-bs-toggle="dropdown">
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" id="modelDropdownList" style="max-height:300px;overflow-y:auto;">
+                                    <!-- Populated via JS -->
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label d-flex justify-content-between">
+                                <span>Temperature (创造力)</span>
+                                <span id="tempValue" class="fw-bold text-primary">{{ llm_settings.temperature }}</span>
+                            </label>
+                            <input type="range" class="form-range" name="temperature" 
+                                   min="0" max="2" step="0.1" 
+                                   value="{{ llm_settings.temperature }}"
+                                   oninput="document.getElementById('tempValue').innerText = this.value">
+                            <div class="form-text">0 = 严谨稳定，2 = 极具创意。建议 0.7 左右。</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label d-flex justify-content-between">
+                                <span>Custom System Prompt (系统提示词)</span>
+                                <a href="#" class="btn-xs text-primary text-decoration-none" style="font-size:12px;" onclick="resetLlmPrompt()">
+                                    <i class="bi bi-arrow-counterclockwise"></i> 恢复默认
+                                </a>
+                            </label>
+                            <textarea class="form-control" name="system_prompt" id="llmPromptInput"
+                                      rows="4" style="font-size:13px;font-family:monospace;"
+                                      placeholder="留空则使用内置默认提示词...">{{ llm_settings.system_prompt }}</textarea>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" name="use_article_gen" id="useArticleGen" {% if llm_settings.use_article_gen %}checked{% endif %}>
+                                <label class="form-check-label" for="useArticleGen">启用 AI 全文生成</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">AI Cover Image Generation (FRW API)</label>
+                            <div class="input-group mb-2">
+                                <input type="password" class="form-control" name="image_gen_api_key"
+                                       placeholder="输入 FRW API Key"
+                                       value="{{ llm_settings.image_gen_api_key }}">
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="use_image_gen" id="useImageGen" {% if llm_settings.use_image_gen %}checked{% endif %}>
+                                <label class="form-check-label" for="useImageGen">启用 AI 封面生成</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-floppy me-1"></i>保存 LLM 设定
+                        </button>
+                        <button type="button" class="btn btn-outline-info btn-sm" onclick="testLlmConnection()">
+                            <i class="bi bi-broadcast me-1"></i>测试连接
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearLlmSettings()">
+                            <i class="bi bi-x-circle me-1"></i>清除配置
+                        </button>
+                        <span id="llmTestResult" class="ms-2" style="font-size:13px;align-self:center;"></span>
+                    </div>
+                    <div class="mt-3" style="font-size: 11px; color: #64748b;">
+                        <i class="bi bi-info-circle me-1"></i> 提示：
+                        获取 API Key: 
+                        <a href="https://platform.openai.com/api-keys" target="_blank" class="text-decoration-none me-2">OpenAI</a>
+                        <a href="https://platform.deepseek.com/api_keys" target="_blank" class="text-decoration-none me-2">DeepSeek</a>
+                        <a href="https://openrouter.ai/keys" target="_blank" class="text-decoration-none me-2">OpenRouter</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- ⑦ 生成诊断控制台 -->
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-file-earmark-text me-2"></i>配置文件
+                <i class="bi bi-magic me-2"></i>生成预览沙盒 (Preview Sandbox)
             </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <input type="text" id="testTitle" class="form-control" placeholder="输入测试文章标题...">
+                    </div>
+                    <div class="col-md-6">
+                        <button class="btn btn-outline-primary w-100" onclick="previewGeneration()">
+                            <i class="bi bi-play-fill"></i> 执行预览生成
+                        </button>
+                    </div>
+                </div>
+                <div id="previewResult" class="bg-light border p-3 rounded mt-3" style="font-size:13px;min-height:100px;">
+                    预览结果将显示在此处...
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-terminal me-2"></i>实时运行日志 (Logs)
+            </div>
+            <div class="card-body">
+                <div id="llmLogConsole" class="bg-dark text-light p-3 rounded" 
+                     style="font-family:monospace;font-size:12px;height:200px;overflow-y:scroll;white-space:pre-wrap;">
+                    正在加载日志...
+                </div>
+            </div>
+        </div>
             <div class="card-body">
                 <p class="text-muted mb-1" style="font-size:13px;">配置保存路径：</p>
                 <code style="font-size:13px;">{{ config_path }}</code>
@@ -199,6 +423,164 @@
             icon.className = 'bi bi-eye';
         }
     }
+
+    // ── LLM Settings Helpers ─────────────────────────────────────
+    function toggleLlmSecret() {
+        const input = document.getElementById('llmApiKeyInput');
+        const icon  = document.getElementById('llmSecretEye');
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.className = 'bi bi-eye-slash';
+        } else {
+            input.type = 'password';
+            icon.className = 'bi bi-eye';
+        }
+    }
+
+    function resetLlmPrompt() {
+        event.preventDefault();
+        if (confirm('确定要恢复默认系统提示词吗？')) {
+            document.getElementById('llmPromptInput').value = '';
+        }
+    }
+
+    function clearLlmSettings() {
+        if (confirm('确定要清除所有 LLM 配置吗？这将还原为系统默认生成模式。')) {
+            document.getElementById('llmEndpointInput').value = '';
+            document.getElementById('llmApiKeyInput').value = '';
+            document.getElementById('llmModelInput').value = '';
+            document.getElementById('llmTestResult').innerHTML = '';
+            document.getElementById('modelSelectBtn').classList.add('d-none');
+            event.target.closest('form').submit();
+        }
+    }
+
+    function applyLlmPreset(provider) {
+        event.preventDefault();
+        const endpointEl = document.getElementById('llmEndpointInput');
+        const modelEl = document.getElementById('llmModelInput');
+        
+        const presets = {
+            'openai': { url: 'https://api.openai.com/v1', model: 'gpt-4o' },
+            'deepseek': { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+            'openrouter': { url: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
+            'groq': { url: 'https://api.groq.com/openai/v1', model: 'llama3-70b-8192' },
+            'local': { url: 'http://localhost:11434/v1', model: 'llama3' }
+        };
+        
+        if (presets[provider]) {
+            endpointEl.value = presets[provider].url;
+            modelEl.value = presets[provider].model;
+            document.getElementById('llmTestResult').innerHTML = '';
+            document.getElementById('modelSelectBtn').classList.add('d-none');
+        }
+    }
+
+    function selectLlmModel(model) {
+        event.preventDefault();
+        document.getElementById('llmModelInput').value = model;
+        
+        // Auto-save the form to bind the selected model
+        const form = document.querySelector('form[action="/settings/save-llm-config"]');
+        if (form) {
+            form.submit();
+        }
+    }
+
+    async function testLlmConnection() {
+        const resEl = document.getElementById('llmTestResult');
+        const btn = event.target.closest('button');
+        const endpoint = document.querySelector('input[name="endpoint"]').value;
+        const api_key = document.querySelector('input[name="api_key"]').value;
+        const model = document.querySelector('input[name="model"]').value;
+
+        resEl.innerHTML = '<span class="text-muted"><i class="bi bi-hourglass-split"></i> 测试中...</span>';
+        btn.disabled = true;
+
+        try {
+            const formData = new FormData();
+            formData.append('endpoint', endpoint);
+            formData.append('api_key', api_key);
+            formData.append('model', model);
+
+            const resp = await fetch('/settings/test-llm-connection', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                resEl.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> ${data.message}</span>`;
+                
+                if (data.models && data.models.length > 0) {
+                    const list = document.getElementById('modelDropdownList');
+                    const btn = document.getElementById('modelSelectBtn');
+                    list.innerHTML = '';
+                    data.models.sort().forEach(m => {
+                        const li = document.createElement('li');
+                        li.innerHTML = `<a class="dropdown-item" href="#" style="font-size:13px;" onclick="selectLlmModel('${m}')">${m}</a>`;
+                        list.appendChild(li);
+                    });
+                    btn.classList.remove('d-none');
+                }
+            } else {
+                resEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> ${data.message}</span>`;
+            }
+        } catch (e) {
+            resEl.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 网络错误: ${e}</span>`;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function previewGeneration() {
+        const resEl = document.getElementById('previewResult');
+        const title = document.getElementById('testTitle').value;
+        resEl.textContent = "生成中...";
+
+        try {
+            const formData = new FormData();
+            formData.append('test_title', title);
+            const resp = await fetch('/settings/test-llm-generation', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await resp.json();
+            if (data.status === 'ok') {
+                resEl.textContent = data.result;
+            } else {
+                resEl.textContent = "错误: " + data.message;
+            }
+        } catch (e) {
+            resEl.textContent = "请求失败: " + e;
+        }
+    }
+
+    async function refreshLogs() {
+        const consoleEl = document.getElementById('llmLogConsole');
+        try {
+            const resp = await fetch('/settings/llm-logs');
+            const data = await resp.json();
+            consoleEl.textContent = data.logs;
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        } catch (e) {
+            consoleEl.textContent = "获取日志失败: " + e;
+        }
+    }
+    setInterval(refreshLogs, 5000); // Auto-refresh every 5s
+    refreshLogs();
+
+    async function fetchMetrics() {
+        try {
+            const resp = await fetch('/settings/llm-stats');
+            const data = await resp.json();
+            document.getElementById('aiUsageCount').textContent = data.count;
+            document.getElementById('aiSuccessRate').textContent = data.success_rate;
+            document.getElementById('aiLatency').textContent = data.latency;
+        } catch (e) {
+            console.error("Failed to fetch AI metrics", e);
+        }
+    }
+    fetchMetrics();
 
     // ── Medium Token 显示切换 ────────────────────────────────────
     function toggleToken() {

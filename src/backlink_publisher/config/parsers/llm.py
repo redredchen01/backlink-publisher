@@ -2,25 +2,22 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
-import re
+from pathlib import Path
 from typing import Any
 
 from ...errors import InputValidationError
-from ...url_utils import validate_https_url, validate_main_domain_url
 from ..types import (
-    ANCHOR_TYPES,
-    AnchorAlarmConfig,
-    AnchorAlarmOverride,
-    DEFAULT_WORK_TEMPLATES,
     LLMProviderConfig,
-    ThreeUrlConfig,
-    _LLM_API_KEY_ENV_VAR,
-    _PROPORTIONS_SUM_TOLERANCE,
-    _SAFE_SEO_PROPORTIONS,
-    _UNSAFE_IN_ANCHOR,
 )
+
+_LLM_API_KEY_ENV_VAR = "BACKLINK_LLM_API_KEY"
+_LLM_BASE_URL_ENV_VAR = "BACKLINK_LLM_BASE_URL"
+_LLM_MODEL_ENV_VAR = "BACKLINK_LLM_MODEL"
+_LLM_TEMPERATURE_ENV_VAR = "BACKLINK_LLM_TEMPERATURE"
+_LLM_SYSTEM_PROMPT_ENV_VAR = "BACKLINK_LLM_SYSTEM_PROMPT"
+_LLM_USE_ARTICLE_GEN_ENV_VAR = "BACKLINK_LLM_USE_ARTICLE_GEN"
+_LLM_ARTICLE_SYSTEM_PROMPT_ENV_VAR = "BACKLINK_LLM_ARTICLE_SYSTEM_PROMPT"
 
 _log = logging.getLogger(__name__)
 
@@ -29,7 +26,7 @@ def _parse_llm_anchor_provider(
     *,
     config_path: Path | None = None,
 ) -> LLMProviderConfig | None:
-    """Parse ``[llm.anchor_provider]`` and resolve ``api_key`` from env.
+    """Parse ``[llm.anchor_provider]`` and resolve fields from env.
 
     Returns ``None`` when the section is empty or missing required fields —
     LLM is optional; absence simply means the anchor resolver will only use
@@ -39,9 +36,17 @@ def _parse_llm_anchor_provider(
     ``api_key`` but its file permissions are not 0600.
     """
     if not isinstance(section, dict):
-        return None
+        # Even if section is missing, we check env vars for a full override
+        section = {}
 
     env_api_key = os.environ.get(_LLM_API_KEY_ENV_VAR)
+    env_base_url = os.environ.get(_LLM_BASE_URL_ENV_VAR)
+    env_model = os.environ.get(_LLM_MODEL_ENV_VAR)
+    env_temp = os.environ.get(_LLM_TEMPERATURE_ENV_VAR)
+    env_system = os.environ.get(_LLM_SYSTEM_PROMPT_ENV_VAR)
+    env_use_article = os.environ.get(_LLM_USE_ARTICLE_GEN_ENV_VAR)
+    env_article_system = os.environ.get(_LLM_ARTICLE_SYSTEM_PROMPT_ENV_VAR)
+
     toml_api_key_raw = section.get("api_key")
     toml_has_api_key = isinstance(toml_api_key_raw, str) and bool(toml_api_key_raw)
 
@@ -49,9 +54,30 @@ def _parse_llm_anchor_provider(
         from ..loader import _warn_if_loose_config_permissions
         _warn_if_loose_config_permissions(config_path)
 
-    base_url = section.get("base_url")
-    model = section.get("model")
+    base_url = env_base_url or section.get("base_url")
+    model = env_model or section.get("model")
     timeout_s = section.get("timeout_s", 30.0)
+    
+    # Resolve temperature: env > toml > default
+    temperature = 0.7
+    toml_temp = section.get("temperature")
+    if env_temp:
+        try:
+            temperature = float(env_temp)
+        except ValueError:
+            pass
+    elif isinstance(toml_temp, (int, float)):
+        temperature = float(toml_temp)
+
+    system_prompt = env_system or section.get("system_prompt")
+    
+    use_article_gen = False
+    if env_use_article:
+        use_article_gen = env_use_article.lower() in ("1", "true", "yes")
+    elif "use_article_gen" in section:
+        use_article_gen = bool(section["use_article_gen"])
+        
+    article_system_prompt = env_article_system or section.get("article_system_prompt")
 
     api_key = env_api_key or (toml_api_key_raw if toml_has_api_key else None)
 
@@ -90,4 +116,8 @@ def _parse_llm_anchor_provider(
         api_key=api_key,
         model=model,
         timeout_s=float(timeout_s),
+        temperature=temperature,
+        system_prompt=system_prompt,
+        use_article_gen=use_article_gen,
+        article_system_prompt=article_system_prompt,
     )

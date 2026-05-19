@@ -2,23 +2,10 @@
 from __future__ import annotations
 
 import logging
-import math
-import os
-import re
 from typing import Any
 
-from ...errors import InputValidationError
-from ...url_utils import validate_https_url, validate_main_domain_url
 from ..types import (
     ANCHOR_TYPES,
-    AnchorAlarmConfig,
-    AnchorAlarmOverride,
-    DEFAULT_WORK_TEMPLATES,
-    LLMProviderConfig,
-    ThreeUrlConfig,
-    _LLM_API_KEY_ENV_VAR,
-    _PROPORTIONS_SUM_TOLERANCE,
-    _SAFE_SEO_PROPORTIONS,
     _UNSAFE_IN_ANCHOR,
 )
 

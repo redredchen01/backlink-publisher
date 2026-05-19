@@ -84,6 +84,28 @@ class LLMProviderConfig:
     api_key: str
     model: str
     timeout_s: float = 30.0
+    temperature: float = 0.7
+    system_prompt: str | None = None
+    use_article_gen: bool = False
+    article_system_prompt: str | None = None
+
+
+@dataclass(frozen=True)
+class VelogConfig:
+    """Velog adapter configuration.
+
+    ``cookies_path`` points to the JSON file produced by ``velog-login``.
+    Default: ``~/.config/backlink-publisher/velog-cookies.json``.
+
+    The file must be 0600 — the adapter enforces this at load time.
+    """
+
+    cookies_path: Path = field(
+        default_factory=lambda: Path.home()
+        / ".config"
+        / "backlink-publisher"
+        / "velog-cookies.json"
+    )
 
 
 @dataclass(frozen=True)
@@ -196,6 +218,13 @@ class Config:
     Populated from ``[anchor_alarm]`` in config.toml. Globals + per-target
     overrides. Not round-tripped by ``save_config`` — manual edit only.
     See ``anchor_metrics.resolve_thresholds`` for precedence rules."""
+
+    velog: VelogConfig | None = None
+    """Velog adapter config (cookies path).
+
+    Populated from ``[velog]`` in config.toml. ``None`` when section is
+    absent — the adapter will use its default path
+    ``~/.config/backlink-publisher/velog-cookies.json``."""
 
     @property
     def config_dir(self) -> Path:

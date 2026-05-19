@@ -13,10 +13,6 @@ override via ``BIND_HOST=...`` plus
 from __future__ import annotations
 
 import os
-import sys
-
-# Ensure the backlink_publisher package is importable when running from repo root.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from webui_app import create_app
 from webui_app.helpers import _resolve_bind_host, _wire_content_fetch_ttl_from_env
@@ -55,7 +51,6 @@ from webui_app.helpers import (  # noqa: E402
     _parse_publish_results,
     _persist_three_tier_config,
     _render,
-    _save_schedule_settings,
     _settings_context,
     _validate_webui_run_id,
     _verify_urls_or_error,
@@ -77,51 +72,7 @@ from backlink_publisher import content_fetch  # noqa: E402, F401
 from backlink_publisher.work_scraper import fetch_work_metadata  # noqa: E402, F401
 
 
-# Legacy helpers expressed as one-liner delegations (Unit 2 had them as
-# delegations to the stores; routes use the stores directly now, but tests
-# may still call these). Kept as functions, not aliases, so ``patch.object``
-# can target them at module level.
-def _load_history():
-    return _history_store.load()
 
-
-def _append_history(item: dict) -> list:
-    return _history_store.update(lambda hist: [item, *hist][:100])
-
-
-def _load_profiles() -> list:
-    return _profiles_store.load()
-
-
-def _save_profiles(profiles: list) -> None:
-    _profiles_store.save(profiles)
-
-
-def _load_draft_queue() -> list:
-    return _drafts_store.load()
-
-
-def _save_draft_queue(items: list) -> None:
-    _drafts_store.save(items)
-
-
-def _get_draft_item(item_id: str) -> dict | None:
-    return _drafts_store.get_item(item_id)
-
-
-def _update_draft_item(item_id: str, **fields) -> bool:
-    return _drafts_store.update_item(item_id, **fields)
-
-
-def _delete_draft_item(item_id: str) -> bool:
-    return _drafts_store.delete_item(item_id)
-
-
-# Path aliases — same as Unit 2 (read store path at import time).
-_HISTORY_FILE = _history_store.path
-_PROFILES_FILE = _profiles_store.path
-_DRAFT_FILE = _drafts_store.path
-_SCHEDULE_SETTINGS_FILE = _schedule_store.path
 
 
 if __name__ == '__main__':

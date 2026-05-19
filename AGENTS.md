@@ -2,51 +2,169 @@
 
 See `README.md` for project overview and `docs/` for plans, brainstorms, ideation, and solutions.
 
+## Dev Commands
+
+```bash
+# Install
+pip install -e .          # full package
+pip install -e .[dev]     # + dev deps (pytest, radon==6.0.1, etc.)
+
+# Test (PYTHONHASHSEED=0 required — set by pytest-env in pyproject.toml)
+pytest tests/
+pytest tests/test_no_monolith_regrowth.py -k "R4"   # single budget test
+pytest tests/scripts/                               # worktree script tests
+pytest -m real_ssrf_check                           # live SSRF checks (off by default)
+pytest -m real_content_fetch                        # live content fetching (module-wide in test_content_fetch.py)
+
+# Lint (CI uses py_compile + ast.parse, not Black/flake8 — local-only)
+black --check src/
+flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+# SLOC measurement (for monolith budget edits)
+python -m radon raw -s src/backlink_publisher/cli/plan_backlinks.py
+
+# WebUI
+python webui.py                                    # start dev server on :8888
+```
+
+## Repo Layout
+
+Workspace root (not a git repo) holds `backlink-publisher/` (canonical) and `bp-<topic>/` (`git worktree` checkouts sharing `.git/`). Edit `backlink-publisher/`, never `bp-*/`, unless on that branch.
+
+### WebUI
+
+Flask app at `webui_app/` (12 route modules, `create_app()` factory). State persistence at `webui_store/` (4 module-level singletons). Launcher: `python webui.py`.
+
+### CLI entrypoints (6)
+
+```bash
+cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode draft
+```
+
+| Command | Source | Role |
+|---|---|---|
+| `plan-backlinks` | `cli/plan_backlinks.py` | Generate articles from seed JSONL |
+| `validate-backlinks` | `cli/validate_backlinks.py` | Validate + enrich |
+| `publish-backlinks` | `cli/publish_backlinks.py` | Publish via platform adapters |
+| `report-anchors` | `cli/report_anchors.py` | Post-hoc anchor profile |
+| `footprint` | `cli/footprint.py` | Link footprint analysis |
+| `phase0-seal` | `cli/phase0_seal.py` | Phase0 seal operations |
+
+### Output contract
+
+stdout = clean JSONL; stderr = diagnostics; exit code 0 on success. No human-readable output.
+
+### Config
+
+`~/.config/backlink-publisher/config.toml` (override via `BACKLINK_PUBLISHER_CONFIG_DIR`). Template: `config.example.toml`. `save_config` does NOT round-trip `[targets.*]`, `[sites.*]`, `[anchor_alarm]`, `[anchor.proportions]`, or `[llm.anchor_provider]`.
+
+## Import Conventions
+
+Old flat imports (`from backlink_publisher.errors import ...`) still work via `_LegacyPathFinder`. **New code should import from refactored paths:**
+
+| Legacy | New |
+|---|---|
+| `anchor_lang`, `anchor_metrics`, `anchor_profile`, `anchor_resolver`, `anchor_scheduler` | `anchor.lang`, `.metrics`, `.profile`, `.resolver`, `.scheduler` |
+| `content_fetch`, `work_scraper`, `work_themed_generator` | `content.fetch`, `.scraper`, `.themed_gen` |
+| `language_check`, `verify_publish` | `linkcheck.language`, `.verify` |
+| `errors`, `io_utils`, `jsonl`, `logger`, `markdown_utils`, `url_utils` | `_util.errors`, `.io`, `.jsonl`, `.logger`, `.markdown`, `.url` |
+| `adapters.*` | `publishing.adapters.*` |
+
+Full map: `src/backlink_publisher/__init__.py:_REEXPORT_MAP` (17 entries). Most tests, CLI code, and WebUI still use legacy paths — the finder makes it transparent, but don't add new legacy imports.
+
+## Test Patterns
+
+Network is mocked by 4 autouse conftest fixtures (config isolated, URL checks pass, content fetch passes, sockets blocked). Test live paths with:
+
+```bash
+pytest -m real_ssrf_check        # exercise real _check_url_for_ssrf
+pytest -m real_content_fetch     # exercise real verify_urls_batch (module-wide in test_content_fetch.py)
+```
+
+Test fixtures: `fixtures/seed.jsonl` (E2E, at repo root), `tests/fixtures/sloc_canary.py` (radon), `tests/fixtures/footprint_attack/` (HTML samples).
+
+## CI (GitHub Actions)
+
+`backlink-publisher/.github/workflows/ci.yml` triggers on push to `main`/`develop`, PRs to `main`. Python 3.11+3.12, all steps blocking (no `|| true`). `PYTHONHASHSEED=0` at job level for footprint regression gate.
+
+```bash
+pip install -e ".[dev]"
+python -m pytest tests/ -v --tb=short --timeout=30
+python -m py_compile src/backlink_publisher/**/*.py
+# style check (not Black): ast.parse each .py via pathlib.Path("src").rglob("*.py")
+cat fixtures/seed.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --dry-run
+```
+
+NOTE: A stale copy exists at workspace root `./.github/workflows/ci.yml` (references `core/`, `|| true`). Ignore it — canonical CI is inside the git repo.
+
+## Environment Variables
+
+| Var | Purpose |
+|---|---|
+| `BACKLINK_PUBLISHER_CONFIG_DIR` | Override config dir (default `~/.config/backlink-publisher/`) |
+| `BACKLINK_PUBLISHER_CACHE_DIR` | Override cache dir (default `~/.cache/backlink-publisher/`) |
+| `BACKLINK_LLM_API_KEY` | LLM API key for anchor generation |
+| `BACKLINK_NO_FETCH_VERIFY` | Skip content fetch verification |
+| `BACKLINK_GATE_CACHE_TTL_SECONDS` | Override gate cache TTL |
+| `BACKLINK_PUBLISHER_ALLOW_NETWORK=1` | Bind WebUI to non-loopback |
+| `BACKLINK_PUBLISHER_WORKTREE_AUTOREMOVE=1` | Auto-remove stale worktrees |
+| `MEDIUM_THROTTLE_MIN`, `MEDIUM_THROTTLE_MAX` | Inter-post delay (default 60-300s) |
+| `OAUTHLIB_INSECURE_TRANSPORT` | Allow HTTP for OAuth loopback |
+| `BIND_HOST` / `PORT` | WebUI address |
+| `PYTHONHASHSEED=0` | Required for footprint regression tests |
+
+## Known Quirks
+
+- `GEMINI.md` is the Gemini CLI counterpart to this file — kept at repo root for Gemini project detection
+- `planning/` subpackage exists but has no source files (only `__pycache__/`)
+- `webui_app/services/` directory exists but has no source files (only `__pycache__/`)
+- `src/backlink_publisher/adapters/` is a stale dir; real adapters are in `publishing/adapters/`
+- `INSECURE_TLS` is mentioned in docs but not implemented in source yet
+- Exit code table (0-6) is a documented contract, not enforced by `sys.exit()` in CLI code
+- `bp-*/AGENTS.md` are stale copies — update this file, not those
+- `docs/plans/`, `docs/brainstorms/` contain real operator domain names — don't propagate to `docs/solutions/`
+- `develop` branch doesn't exist (locally or remote) despite CI triggering on `branches: [main, develop]`
+
 ## Lessons capture (dual-track)
 
 The project keeps lessons in two places:
 
 - **Private auto-memory** — Claude Code automatically writes `feedback_*.md` files at `~/.claude/projects/<project-memory-slug>/memory/` during sessions. These are fast-capture, operator-private, and never committed.
-- **Public `docs/solutions/`** — High-value or recurring lessons get *promoted* into committed markdown entries under `docs/solutions/<category>/` (categories: `best-practices/`, `logic-errors/`, `test-failures/`, `ui-bugs/`). The promotion tool is `/ce:compound` (a Claude Code skill from the `compound-engineering` plugin — see plugin docs); it generates the frontmatter schema each existing entry uses.
+- **Public `docs/solutions/`** — High-value or recurring lessons get *promoted* into committed markdown entries under `docs/solutions/<category>/` (categories: `best-practices/`, `logic-errors/`, `test-failures/`, `ui-bugs/`). The promotion tool is `/ce:compound`.
 
-**Promotion is rewriting, not copy-paste. Strip session UUIDs, real domains, absolute paths, and user-identifying quotes; teach the pattern, not the incident.** The grep gates in `docs/plans/2026-05-15-001-refactor-lessons-kit-curation-plan.md` (Unit 5) are the safety net; the gitignored token file at `~/.local/share/backlink-publisher/private-tokens.txt` enumerates what to scrub.
+**Promotion = rewriting, not copy-paste. Strip UUIDs, domains, absolute paths, user-identifying quotes.** The grep gates check against patterns in `~/.local/share/backlink-publisher/private-tokens.txt` — populate this file before first use of `/ce:compound` or gates pass vacuously.
 
-**First-time setup** (per-operator; the token file is local-only and never shared): see `docs/plans/2026-05-15-001-refactor-lessons-kit-curation-plan.md` Unit 1.5 for the bootstrap recipe. A new contributor must populate `~/.local/share/backlink-publisher/private-tokens.txt` with their operator-private patterns (real target domains, operator email, run-ID patterns) before running `/ce:compound`, or the grep gates will vacuously pass against an empty pattern file.
+Next curation review: **2026-08-15**. Next `/ce:compound` run should scan recent `feedback_*.md` and promote what's worth keeping.
 
-Next curation review: **2026-08-15** — *aspirational quarterly cadence; not enforced by CI or any tool*. This file is static markdown; the actual trigger is "next time `/ce:compound` or `/ce:plan` runs in this repo, scan recent `feedback_*.md` and decide what's worth promoting." Update this date when the review completes; treat skipping a quarter as a soft signal, not a failure.
+## Worktree Cleanup
 
-Soft observation (2026-05-15): historical `docs/brainstorms/` and `docs/plans/` files contain real operator domain references (e.g. target hostnames). The sanitization rule above applies to `docs/solutions/` entries; if the project ever needs to extend it to historical decision artifacts, scope a separate pass — do not retrofit silently.
+Accumulated `bp-<topic>/` worktrees can be cleaned with:
 
-## Worktree Auto-Cleanup
+- **`bash scripts/prune-stale-worktrees.sh`** — detects worktrees merged into `origin/main` (via `gh pr list` or `merge-base`), skips dirty dirs. Flags: `--dry-run`, `--force`, `--help`. Exit 2 on failure.
+- **`bash scripts/install-post-merge-hook.sh`** — installs a `post-merge` hook that notifies after `git pull` on `main`. Auto-remove via `BACKLINK_PUBLISHER_WORKTREE_AUTOREMOVE=1`.
 
-Sibling `bp-<topic>/` git worktrees accumulate after parallel feature work — even with discipline, fresh clones and concurrent agent sessions reintroduce sprawl. Two scripts manage cleanup:
-
-- **`bash scripts/prune-stale-worktrees.sh`** — interactive helper. Lists worktrees whose branch tip is reachable from `origin/main` (handles squash-merge via `gh pr list` when available; falls back to direct `git merge-base --is-ancestor` otherwise). Skips dirty worktrees and the main worktree. Flags: `--dry-run` (list only), `--force` (cron-safe, no prompts), `--help`.
-- **`bash scripts/install-post-merge-hook.sh`** — per-clone installer that writes a `post-merge` hook to `.git/hooks/`. The hook fires after `git merge` / `git pull` on `main` and **notifies by default** about stale worktrees. To enable auto-removal after the hook's dirty-state check, set `export BACKLINK_PUBLISHER_WORKTREE_AUTOREMOVE=1` in your shell rc. Re-run the installer after fresh clones (git hooks are not committed).
-
-Safety: both refuse to remove the worktree the script is running in, both honor the dirty-state guard (no force-remove of uncommitted work), and the prune helper exits 2 if any removal fails so cron-style invocations can alert. Coverage: `tests/scripts/test_prune_stale_worktrees.py`.
+Shared safety in `scripts/_worktree_safety.sh`. Tests: `tests/scripts/test_prune_stale_worktrees.py`.
 
 ## Monolith Budget
 
-`monolith_budget.toml` at repo root tracks radon SLOC ceilings for five named source files: `src/backlink_publisher/cli/plan_backlinks.py`, `src/backlink_publisher/cli/publish_backlinks.py`, `src/backlink_publisher/content/fetch.py`, `src/backlink_publisher/config/writer.py`, `src/backlink_publisher/_util/markdown.py`. Enforced by `tests/test_no_monolith_regrowth.py` (hard-fail R4 + warning canary R7 + radon counter pinning).
+`monolith_budget.toml` tracks radon SLOC ceilings for **6** source files. Enforced by `tests/test_no_monolith_regrowth.py` (R4 hard-fail + R7 warning canary + radon version pinning).
 
-**When to edit:** if your PR pushes a monitored file's SLOC past its `ceiling`, the test fails. Edit `monolith_budget.toml` in the same PR — raise the ceiling and rewrite the `rationale` to explain what motivated the growth and the shape this file is expected to settle to over the next few sprints (the rationale field must be ≥80 chars).
+| File | Ceiling |
+|---|---|
+| `cli/plan_backlinks.py` | 1270 |
+| `cli/publish_backlinks.py` | 730 |
+| `content/fetch.py` | 370 |
+| `config/writer.py` | 340 |
+| `_util/markdown.py` | 320 |
+| `events/projector.py` | 580 |
 
-**Journal, not gate.** A solo developer can rubber-stamp any bump — the defense is `git blame` on `monolith_budget.toml`. Every intentional bump leaves a reviewable record. There is no override label and no warning-only mode for the primary check.
-
-**F7 does not decompose anything.** The surgical extraction plans (F2 `ErrorClass` oracle, F3 `safe_write` carve from `config/writer.py`, F5 `ThrottleClock`) are separate work. F7 only prevents regrowth after such carves land.
-
-**Bumping `radon` is treated as a budget edit** (pinned exactly in `pyproject.toml`'s `[project.optional-dependencies].dev`). The bump PR must re-measure all five ceilings via `python -m radon raw -s <paths>` and update the SLOC canary fixture's `SLOC_CANARY_EXPECTED` in the test file.
-
-**Recommended branch protection on `main`:** enable "Require branches to be up to date before merging." Protects against two concurrent PRs each bumping the same file's ceiling and producing a post-merge state that fails R4. The existing `push: branches: [main]` CI lane catches violations post-merge regardless, but pre-merge prevention is cheaper than a revert under pressure.
+If a PR exceeds a ceiling, edit `monolith_budget.toml` in the same PR — raise it and add `rationale` (≥80 chars). `git blame` is the defense; no override label. Bumping `radon` (pinned `==6.0.1`) requires re-measuring all 6 ceilings + updating `SLOC_CANARY_EXPECTED` in `tests/fixtures/sloc_canary.py`.
 
 References: `docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md`, `docs/brainstorms/2026-05-18-monolith-loc-ceiling-requirements.md`.
 
 ## Adding a new publisher adapter
 
-Post-R9 (plan `docs/plans/2026-05-18-009-refactor-cli-extension-readiness-plan.md`), a new platform is one `register("x", XAdapter)` call away from reaching both the CLI argparse layer and `schema.validate_publish_payload`. The dispatcher, schema enum, throttle gating, and LinkedIn-style rejection all read from `publishing.registry.registered_platforms()` — you do not edit any CLI file or `schema.py` to add a new platform.
-
-The five-step recipe below builds on `BloggerAPIAdapter` as a concrete reference at every step.
+Post-R9, a new platform is one `register("x", XAdapter)` call away from reaching both the CLI argparse layer and `schema.validate_publish_payload`. The dispatcher, schema enum, throttle gating, and LinkedIn-style rejection all read from `publishing.registry.registered_platforms()` — you do not edit any CLI file or `schema.py` to add a new platform.
 
 ### 1. Subclass `Publisher`
 
@@ -65,8 +183,6 @@ from .base import AdapterResult
 class YourPlatformAdapter(Publisher):
     @classmethod
     def available(cls, config: Config) -> bool:
-        # Return False to skip this adapter in the dispatch chain. Use for
-        # macOS-only adapters, feature flags, license checks. Default True.
         return True
 
     def publish(self, payload: dict[str, Any], mode: str, config: Config) -> AdapterResult:
@@ -75,17 +191,11 @@ class YourPlatformAdapter(Publisher):
 
 ### 2. Implement `publish()`
 
-Mirror the structure of `BloggerAPIAdapter.publish()`:
-
-- Read the row fields you need from `payload` (`title`, `content_markdown` / `content_html`, `tags`, `main_domain`).
-- Call `extract_publish_html(payload, "yourplatform")` from `publishing.content_negotiation` to get the platform-appropriate body. The tier table (`ROUTE_TIER_MATRIX`) defaults to `"c"` (fail-closed) for unknown platforms — add an entry only when you have an XSS contract test in place (see step 6).
-- Wrap remote calls in `retry_transient_call` from `.retry` to inherit the 429/5xx backoff.
-- Return an `AdapterResult(status="drafted"|"published", adapter="yourplatform-api", platform="yourplatform", draft_url=..., published_url=...)`. If your platform needs a post-publish throttle (rate-limit avoidance), set `post_publish_delay_seconds=N` on the result — the CLI's verify-poll window and inter-row throttle key off this field instead of a hardcoded platform name (plan 2026-05-18-009 R9c).
-
-Error contract (preserved across the dispatch chain):
-
-- Raise `DependencyError` for missing prerequisites (no token, no browser, no AppleScript host) — the dispatcher will try the next adapter registered for the same platform.
-- Raise `ExternalServiceError` for remote failures (401, 429, 5xx, network) — it propagates immediately, no fallthrough.
+- Call `extract_publish_html(payload, "yourplatform")` from `publishing.content_negotiation`
+- Wrap remote calls in `retry_transient_call` from `.retry` for 429/5xx backoff
+- Return `AdapterResult(status="drafted"|"published", ...)`
+- Set `post_publish_delay_seconds=N` for rate-limit avoidance
+- Raise `DependencyError` (falls through to next adapter) or `ExternalServiceError` (propagates immediately)
 
 ### 3. Register
 
@@ -93,70 +203,44 @@ Add one line to `src/backlink_publisher/publishing/adapters/__init__.py`:
 
 ```python
 from .yourplatform import YourPlatformAdapter
-
 register("yourplatform", YourPlatformAdapter)
 ```
 
-This is the **only** registration point. Post-R9 you do not edit:
+Do NOT edit:
+- `cli/publish_backlinks.py` (reads `registered_platforms()` dynamically)
+- `cli/plan_backlinks.py` `--default-platform` choices
+- `cli/validate_backlinks.py` unsupported-platform rejection
+- `schema.py` `supported_platforms()` or `reject_unsupported_platform()`
 
-- `cli/publish_backlinks.py` argparse `choices=` (reads `registered_platforms()` dynamically).
-- `cli/plan_backlinks.py` `--default-platform` choices.
-- `cli/validate_backlinks.py` unsupported-platform rejection.
-- `schema.py` `supported_platforms()` or `reject_unsupported_platform()`.
-
-If your platform has a fallback chain (like Medium's `MediumAPIAdapter → MediumBraveAdapter → MediumBrowserAdapter`), pass all classes in one call: `register("yourplatform", PrimaryAdapter, FallbackAdapter1, FallbackAdapter2)`. Order matters — `available()=False` skips an entry, `DependencyError` falls through, `ExternalServiceError` propagates.
+For fallback chains (like Medium's `APIAdapter → BraveAdapter → BrowserAdapter`), pass all classes in one `register()` call.
 
 ### 4. Add config (if needed)
 
-Reference: `src/backlink_publisher/config/types.py::BloggerOAuthConfig` (the dataclass) and `Config.blogger_blog_ids` (line 131, the per-blog map).
-
-If your platform needs persistent credentials or per-blog config, follow the Blogger pattern:
-
-- Add a frozen dataclass for the auth bundle (`@dataclass(frozen=True) class YourPlatformOAuthConfig: client_id: str; client_secret: str`).
-- Add a field to `Config` (`yourplatform_oauth: YourPlatformOAuthConfig | None = None`).
-- Add the TOML key to `config.example.toml` and the loader path in `config/loader.py`.
-- Add `load_yourplatform_token` / `save_yourplatform_token` helpers mirroring `load_blogger_token` if you need a separate token cache file.
+Follow `BloggerOAuthConfig` pattern: frozen dataclass → `Config` field → TOML key → loader path → token helpers.
 
 ### 5. Add an optional dependency (if needed)
-
-Reference: `pyproject.toml` `[project.optional-dependencies].dev` block (line 23-25).
-
-If your platform's SDK adds dependencies that not every operator needs, declare them as an extra:
 
 ```toml
 [project.optional-dependencies]
 yourplatform = ["yourplatform-sdk>=2.0"]
 ```
 
-Document the install incantation in the adapter docstring and in `README.md` under "Prerequisites". Operators run `pip install -e .[yourplatform]` to opt in.
+### 6. Add tests
 
-**Escalation path for resolver conflicts:** if your platform's SDK pins a dependency that conflicts with the base `[project.dependencies]` block, do not split the package into `core/` + `packages/` reactively — the registry already isolates the dispatch contract, and the schema layer reads from it. Open an issue with the conflict trace first so we can evaluate either pinning the conflicting dep in `dev` extras or, only if no other path exists, a real package split.
+Minimum: happy-path mock test, `DependencyError` test, `ExternalServiceError` test. XSS contract test required if adding a `ROUTE_TIER_MATRIX["yourplatform"] = "a"` entry.
 
-### 6. Add a test
+The R9 proof in `tests/test_r9_extension_readiness.py` already exercises cross-layer wiring — registering is sufficient to inherit it.
 
-Reference: `tests/test_adapter_blogger_api.py` (unit) and `tests/test_adapter_blogger_api_xss_contract.py` (XSS contract — required if you add a `ROUTE_TIER_MATRIX` entry at tier `"a"` so the adapter forwards `content_html` verbatim).
-
-Minimum coverage for a new adapter:
-
-- One happy-path test that mocks the SDK / HTTP boundary and asserts on the returned `AdapterResult` (status, `adapter`, `platform`, `draft_url`/`published_url`, and `post_publish_delay_seconds` if your platform sets one).
-- One test that raises `DependencyError` from the SDK and asserts the dispatcher would try the next adapter (or returns the error cleanly when no fallback exists).
-- One test that raises `ExternalServiceError` from the SDK and asserts propagation (not fallthrough).
-- If you add a `ROUTE_TIER_MATRIX["yourplatform"] = "a"` entry, you owe an XSS contract test: a malicious `content_html` payload reaches the adapter unchanged (the adapter is a forwarder; sanitize is the remote service's job).
-
-The R9 falsifiable acceptance proof in `tests/test_r9_extension_readiness.py` already exercises the cross-layer wiring (argparse + schema + `supported_platforms` + `reject_unsupported_platform`) for a fixture-scoped `register("fake", FakeAdapter)`. You do not need to repeat that test for your platform — registering is sufficient to inherit the proof.
-
-### PR description checklist
-
-When opening the PR for your new adapter, include:
+### PR checklist
 
 - [ ] Adapter file under `src/backlink_publisher/publishing/adapters/`
-- [ ] One-line `register(...)` added to `adapters/__init__.py`
-- [ ] Config dataclass / loader / TOML example updated (if your platform needs config)
-- [ ] `pyproject.toml` optional-dependency entry (if your platform's SDK is heavyweight)
-- [ ] At least 3 adapter tests (happy / `DependencyError` / `ExternalServiceError`)
-- [ ] XSS contract test if you added a tier-`"a"` `ROUTE_TIER_MATRIX` entry
-- [ ] `README.md` Prerequisites section updated (if the install instructions changed)
-- [ ] Did **not** edit any CLI file or `schema.py` — confirm via `git diff --stat src/backlink_publisher/cli/ src/backlink_publisher/schema.py` is empty
+- [ ] One-line `register(...)` in `adapters/__init__.py`
+- [ ] Config dataclass / loader / TOML example (if needed)
+- [ ] `pyproject.toml` optional-dependency entry (if needed)
+- [ ] 3+ adapter tests (happy / DependencyError / ExternalServiceError)
+- [ ] XSS contract test (if tier-`"a"` entry added)
+- [ ] `README.md` Prerequisites updated
+- [ ] `git diff --stat src/backlink_publisher/cli/ src/backlink_publisher/schema.py` is empty
 
 Related: `docs/plans/2026-05-18-009-refactor-cli-extension-readiness-plan.md` (the R9 plan that made this recipe possible), `src/backlink_publisher/publishing/registry.py` (the `Publisher` ABC and dispatcher).
 

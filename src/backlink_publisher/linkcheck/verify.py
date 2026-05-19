@@ -94,7 +94,7 @@ def verify_published(
         elif not _title_in_body(title, body):
             last_reason = f"title not found in response body (title: {title[:40]!r})"
         elif not _link_in_body(required_link_urls, body):
-            last_reason = f"required links not found in body"
+            last_reason = "required links not found in body"
         else:
             return VerificationResult(ok=True, reason="")
 

@@ -9,6 +9,8 @@ from datetime import datetime
 
 from flask import Blueprint, request, session
 
+from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
+
 from ..helpers import (
     _REPO_ROOT,
     _parse_publish_results,
@@ -21,6 +23,20 @@ from ..helpers import (
 )
 
 bp = Blueprint("batch", __name__)
+
+
+def _check_blogger_blog_id(domain: str) -> str | None:
+    """Return error HTML if blog_id missing, None if OK."""
+    try:
+        _resolve(_load_cfg(), domain)
+    except Exception as exc:
+        if 'blog_id' in str(exc).lower() or 'DependencyError' in type(exc).__name__:
+            return (
+                "❌ Blogger Blog ID 未配置。"
+                "请前往 <a href='/settings#blogger-blog-ids' style='color:var(--primary);font-weight:600;'>"
+                "设置 → Blogger Blog ID 映射</a> 添加对应条目。"
+            )
+    return None
 
 
 @bp.route('/ce:batch', methods=['POST'])
@@ -44,21 +60,10 @@ def ce_batch():
         urls.append(u)
 
     if platform == 'blogger':
-        try:
-            from backlink_publisher.config import load_config as _load_cfg
-            from backlink_publisher.config import resolve_blog_id as _resolve
-            _cfg = _load_cfg()
-            first_domain = get_main_domain(urls[0])
-            _resolve(_cfg, first_domain)
-        except Exception as _pre_err:
-            if 'blog_id' in str(_pre_err).lower() or 'DependencyError' in type(_pre_err).__name__:
-                friendly = (
-                    f"❌ Blogger Blog ID 未配置。"
-                    f"请前往 <a href='/settings#blogger-blog-ids' style='color:var(--primary);font-weight:600;'>"
-                    f"设置 → Blogger Blog ID 映射</a> 添加对应条目。"
-                )
-                return _render('index.html', error=friendly, batch_tab=True,
-                               batch_urls=urls_text, config={})
+        err = _check_blogger_blog_id(get_main_domain(urls[0]))
+        if err:
+            return _render('index.html', error=err, batch_tab=True,
+                           batch_urls=urls_text, config={})
 
     seed_jsonl = '\n'.join(
         json.dumps({
@@ -145,22 +150,11 @@ def ce_publish_real():
     config = session.get('config', {})
 
     if platform == 'blogger':
-        try:
-            from backlink_publisher.config import load_config as _load_cfg
-            from backlink_publisher.config import resolve_blog_id as _resolve
-            _cfg = _load_cfg()
-            _main_domain = config.get('main_domain', '')
-            if _main_domain:
-                _resolve(_cfg, _main_domain)
-        except Exception as _pre_err:
-            if 'blog_id' in str(_pre_err).lower() or 'DependencyError' in type(_pre_err).__name__:
-                friendly = (
-                    f"❌ Blogger Blog ID 未配置：域名 <code>{config.get('main_domain', '?')}</code> "
-                    f"尚未绑定 Blog ID。<br><br>"
-                    f"请前往 <a href='/settings#blogger-blog-ids' style='color:var(--primary);font-weight:600;'>"
-                    f"设置 → Blogger Blog ID 映射</a> 添加对应条目。"
-                )
-                return _render('index.html', error=friendly,
+        main_domain = config.get('main_domain', '')
+        if main_domain:
+            err = _check_blogger_blog_id(main_domain)
+            if err:
+                return _render('index.html', error=err,
                                config=config, history_active=True)
 
     try:
