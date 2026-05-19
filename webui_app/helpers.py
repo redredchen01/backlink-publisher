@@ -921,9 +921,20 @@ def _settings_context(flash=None):
 
     velog_status = _get_velog_status()
 
+    try:
+        from backlink_publisher.publishing.registry import registered_platforms
+        from .binding_status import get_channel_status
+        dashboard_channels = [
+            (name, get_channel_status(name, cfg))
+            for name in registered_platforms()
+        ]
+    except Exception:
+        dashboard_channels = []
+
     return dict(
         flash=flash,
         csrf_token=csrf_token,
+        dashboard_channels=dashboard_channels,
         medium_browser_status=_get_medium_browser_status(cfg, session=_flask_session),
         blogger_token=bool(token_data),
         blogger_client_id=cfg.blogger_oauth.client_id if cfg.blogger_oauth else "",
