@@ -1,0 +1,56 @@
+{# Plan 2026-05-19-006 Unit 5 — channel binding dashboard card macro.
+
+   Renders one row per registered platform showing bound state, dofollow
+   label, identity (when known), and two buttons that call
+   /api/<channel>/{verify,dry-run}. Wired by webui_app/static/js/channel-binding.js.
+
+   The "Configure ↓" link scrolls to the existing per-channel partial below
+   (which still owns OAuth / token-paste / bind UI for that platform).
+
+   Bind modal (Q-C resolution) lands with Phase 3 first unit (Unit 7 GitHub
+   Pages) — current existing channels (blogger OAuth / medium 3-mode /
+   telegraph auto-bootstrap) all have their own bind flow in their partial. #}
+
+{% macro dashboard_channel_card(name, status) -%}
+<div class="dashboard-channel-card" data-channel="{{ name }}">
+  <div class="dch-header">
+    <strong class="dch-name">{{ name }}</strong>
+    {%- if status.bound %}
+      <span class="badge-status ok" data-field="bound">已綁定</span>
+    {%- else %}
+      <span class="badge-status err" data-field="bound">未綁定</span>
+    {%- endif %}
+    {%- if status.dofollow == True %}
+      <span class="badge-dofollow good" title="dofollow links — SEO 信號強">dofollow</span>
+    {%- elif status.dofollow == False %}
+      <span class="badge-dofollow weak" title="nofollow — SEO 零價值，僅 referral">nofollow</span>
+    {%- elif status.dofollow is none %}
+      <span class="badge-dofollow unknown" title="待 empirical 驗證">dofollow?</span>
+    {%- endif %}
+  </div>
+  {%- if status.identity %}
+  <div class="dch-identity">身份: <code>{{ status.identity }}</code></div>
+  {%- endif %}
+  <div class="dch-meta">
+    <span class="dch-last-verify" data-field="last_verified_at">
+      {%- if status.last_verified_at %}最後驗證: {{ status.last_verified_at }}
+      {%- else %}從未驗證{% endif -%}
+    </span>
+  </div>
+  {%- if status.blockers %}
+  <ul class="dch-blockers" data-field="blockers">
+    {%- for b in status.blockers %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+  {%- endif %}
+  <div class="dch-actions">
+    <button type="button" class="btn btn-sm btn-outline-primary dch-btn-verify" data-channel="{{ name }}">
+      <i class="bi bi-shield-check"></i> Verify Token
+    </button>
+    <button type="button" class="btn btn-sm btn-outline-secondary dch-btn-dryrun" data-channel="{{ name }}">
+      <i class="bi bi-play-circle"></i> Dry-Run
+    </button>
+    <a href="#channel-{{ name }}" class="btn btn-sm btn-link">Configure ↓</a>
+  </div>
+  <div class="dch-result" data-field="result" style="display:none;"></div>
+</div>
+{%- endmacro %}
