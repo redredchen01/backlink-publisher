@@ -58,20 +58,20 @@ def _run_applescript(script: str, timeout: int = 60) -> str:
 # Stable-ID tab helpers
 # ---------------------------------------------------------------------------
 
-def _open_new_story_in_brave(wait_secs: int = 12) -> tuple[int, int, str]:
+def _open_new_story_in_brave(wait_secs: int = 12) -> tuple[str, str, str]:
     """Open medium.com/new-story; return (win_id, tab_id, settled_url).
 
-    win_id and tab_id are Brave's stable opaque integers — they don't shift
-    when other tabs are opened or closed. Callers use these IDs to resolve
-    current (win_idx, tab_idx) before every operation.
+    IDs are kept as strings — Brave's AppleScript `id` property returns TEXT,
+    not integer. Comparing a text id with an integer literal always evaluates
+    to false, which caused _resolve_tab to fail even when the tab existed.
     """
     script = f"""
 tell application "Brave Browser"
     activate
     set newWin to front window
-    set newWinId to id of newWin
+    set newWinId to (id of newWin) as string
     set newTab to make new tab at end of tabs of newWin with properties {{URL:"https://medium.com/new-story"}}
-    set newTabId to id of newTab
+    set newTabId to (id of newTab) as string
     set active tab index of newWin to (count tabs of newWin)
     set deadline to (current date) + {wait_secs}
     set settledURL to ""
@@ -86,7 +86,7 @@ tell application "Brave Browser"
         end if
         delay 0.5
     end repeat
-    return (newWinId as string) & "|" & (newTabId as string) & "|" & settledURL
+    return newWinId & "|" & newTabId & "|" & settledURL
 end tell
 """
     raw = _run_applescript(script, timeout=30 + wait_secs)
@@ -95,26 +95,25 @@ end tell
         raise ExternalServiceError(
             f"Unexpected response from open-story script: {raw!r}"
         )
-    win_id, tab_id, url = int(parts[0]), int(parts[1]), parts[2]
-    return win_id, tab_id, url
+    return parts[0], parts[1], parts[2]
 
 
-def _resolve_tab(win_id: int, tab_id: int) -> tuple[int, int]:
+def _resolve_tab(win_id: str, tab_id: str) -> tuple[int, int]:
     """Resolve stable (win_id, tab_id) → current positional (win_idx, tab_idx).
 
-    Searches all Brave windows/tabs by ID. Raises ExternalServiceError if
-    the tab has been closed.
+    Compares IDs as strings — Brave returns TEXT from id properties, so
+    `id of w is {int}` always fails with type mismatch. Must use string cast.
     """
     script = f"""
 tell application "Brave Browser"
     set wIdx to 0
     repeat with w in windows
         set wIdx to wIdx + 1
-        if id of w is {win_id} then
+        if (id of w as string) is "{win_id}" then
             set tIdx to 0
             repeat with t in tabs of w
                 set tIdx to tIdx + 1
-                if id of t is {tab_id} then
+                if (id of t as string) is "{tab_id}" then
                     return (wIdx as string) & "," & (tIdx as string)
                 end if
             end repeat
@@ -132,7 +131,7 @@ end tell
     return int(parts[0]), int(parts[1])
 
 
-def _get_tab_url(win_id: int, tab_id: int) -> str:
+def _get_tab_url(win_id: str, tab_id: str) -> str:
     win_idx, tab_idx = _resolve_tab(win_id, tab_id)
     script = f"""
 tell application "Brave Browser"
@@ -142,7 +141,7 @@ end tell
     return _run_applescript(script, timeout=10)
 
 
-def _focus_tab(win_id: int, tab_id: int) -> None:
+def _focus_tab(win_id: str, tab_id: str) -> None:
     """Bring Brave forward, put our window in front, make our tab active."""
     win_idx, tab_idx = _resolve_tab(win_id, tab_id)
     script = f"""
@@ -157,7 +156,7 @@ delay 0.3
     _run_applescript(script, timeout=10)
 
 
-def _tab_js(win_id: int, tab_id: int, js: str) -> str:
+def _tab_js(win_id: str, tab_id: str, js: str) -> str:
     """Execute JavaScript in our specific tab."""
     win_idx, tab_idx = _resolve_tab(win_id, tab_id)
     escaped = js.replace("\\", "\\\\").replace('"', '\\"')
@@ -180,7 +179,7 @@ def _set_clipboard(text: str) -> None:
 # Editor interaction helpers
 # ---------------------------------------------------------------------------
 
-def _wait_for_editor(win_id: int, tab_id: int, max_wait: int = 20) -> bool:
+def _wait_for_editor(win_id: str, tab_id: str, max_wait: int = 20) -> bool:
     for _ in range(max_wait):
         try:
             url = _get_tab_url(win_id, tab_id)
@@ -199,7 +198,7 @@ def _wait_for_editor(win_id: int, tab_id: int, max_wait: int = 20) -> bool:
     return False
 
 
-def _fill_title(win_id: int, tab_id: int, title: str) -> None:
+def _fill_title(win_id: str, tab_id: str, title: str) -> None:
     _tab_js(
         win_id, tab_id,
         "var el = document.querySelector('[data-testid=\"post-title\"], "
@@ -226,7 +225,7 @@ def _fill_title(win_id: int, tab_id: int, title: str) -> None:
     time.sleep(0.5)
 
 
-def _paste_body(win_id: int, tab_id: int, html_content: str) -> None:
+def _paste_body(win_id: str, tab_id: str, html_content: str) -> None:
     _set_clipboard(html_content)
     time.sleep(0.3)
     _tab_js(
@@ -247,7 +246,7 @@ def _paste_body(win_id: int, tab_id: int, html_content: str) -> None:
     time.sleep(2)
 
 
-def _click_publish_menu(win_id: int, tab_id: int) -> None:
+def _click_publish_menu(win_id: str, tab_id: str) -> None:
     clicked = _tab_js(
         win_id, tab_id,
         "var btns = Array.from(document.querySelectorAll('button'));"
@@ -261,7 +260,7 @@ def _click_publish_menu(win_id: int, tab_id: int) -> None:
     time.sleep(2)
 
 
-def _click_publish_now(win_id: int, tab_id: int) -> None:
+def _click_publish_now(win_id: str, tab_id: str) -> None:
     _tab_js(
         win_id, tab_id,
         "var btns = Array.from(document.querySelectorAll('button'));"
