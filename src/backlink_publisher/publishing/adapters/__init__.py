@@ -145,9 +145,11 @@ def verify_adapter_setup(
 
 
 def _verify_live(platform: str, config: Config) -> VerifyResult:
-    """Live verify stub — returns 'never' if known-unbound, 'unverifiable_live'
-    if bound-but-no-live-impl-yet. Per-channel real live verify lands per
-    adapter in follow-up Unit 2 commits + Unit 6 backfill.
+    """Live verify — calls platform's lightweight verify endpoint.
+
+    Returns 'never' if known-unbound (no credentials), 'ok' / 'token_expired'
+    / 'timeout' once configured. Per-channel real impls land per adapter:
+    Telegraph (Unit 6a, this commit) → Blogger users.get → Medium /me → ...
     """
     if platform not in registered_platforms():
         return VerifyResult(
@@ -166,14 +168,126 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
             blockers=[str(e)],
         )
 
-    # Configured but live-verify-endpoint not yet wired. Surface honestly rather
-    # than fake-green. Per-adapter live impls (Telegraph getAccountInfo, Medium
-    # /me, Blogger users.get) land in follow-up commits.
+    # Per-channel live verify dispatch.
+    if platform == "telegraph":
+        return _verify_telegraph_live(config)
+
+    # Blogger / Medium etc. — real live verify lands in follow-up commits.
     return VerifyResult(
         ok=True,
         last_verify_result="unverifiable_live",
         blockers=["live verify endpoint not yet implemented for this platform"],
     )
+
+
+def _verify_telegraph_live(config: Config) -> VerifyResult:
+    """POST ``/getAccountInfo`` to confirm the stored access_token still works.
+
+    Plan 2026-05-19-006 Unit 6a — replaces the stub for telegraph. Reads the
+    token from the existing ``_load_token`` loader in telegraph_api.
+    200 + ``ok:true`` → identity = short_name.  Telegraph error markers
+    (ACCESS_TOKEN_INVALID / INVALID_ACCESS_TOKEN) → ``token_expired``.
+    ``requests.Timeout`` → ``timeout``. Other errors → ``never`` with
+    blocker text.
+
+    Read-only by design: NEVER triggers token rotation. Rotation belongs
+    to the publish path; live verify must not write token files.
+    """
+    import requests
+    from .telegraph_api import (
+        TELEGRAPH_API,
+        _HTTP_TIMEOUT_S,
+        _INVALID_TOKEN_MARKERS,
+        _load_token,
+    )
+
+    try:
+        token_data = _load_token(config)
+    except Exception as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"telegraph token file unreadable: {e}"],
+        )
+
+    access_token = token_data.get("access_token") if token_data else None
+    if not access_token:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["telegraph token not yet created (publish once to auto-create)"],
+        )
+
+    # 5s server-side hard cap per Unit 4 SLA. telegraph_api uses 15s for
+    # publish, but live verify is a dashboard-facing snappy call.
+    verify_timeout = min(5, _HTTP_TIMEOUT_S)
+
+    try:
+        resp = requests.post(
+            f"{TELEGRAPH_API}/getAccountInfo",
+            data={
+                "access_token": access_token,
+                "fields": '["short_name","author_name","page_count"]',
+            },
+            timeout=verify_timeout,
+        )
+    except requests.Timeout:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="timeout",
+            blockers=[f"telegraph getAccountInfo timed out after {verify_timeout}s"],
+        )
+    except requests.RequestException as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"telegraph network failure: {e}"],
+        )
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["telegraph returned non-JSON response"],
+        )
+
+    if not body.get("ok"):
+        err = str(body.get("error", "unknown"))
+        if any(marker in err for marker in _INVALID_TOKEN_MARKERS):
+            return VerifyResult(
+                ok=False,
+                last_verify_result="token_expired",
+                blockers=[f"telegraph token rejected: {err}"],
+            )
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"telegraph API error: {err}"],
+        )
+
+    result_data = body.get("result") or {}
+    identity = result_data.get("short_name") or token_data.get("short_name")
+
+    return VerifyResult(
+        ok=True,
+        identity=identity,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=True,
+    )
+
+
+def _utc_now_iso() -> str:
+    """UTC iso8601 timestamp for last_verified_at.
+
+    Always UTC — never local time (per project_velog_adapter_pr75 lesson:
+    TZ regressions bit daily-cap; same trap applies to verify timestamps
+    crossing midnight boundaries).
+    """
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _verify_dry_run(
