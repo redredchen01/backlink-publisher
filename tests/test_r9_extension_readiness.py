@@ -13,55 +13,23 @@ and these tests fail.
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 import pytest
 
 # Importing adapters at module level populates the registry side-effect — the
 # same idiom plan_backlinks.py and validate_backlinks.py use post-R9.
 import backlink_publisher.publishing.adapters  # noqa: F401
-from backlink_publisher.publishing.adapters.base import AdapterResult
-from backlink_publisher.publishing.registry import (
-    Publisher,
-    register,
-    registered_platforms,
-    _REGISTRY,
-)
+from backlink_publisher.publishing.registry import _REGISTRY, registered_platforms
 from backlink_publisher.schema import (
     reject_unsupported_platform,
     supported_platforms,
     validate_publish_payload,
 )
 
-
-class FakeAdapter(Publisher):
-    """Stub publisher used only by the R9 acceptance test."""
-
-    @classmethod
-    def available(cls, config: Any) -> bool:
-        return True
-
-    def publish(self, payload: dict[str, Any], mode: str, config: Any) -> AdapterResult:
-        return AdapterResult(
-            status="drafted",
-            adapter="fake",
-            platform="fake",
-            draft_url="https://fake.example/p/1",
-        )
-
-
-@pytest.fixture
-def fake_platform_registered():
-    """Fixture-scoped ``register("fake", FakeAdapter)`` with strict teardown."""
-    previous = _REGISTRY.get("fake")
-    register("fake", FakeAdapter)
-    try:
-        yield
-    finally:
-        if previous is None:
-            _REGISTRY.pop("fake", None)
-        else:
-            _REGISTRY["fake"] = previous
+# ``FakeAdapter`` + ``fake_platform_registered`` fixture were promoted to
+# ``tests/conftest.py`` (Plan 2026-05-19-002 U2 / adversarial F7) to prevent
+# copy-paste drift between this file and the WebUI contract tests that also
+# consume them.  This module uses them via fixture injection only.
 
 
 class TestR9AcceptanceProof:

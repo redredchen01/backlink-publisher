@@ -37,6 +37,27 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
     from .routes import register_blueprints
     register_blueprints(app)
 
+    # Inject the live registered platforms into every template render.
+    # Plan 2026-05-19-002 U2 / R6: WebUI is reverse-driven by the publisher
+    # registry — register("X", XAdapter) is now sufficient to make X
+    # appear in the publish-form select, the history filter-chip row,
+    # the JS counter dict, and norm_platform routing without any HTML edit.
+    # ``s.title()`` is the v1 display-name source (no _display_name_map dict
+    # per scope-guardian F5); i18n migration is a Deferred follow-up.
+    @app.context_processor
+    def inject_platforms():
+        # Importing adapters at first request populates the registry
+        # side-effect — same idiom as plan_backlinks.py / publish_backlinks.py.
+        import backlink_publisher.publishing.adapters  # noqa: F401
+        from backlink_publisher.publishing.registry import registered_platforms
+
+        return {
+            "platforms": [
+                {"slug": s, "display_name": s.title()}
+                for s in registered_platforms()
+            ]
+        }
+
     # Start scheduler unless under pytest (tests don't need background jobs)
     if start_scheduler is None:
         start_scheduler = 'PYTEST_CURRENT_TEST' not in os.environ
