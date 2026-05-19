@@ -32,6 +32,7 @@ from .blogger_api import BloggerAPIAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
+from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 
 
@@ -39,6 +40,7 @@ from .velog_graphql import VelogGraphQLAdapter
 # more ``register(...)`` call — no dispatcher changes.
 register("blogger", BloggerAPIAdapter)
 register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
+register("telegraph", TelegraphAPIAdapter)
 register("velog", VelogGraphQLAdapter)
 
 
@@ -79,6 +81,14 @@ def verify_adapter_setup(platform: str, config: Config) -> None:
                 "Medium requires either an integration_token in config.toml "
                 "or Playwright installed (run: playwright install chromium)."
             )
+        return
+
+    if platform == "telegraph":
+        # Telegraph has no required prerequisites: the adapter auto-creates
+        # an anonymous account on first publish.  verify_telegraph_setup
+        # only raises if the config_dir cannot be created (filesystem-level
+        # fault) or an existing token file is malformed / wrong perms.
+        verify_telegraph_setup(config)
         return
 
     if platform == "velog":
