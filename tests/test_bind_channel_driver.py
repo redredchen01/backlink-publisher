@@ -105,6 +105,19 @@ class TestValidateStoragePath:
             drv._validate_storage_state_path("/etc/passwd")
 
 
+class TestBrowserProfileDir:
+    """``_browser_profile_dir`` resolves to a persistent Chromium profile path."""
+
+    def test_default_is_config_dir_subdir(self, monkeypatch):
+        monkeypatch.delenv("BACKLINK_PUBLISHER_BROWSER_PROFILE_DIR", raising=False)
+        assert drv._browser_profile_dir() == _config_dir() / "browser-profile"
+
+    def test_env_override_takes_precedence(self, tmp_path, monkeypatch):
+        custom = tmp_path / "alt-profile"
+        monkeypatch.setenv("BACKLINK_PUBLISHER_BROWSER_PROFILE_DIR", str(custom))
+        assert drv._browser_profile_dir() == custom
+
+
 class TestPersistStorageState:
     """``_persist_storage_state`` writes the file atomically with mode 0600."""
 

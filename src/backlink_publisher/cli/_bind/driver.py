@@ -147,6 +147,28 @@ def _emit(event: str, **payload: Any) -> None:
 # ───────── path + persistence helpers ─────────
 
 
+def _browser_profile_dir() -> Path:
+    """Persistent Chromium profile shared across all channels.
+
+    The first bind writes cookies + localStorage + IndexedDB into this
+    profile; subsequent binds reuse it. This avoids three concrete pains:
+
+      1. Operator re-doing social-OAuth (Google / GitHub) every bind because
+         OAuth providers see a fresh-fingerprint browser each time.
+      2. Cloudflare / anti-bot WAFs flagging fresh-Chromium-with-no-history
+         as automated and serving CAPTCHA / 403 to every bind attempt.
+      3. ``mark_bound`` claiming success while the operator still sees
+         "please log in" because cookies didn't survive to the next bind.
+
+    Override via ``BACKLINK_PUBLISHER_BROWSER_PROFILE_DIR`` for test
+    isolation. Default: ``<config_dir>/browser-profile``.
+    """
+    raw = os.environ.get("BACKLINK_PUBLISHER_BROWSER_PROFILE_DIR")
+    if raw:
+        return Path(raw)
+    return _config_dir() / "browser-profile"
+
+
 def _validate_storage_state_path(path: Path | str) -> Path:
     """Reject any storage_state target that resolves outside ``_config_dir()``.
 
@@ -409,9 +431,24 @@ class _PlaywrightBrowserRunner:
 
         # We control the entire lifecycle; storage_state_provider closes over
         # the context so the caller can dump after we return.
+        #
+        # ``launch_persistent_context`` (vs ``launch`` + ``new_context``):
+        # the user_data_dir holds cookies + localStorage + IndexedDB across
+        # bind runs, so OAuth providers and anti-bot WAFs see the same
+        # browser fingerprint they trusted last time. See ``_browser_profile_dir``.
+        # ``--disable-blink-features=AutomationControlled`` hides the
+        # ``navigator.webdriver`` flag — cheap defense against the most basic
+        # automation detection while remaining within Playwright's supported
+        # surface (no third-party stealth plugin needed).
         pw = sync_playwright().start()
         try:
-            browser = pw.chromium.launch(headless=False)
+            profile_dir = _browser_profile_dir()
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            context = pw.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
         except Exception as exc:
             try:
                 pw.stop()
@@ -419,15 +456,16 @@ class _PlaywrightBrowserRunner:
                 pass
             raise PlaywrightLaunchError("playwright_launch_failed") from exc
 
-        context = browser.new_context()
         context.set_default_timeout(BIND_TIMEOUT_MS)
-        page = context.new_page()
+        # launch_persistent_context starts with one blank tab — reuse it
+        # instead of opening a second one, so the operator sees a single
+        # window rather than two.
+        page = context.pages[0] if context.pages else context.new_page()
         try:
             page.goto(recipe.login_url, wait_until="domcontentloaded")
         except Exception as exc:
             try:
                 context.close()
-                browser.close()
                 pw.stop()
             except Exception:
                 pass
@@ -440,7 +478,6 @@ class _PlaywrightBrowserRunner:
         except PWTimeoutError as exc:
             try:
                 context.close()
-                browser.close()
                 pw.stop()
             except Exception:
                 pass
@@ -448,7 +485,6 @@ class _PlaywrightBrowserRunner:
         except Exception:
             try:
                 context.close()
-                browser.close()
                 pw.stop()
             except Exception:
                 pass
@@ -468,7 +504,6 @@ class _PlaywrightBrowserRunner:
             finally:
                 try:
                     context.close()
-                    browser.close()
                     pw.stop()
                 except Exception:
                     pass
@@ -518,6 +553,7 @@ __all__ = [
     "IdentityMismatch",
     "PersistIOError",
     "PlaywrightLaunchError",
+    "_browser_profile_dir",
     "_emit",
     "_persist_storage_state",
     "_promote_last_account_if_pending",
