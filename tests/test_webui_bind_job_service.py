@@ -167,7 +167,8 @@ class TestRegistryPoll:
 
     def test_error_messages_cover_all_known_failed_codes(self):
         """Every error_code Unit 2's driver can emit on a failed event maps to
-        a Chinese message (no English fallback for known codes)."""
+        a Chinese message (no English fallback for known codes). Plan 003
+        Unit 1 added identity_mismatch."""
         from webui_app.services.bind_job import BIND_ERROR_MESSAGES
         known_codes = {
             "bound_predicate_timeout",
@@ -175,9 +176,88 @@ class TestRegistryPoll:
             "storage_path_traversal",
             "persist_io_error",
             "stream_closed_no_terminal_event",
+            "identity_mismatch",
         }
         missing = known_codes - set(BIND_ERROR_MESSAGES.keys())
         assert not missing, f"missing Chinese mappings: {missing}"
+
+
+# ─── Plan 2026-05-19-003 Unit 1 + Unit 4 — identity_mismatch wiring ───
+
+
+class TestIdentityMismatchWiring:
+    """When the bind subprocess emits channel.bind.failed with
+    error_code=identity_mismatch + old_account + new_account, the
+    registry calls mark_identity_mismatch so the Settings UI renders
+    the keep/replace confirmation card."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_status_store(self, monkeypatch):
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store import channel_status_store
+        fresh = _config_dir() / "channel-status.json"
+        if fresh.exists():
+            fresh.unlink()
+        monkeypatch.setattr(channel_status_store, "path", fresh, raising=False)
+
+    def test_marks_identity_mismatch_on_failed_event(self, registry):
+        registry._popen = _make_popen(_events_jsonl(
+            {"event": "channel.bind.start", "channel": "medium"},
+            {
+                "event": "channel.bind.failed",
+                "channel": "medium",
+                "error_code": "identity_mismatch",
+                "old_account": "alice",
+                "new_account": "bob",
+            },
+        ), returncode=3)
+        job = registry.start("medium")
+        assert _wait_until(lambda: registry.poll(job.id)["status"] == "failed")
+
+        from webui_store.channel_status import get_status
+        rec = get_status("medium")
+        assert rec["status"] == "identity_mismatch"
+        assert rec["identity_mismatch_old"] == "alice"
+        assert rec["identity_mismatch_new"] == "bob"
+
+    def test_failed_without_accounts_skips_mark_identity_mismatch(self, registry):
+        """If the JSONL event somehow lacks old/new account fields, the
+        registry must NOT call mark_identity_mismatch with empty
+        strings (would raise UsageError or write empty record)."""
+        registry._popen = _make_popen(_events_jsonl(
+            {"event": "channel.bind.start", "channel": "medium"},
+            {
+                "event": "channel.bind.failed",
+                "channel": "medium",
+                "error_code": "identity_mismatch",
+                # NO old_account / new_account
+            },
+        ), returncode=3)
+        job = registry.start("medium")
+        assert _wait_until(lambda: registry.poll(job.id)["status"] == "failed")
+
+        # Status should remain unbound (default) — no mark_identity_mismatch
+        # was called because old/new were missing.
+        from webui_store.channel_status import get_status
+        rec = get_status("medium")
+        assert rec["status"] == "unbound"
+
+    def test_non_identity_failure_does_not_mark_identity_mismatch(self, registry):
+        """Regression: bound_predicate_timeout shouldn't accidentally trip
+        the identity_mismatch path."""
+        registry._popen = _make_popen(_events_jsonl(
+            {"event": "channel.bind.start", "channel": "medium"},
+            {
+                "event": "channel.bind.failed",
+                "channel": "medium",
+                "error_code": "bound_predicate_timeout",
+            },
+        ), returncode=3)
+        job = registry.start("medium")
+        assert _wait_until(lambda: registry.poll(job.id)["status"] == "failed")
+
+        from webui_store.channel_status import get_status
+        assert get_status("medium")["status"] == "unbound"
 
 
 class TestReapOrphans:

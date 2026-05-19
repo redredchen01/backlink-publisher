@@ -677,6 +677,19 @@ def _settings_context(flash=None):
         set(cfg.blogger_blog_ids.keys()) | set(cfg.target_anchor_keywords.keys())
     )
 
+    # Plan 2026-05-19-003 Unit 5: refresh medium's last_verified_at /
+    # status via the liveness probe BEFORE reading the store. The probe
+    # short-circuits when the cache is fresh (< 5 min) or when the store
+    # already says expired/unbound — typical cost is one stat call. When
+    # the active probe is enabled (default False until Spike 2 confirms
+    # anti-bot safety), the probe runs in a worker thread with a 10s
+    # budget; total Settings GET latency is capped.
+    try:
+        from .medium_liveness import medium_liveness_check
+        medium_liveness_check()
+    except Exception:  # noqa: BLE001 — Settings render must not depend on probe
+        pass
+
     try:
         channel_statuses = _channel_list_all()
     except Exception:

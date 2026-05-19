@@ -813,9 +813,10 @@ class TestQueueDashboardRoutes:
 
 
 class TestBindRoutes:
-    """Plan 2026-05-19-001 Unit 4 — POST + GET smoke for the bind blueprint.
+    """Plan 2026-05-19-001 Unit 4 + Plan 003 Unit 4 — POST + GET smoke for
+    the bind blueprint and identity-mismatch resolution routes.
 
-    Deeper lifecycle assertions live in test_webui_bind_routes.py. The two
+    Deeper lifecycle assertions live in test_webui_bind_routes.py. The
     smoke tests here exist to satisfy the route-coverage gate below.
     """
 
@@ -826,6 +827,18 @@ class TestBindRoutes:
     def test_poll_bind_unknown_job_returns_404(self, client):
         resp = client.get("/settings/channels/medium/bind/deadbeef")
         assert resp.status_code == 404
+
+    def test_post_identity_mismatch_keep_missing_csrf_returns_403(self, client):
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep", data={}
+        )
+        assert resp.status_code == 403
+
+    def test_post_identity_mismatch_replace_missing_csrf_returns_403(self, client):
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/replace", data={}
+        )
+        assert resp.status_code == 403
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -32,6 +32,11 @@ BIND_ERROR_MESSAGES: dict[str, str] = {
     "storage_path_traversal": "凭据路径校验失败（内部错误），请检查 BACKLINK_PUBLISHER_CONFIG_DIR 是否被异常覆盖",
     "persist_io_error": "无法写入凭据文件，请检查磁盘空间和权限",
     "stream_closed_no_terminal_event": "子进程意外退出，请查看 stderr 日志",
+    # Plan 2026-05-19-003 Unit 1 + Unit 4. The predicate scraped a
+    # @username different from the previously-bound account. The
+    # Settings UI renders a confirmation card (keep vs replace) when
+    # channel_status_store[<channel>].status == "identity_mismatch".
+    "identity_mismatch": "检测到登录账号变更，请在设置页选择保留旧账号或替换为新账号",
 }
 
 
@@ -141,6 +146,30 @@ class BindJobRegistry:
                     with self._lock:
                         job.error_code = payload.get("error_code")
                         job.reason = payload.get("reason")
+                    # Plan 2026-05-19-003 Unit 1 + Unit 4: identity_mismatch
+                    # is a special failure that needs the channel_status_store
+                    # flipped so the Settings UI renders the keep/replace
+                    # confirmation card. Driver's BindResult.extras carried
+                    # old_account + new_account through the CLI as JSONL
+                    # payload fields; we read them back here.
+                    if payload.get("error_code") == "identity_mismatch":
+                        old = payload.get("old_account")
+                        new = payload.get("new_account")
+                        if old and new:
+                            try:
+                                from webui_store.channel_status import (
+                                    mark_identity_mismatch,
+                                )
+                                mark_identity_mismatch(
+                                    job.channel,
+                                    old_account=str(old),
+                                    new_account=str(new),
+                                )
+                            except Exception:  # noqa: BLE001
+                                # Store-write failure shouldn't crash the
+                                # reader thread; the failed event is already
+                                # recorded on the BindJob for the poll API.
+                                pass
         finally:
             try:
                 exit_code = proc.wait(timeout=10)

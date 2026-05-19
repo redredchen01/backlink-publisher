@@ -50,6 +50,14 @@ def _seed_csrf(client) -> str:
     return "test-csrf-token-fixture"
 
 
+def _bind_origin_headers() -> dict[str, str]:
+    """Headers carrying the allowlisted Origin for the bind blueprint —
+    required after Plan 003 Unit 3's _check_bind_origin_or_abort guard
+    became active on /settings/channels/<channel>/bind."""
+    from webui_app.helpers import _FLASK_PORT
+    return {"Origin": f"http://127.0.0.1:{_FLASK_PORT}"}
+
+
 def _wait_until(predicate, timeout: float = 2.0, interval: float = 0.01):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -100,6 +108,7 @@ class TestStartBindRoute:
         resp = client.post(
             "/settings/channels/medium/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         assert resp.status_code == 200, resp.data[:200]
         body = resp.get_json()
@@ -109,7 +118,11 @@ class TestStartBindRoute:
 
     def test_post_missing_csrf_returns_403(self, client, fake_subprocess):
         fake_subprocess(_events_jsonl({"event": "channel.bind.start", "channel": "medium"}))
-        resp = client.post("/settings/channels/medium/bind", data={})
+        resp = client.post(
+            "/settings/channels/medium/bind",
+            data={},
+            headers=_bind_origin_headers(),
+        )
         assert resp.status_code == 403
 
     def test_post_unknown_channel_returns_400(self, client, fake_subprocess):
@@ -118,6 +131,7 @@ class TestStartBindRoute:
         resp = client.post(
             "/settings/channels/foobar/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         assert resp.status_code == 400
 
@@ -129,6 +143,7 @@ class TestStartBindRoute:
         resp = client.post(
             "/settings/channels/..%2Fetc%2Fpasswd/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         assert resp.status_code in {400, 404}
 
@@ -166,6 +181,7 @@ class TestPollBindRoute:
         post = client.post(
             "/settings/channels/medium/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         job_id = post.get_json()["job_id"]
 
@@ -199,6 +215,7 @@ class TestPollBindRoute:
         post = client.post(
             "/settings/channels/medium/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         job_id = post.get_json()["job_id"]
         assert _wait_until(
@@ -218,11 +235,156 @@ class TestPollBindRoute:
         post = client.post(
             "/settings/channels/medium/bind",
             data={"csrf_token": token},
+            headers=_bind_origin_headers(),
         )
         job_id = post.get_json()["job_id"]
         # request the SAME job_id but on a different channel URL
         resp = client.get(f"/settings/channels/velog/bind/{job_id}")
         assert resp.status_code == 404
+
+
+# ─── Plan 2026-05-19-003 Unit 4 — identity-mismatch resolution routes ───
+
+
+class TestIdentityMismatchKeep:
+    """POST /settings/channels/<channel>/identity-mismatch/keep flips
+    status back to bound and preserves storage_state.json + last_account."""
+
+    def _seed_mismatch(self, client, channel="medium"):
+        """Put the store + filesystem in a realistic identity_mismatch
+        state: storage_state.json present, last_account.txt present
+        (from the previously-bound account), channel_status_store has
+        the identity_mismatch flag."""
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store.channel_status import (
+            mark_bound,
+            mark_identity_mismatch,
+        )
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        storage = cfg / f"{channel}-storage-state.json"
+        storage.write_text('{"cookies": [], "origins": []}')
+        (cfg / f"{channel}-last-account.txt").write_text("alice\n")
+        mark_bound(channel, storage)
+        mark_identity_mismatch(channel, old_account="alice", new_account="bob")
+
+    def test_keep_restores_bound_status(self, client):
+        self._seed_mismatch(client)
+        token = _seed_csrf(client)
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+        # Redirect back to /settings
+        assert resp.status_code in (302, 303)
+
+        from webui_store.channel_status import get_status
+        rec = get_status("medium")
+        assert rec["status"] == "bound"
+
+    def test_keep_preserves_storage_state_and_last_account(self, client):
+        self._seed_mismatch(client)
+        from backlink_publisher.config.loader import _config_dir
+        cfg = _config_dir()
+
+        token = _seed_csrf(client)
+        client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+
+        # OLD artifacts must remain — the operator is keeping the old account
+        assert (cfg / "medium-storage-state.json").exists()
+        assert (cfg / "medium-last-account.txt").exists()
+        assert (cfg / "medium-last-account.txt").read_text().strip() == "alice"
+
+    def test_keep_rejects_missing_csrf(self, client):
+        self._seed_mismatch(client)
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={},
+            headers=_bind_origin_headers(),
+        )
+        assert resp.status_code == 403
+
+    def test_keep_rejects_missing_origin(self, client):
+        self._seed_mismatch(client)
+        token = _seed_csrf(client)
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/keep",
+            data={"csrf_token": token},
+            # No Origin header
+        )
+        assert resp.status_code == 403
+
+    def test_keep_rejects_unknown_channel(self, client):
+        token = _seed_csrf(client)
+        resp = client.post(
+            "/settings/channels/tiktok/identity-mismatch/keep",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+        assert resp.status_code == 400
+
+
+class TestIdentityMismatchReplace:
+    """POST /settings/channels/<channel>/identity-mismatch/replace wipes
+    storage_state.json + last_account.txt and resets status to unbound."""
+
+    def _seed_mismatch(self, channel="medium"):
+        from backlink_publisher.config.loader import _config_dir
+        from webui_store.channel_status import (
+            mark_bound,
+            mark_identity_mismatch,
+        )
+        cfg = _config_dir()
+        cfg.mkdir(parents=True, exist_ok=True)
+        storage = cfg / f"{channel}-storage-state.json"
+        storage.write_text('{"cookies": [], "origins": []}')
+        (cfg / f"{channel}-last-account.txt").write_text("alice\n")
+        mark_bound(channel, storage)
+        mark_identity_mismatch(channel, old_account="alice", new_account="bob")
+
+    def test_replace_wipes_storage_state(self, client):
+        self._seed_mismatch()
+        from backlink_publisher.config.loader import _config_dir
+
+        token = _seed_csrf(client)
+        client.post(
+            "/settings/channels/medium/identity-mismatch/replace",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+
+        cfg = _config_dir()
+        assert not (cfg / "medium-storage-state.json").exists()
+        assert not (cfg / "medium-last-account.txt").exists()
+
+    def test_replace_resets_to_unbound(self, client):
+        self._seed_mismatch()
+        token = _seed_csrf(client)
+        client.post(
+            "/settings/channels/medium/identity-mismatch/replace",
+            data={"csrf_token": token},
+            headers=_bind_origin_headers(),
+        )
+
+        from webui_store.channel_status import get_status
+        # The wipe removes the channel record entirely; get_status returns
+        # the unbound default.
+        rec = get_status("medium")
+        assert rec["status"] == "unbound"
+
+    def test_replace_rejects_missing_csrf(self, client):
+        self._seed_mismatch()
+        resp = client.post(
+            "/settings/channels/medium/identity-mismatch/replace",
+            data={},
+            headers=_bind_origin_headers(),
+        )
+        assert resp.status_code == 403
 
 
 class TestBlueprintRegistered:
