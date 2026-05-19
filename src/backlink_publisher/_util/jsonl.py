@@ -11,11 +11,18 @@ from backlink_publisher._util.errors import emit_error
 MAX_LINE_LENGTH = 65536  # 64 KB per line
 
 
-def read_jsonl(source: Iterable[str] | None = None) -> Iterator[dict[str, Any]]:
+def read_jsonl(
+    source: Iterable[str] | None = None,
+    strict: bool = True,
+) -> Iterator[dict[str, Any]]:
     """Read JSONL from an iterable of lines (default: stdin).
 
-    Each non-empty line is parsed as JSON. Malformed JSON or empty
-    input produces a diagnostic on stderr and exits with code 2.
+    Each non-empty line is parsed as JSON.
+
+    When *strict* is ``True`` (default), malformed JSON or empty input
+    produces a diagnostic on stderr and exits with code 2.  When
+    ``False``, malformed lines are skipped with a warning and empty
+    input yields nothing.
     """
     if source is None:
         source = sys.stdin
@@ -31,20 +38,36 @@ def read_jsonl(source: Iterable[str] | None = None) -> Iterator[dict[str, Any]]:
         line_num += 1
 
         if len(line) > MAX_LINE_LENGTH:
-            emit_error(f"line {line_num}: exceeds maximum line length ({MAX_LINE_LENGTH})", exit_code=2)
+            diagnostic = f"line {line_num}: exceeds maximum line length ({MAX_LINE_LENGTH})"
+            if strict:
+                emit_error(diagnostic, exit_code=2)
+            else:
+                print(f"WARN: {diagnostic}", file=sys.stderr)
+                continue
 
         try:
             obj = json.loads(line)
         except json.JSONDecodeError as exc:
-            emit_error(f"line {line_num}: malformed JSON: {exc}", exit_code=2)
+            diagnostic = f"line {line_num}: malformed JSON: {exc}"
+            if strict:
+                emit_error(diagnostic, exit_code=2)
+            else:
+                print(f"WARN: {diagnostic}", file=sys.stderr)
+                continue
 
         if not isinstance(obj, dict):
-            emit_error(f"line {line_num}: expected a JSON object, got {type(obj).__name__}", exit_code=2)
+            diagnostic = f"line {line_num}: expected a JSON object, got {type(obj).__name__}"
+            if strict:
+                emit_error(diagnostic, exit_code=2)
+            else:
+                print(f"WARN: {diagnostic}", file=sys.stderr)
+                continue
 
         yield obj
 
     if not has_data:
-        emit_error("empty input: no JSONL rows provided", exit_code=2)
+        if strict:
+            emit_error("empty input: no JSONL rows provided", exit_code=2)
 
 
 def write_jsonl(rows: Iterable[dict[str, Any]], dest: Any = None) -> None:
