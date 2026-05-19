@@ -47,4 +47,20 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
             _scheduler.start()
         _restore_scheduled_jobs()
 
+        # Plan 2026-05-19-001 Unit 4: real-runtime startup hooks. Gated by
+        # ``start_scheduler`` so pytest never fires them. Wrapped because a
+        # disk read failure must not crash ``create_app``.
+        import logging
+        _log = logging.getLogger(__name__)
+        try:
+            from webui_store.channel_status import reconcile_on_load
+            reconcile_on_load()
+        except Exception as exc:  # noqa: BLE001 — startup must not crash
+            _log.warning("channel_status.reconcile_on_load failed: %s", exc)
+        try:
+            from .services.bind_job import reap_orphans
+            reap_orphans()
+        except Exception as exc:  # noqa: BLE001 — startup must not crash
+            _log.warning("bind_job.reap_orphans failed: %s", exc)
+
     return app
