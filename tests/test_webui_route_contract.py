@@ -892,3 +892,46 @@ def test_every_route_has_at_least_one_contract_test():
         f"Plan 2026-05-18-001 Unit 1 requires every route to have ≥1 test "
         f"that invokes client.get/post on the route."
     )
+
+
+class TestLlmRoutes:
+    def test_llm_logs_returns_200(self, client):
+        resp = client.get("/settings/llm-logs")
+        assert resp.status_code == 200
+        assert "logs" in resp.json
+
+    def test_test_llm_connection_returns_json(self, client):
+        resp = client.post("/settings/test-llm-connection", data={})
+        assert resp.status_code == 200
+        assert resp.is_json
+
+    def test_test_llm_generation_returns_json(self, client):
+        resp = client.post("/settings/test-llm-generation", data={})
+        assert resp.status_code == 200
+        assert resp.is_json
+
+
+class TestPreviewRoutes:
+    def test_ce_preview_returns_200(self, client):
+        resp = client.post("/ce:preview", data={"urls_json": '["https://example.com"]'})
+        assert resp.status_code == 200
+
+
+class TestVelogApiRoutes:
+    def test_velog_login_spawns_ok(self, client, monkeypatch):
+        """POST /api/velog/login returns JSON {ok: true} (subprocess stubbed)."""
+        import subprocess as _sp
+        monkeypatch.setattr(_sp, "Popen", lambda *a, **kw: None)
+        resp = client.post("/api/velog/login")
+        assert resp.status_code == 200
+        assert resp.is_json
+        assert resp.get_json()["ok"] is True
+
+    def test_velog_status_returns_json(self, client):
+        """GET /api/velog/status returns JSON with a 'state' key."""
+        resp = client.get("/api/velog/status")
+        assert resp.status_code == 200
+        assert resp.is_json
+        data = resp.get_json()
+        assert "state" in data
+        assert data["state"] in ("err", "ok", "fresh", "warn", "cap_reached", "permission_denied")

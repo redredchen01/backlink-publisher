@@ -1,36 +1,30 @@
-"""Shared helpers extracted from legacy webui.py — Plan 2026-05-18-001 Unit 3.
-
-Pure-Python utility functions (URL parsing, content-gate, OAuth callback
-URI, CSRF, derivation pools, settings context, render shim). No Flask app
-instance dependency — modules that need Flask context use ``flask.request``
-/ ``flask.session`` via Flask's request context, not via app.
-"""
+"""Shared helpers extracted from legacy webui.py — Plan 2026-05-18-001 Unit 3."""
 
 from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import secrets
+import subprocess
 import sys
-import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from flask import render_template, request, session
-
-# Ensure backlink_publisher package is importable when invoked from repo root.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from flask import abort, render_template, request, session
+from google.oauth2.credentials import Credentials
 
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher import content_fetch
 from backlink_publisher.config import (
+    _domain_label,
     load_blogger_token,
     load_config,
+    load_medium_token,
     merge_site_url_categories,
     save_config,
     upgrade_target_to_threeurl,
@@ -44,10 +38,36 @@ from webui_store import (
     schedule_store as _schedule_store,
 )
 
-
+_LLM_SETTINGS_FILE = Path.home() / '.config' / 'backlink-publisher' / 'llm-settings.json'
 _FLASK_PORT = int(os.environ.get('PORT', 8888))
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_TRUTHY_BYPASS = {"1", "true", "yes"}
+
+
+def _load_llm_settings() -> dict:
+    defaults = {
+        'api_key': '', 
+        'endpoint': '', 
+        'model': '', 
+        'temperature': 0.7,
+        'system_prompt': '',
+        'use_article_gen': False,
+        'article_system_prompt': '',
+        'image_gen_api_key': '',
+        'use_image_gen': False
+    }
+    if _LLM_SETTINGS_FILE.exists():
+        try:
+            data = json.loads(_LLM_SETTINGS_FILE.read_text(encoding='utf-8'))
+            defaults.update(data)
+        except Exception:
+            plan_logger.warning("failed to parse llm-settings.json, using defaults")
+    return defaults
+
+
+def _is_fetch_verify_disabled() -> bool:
+    return os.environ.get("BACKLINK_NO_FETCH_VERIFY", "").strip().lower() in _TRUTHY_BYPASS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,8 +76,7 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def _content_gate_enabled() -> bool:
-    val = os.environ.get("BACKLINK_NO_FETCH_VERIFY", "").strip().lower()
-    return val not in {"1", "true", "yes"}
+    return not _is_fetch_verify_disabled()
 
 
 def _verify_urls_or_error(
@@ -90,15 +109,12 @@ def _verify_urls_or_error(
 def _get_blogger_token_status() -> dict:
     """Return token health status without making network calls."""
     try:
-        from backlink_publisher.config import load_config as _load_cfg
-        from backlink_publisher.config import load_blogger_token as _load_tok
-        cfg = _load_cfg()
-        token_data = _load_tok(cfg.blogger_token_path)
+        cfg = load_config()
+        token_data = load_blogger_token(cfg.blogger_token_path)
         if not token_data:
             return {'state': 'none', 'label': '未授权', 'days_left': None}
         if not cfg.blogger_oauth:
             return {'state': 'none', 'label': '未配置 OAuth', 'days_left': None}
-        from google.oauth2.credentials import Credentials
         try:
             creds = Credentials.from_authorized_user_info(
                 token_data, ['https://www.googleapis.com/auth/blogger']
@@ -126,35 +142,167 @@ def _get_blogger_token_status() -> dict:
         return {'state': 'ok', 'label': 'Blogger 已连接', 'days_left': None}
 
 
+def _get_velog_status() -> dict:
+    """Return velog channel status for the WebUI badge (6 states).
+
+    States:
+      fresh            — file just written (mtime < 60 s)
+      ok               — file exists, 0600, parseable, cap not reached
+      warn             — file exists but JSON broken / cookies empty
+      err              — file missing (needs velog-login)
+      cap_reached      — daily cap exhausted
+      permission_denied — file exists but WebUI uid cannot read (not 0600 or EPERM)
+    """
+    try:
+        cfg = load_config()
+        from backlink_publisher.publishing.adapters.velog_graphql import (
+            _effective_cap,
+            _read_count,
+        )
+        velog_cfg = cfg.velog
+        cookies_path = (
+            velog_cfg.cookies_path if velog_cfg else
+            cfg.config_dir / "velog-cookies.json"
+        )
+        count_path = cfg.config_dir / "velog-rate-limit.json"
+        cap = _effective_cap()
+
+        # file absent → err
+        if not cookies_path.exists():
+            return {
+                'state': 'err',
+                'label': '未绑定',
+                'guide': f'运行: backlink-publisher velog-login',
+                'cookies_path': str(cookies_path),
+                'count': 0,
+                'cap': cap,
+            }
+
+        # permission check
+        try:
+            mode = os.stat(cookies_path).st_mode & 0o777
+            if mode != 0o600:
+                return {
+                    'state': 'permission_denied',
+                    'label': f'权限错误 ({oct(mode)})',
+                    'guide': f'chmod 600 {cookies_path}',
+                    'cookies_path': str(cookies_path),
+                    'count': 0,
+                    'cap': cap,
+                }
+        except PermissionError:
+            return {
+                'state': 'permission_denied',
+                'label': '无法读取 cookie 文件（uid 不匹配）',
+                'guide': f'chmod 640 {cookies_path}  # 或确认 WebUI 与 CLI 使用同一 uid',
+                'cookies_path': str(cookies_path),
+                'count': 0,
+                'cap': cap,
+            }
+
+        # parse cookies
+        try:
+            raw = json.loads(cookies_path.read_text())
+            cookie_list = raw.get('cookies', [])
+            if not cookie_list:
+                return {
+                    'state': 'warn',
+                    'label': 'Cookie 文件为空',
+                    'guide': 'backlink-publisher velog-login',
+                    'cookies_path': str(cookies_path),
+                    'count': 0,
+                    'cap': cap,
+                }
+        except Exception:
+            return {
+                'state': 'warn',
+                'label': 'Cookie 文件解析失败',
+                'guide': 'backlink-publisher velog-login',
+                'cookies_path': str(cookies_path),
+                'count': 0,
+                'cap': cap,
+            }
+
+        # daily count
+        count, _ = _read_count(count_path)
+        if count >= cap:
+            return {
+                'state': 'cap_reached',
+                'label': f'今日上限已达 ({count}/{cap})',
+                'guide': '重置时间：UTC 午夜',
+                'cookies_path': str(cookies_path),
+                'count': count,
+                'cap': cap,
+            }
+
+        # fresh: mtime < 60s
+        mtime = cookies_path.stat().st_mtime
+        if (datetime.now().timestamp() - mtime) < 60:
+            return {
+                'state': 'fresh',
+                'label': '刚刚绑定',
+                'guide': '',
+                'cookies_path': str(cookies_path),
+                'count': count,
+                'cap': cap,
+            }
+
+        # ok
+        return {
+            'state': 'ok',
+            'label': f'已绑定（今日 {count}/{cap}）',
+            'guide': '',
+            'cookies_path': str(cookies_path),
+            'count': count,
+            'cap': cap,
+        }
+
+    except Exception as exc:
+        return {
+            'state': 'err',
+            'label': f'状态检查失败: {exc}',
+            'guide': 'backlink-publisher velog-login',
+            'cookies_path': '',
+            'count': 0,
+            'cap': 5,
+        }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # URL metadata fetchers
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _fetch_page(url, timeout=10):
+    headers = {'User-Agent':
+               'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
+    resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
+    resp.raise_for_status()
+    return BeautifulSoup(resp.text, 'html.parser')
+
+
+def _extract_title(soup):
+    og = soup.find('meta', property='og:title')
+    if og:
+        return (og.get('content', '') or '').strip()
+    tag = soup.find('title')
+    return tag.text.strip() if tag else ''
+
+
+def _extract_description(soup):
+    og = soup.find('meta', property='og:description')
+    if og:
+        return (og.get('content', '') or '').strip()
+    meta = soup.find('meta', attrs={'name': 'description'})
+    return (meta.get('content', '') or '').strip() if meta else ''
+
+
 def fetch_url_metadata(url):
     try:
-        headers = {'User-Agent':
-                   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-        resp = requests.get(url, headers=headers, timeout=10, verify=False)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        title = ''
-        og_title = soup.find('meta', property='og:title')
-        if og_title:
-            title = og_title.get('content', '')
-        if not title:
-            title_tag = soup.find('title')
-            title = title_tag.text if title_tag else ''
-        desc = ''
-        og_desc = soup.find('meta', property='og:description')
-        if og_desc:
-            desc = og_desc.get('content', '')
-        if not desc:
-            meta_desc = soup.find('meta', attrs={'name': 'description'})
-            if meta_desc:
-                desc = meta_desc.get('content', '')
-        return {'url': url, 'title': title.strip() if title else '',
-                'description': desc.strip() if desc else '', 'status': 'success'}
+        soup = _fetch_page(url, timeout=10)
+        title = _extract_title(soup)
+        desc = _extract_description(soup)
+        return {'url': url, 'title': title, 'description': desc, 'status': 'success'}
     except Exception as e:
         return {'url': url, 'title': '', 'description': '',
                 'status': 'error', 'error': str(e)}
@@ -162,47 +310,23 @@ def fetch_url_metadata(url):
 
 def fetch_full_tdk(url):
     try:
-        headers = {'User-Agent':
-                   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-        resp = requests.get(url, headers=headers, timeout=15, verify=False)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        title = ''
-        og_title = soup.find('meta', property='og:title')
-        if og_title:
-            title = og_title.get('content', '')
-        if not title:
-            title_tag = soup.find('title')
-            title = title_tag.text if title_tag else ''
-        description = ''
-        og_desc = soup.find('meta', property='og:description')
-        if og_desc:
-            description = og_desc.get('content', '')
-        if not description:
-            meta_desc = soup.find('meta', attrs={'name': 'description'})
-            if meta_desc:
-                description = meta_desc.get('content', '')
+        soup = _fetch_page(url, timeout=15)
+        title = _extract_title(soup)
+        description = _extract_description(soup)
         keywords = ''
         meta_keywords = soup.find('meta', attrs={'name': 'keywords'})
         if meta_keywords:
-            keywords = meta_keywords.get('content', '')
-        title = title.strip() if title else ''
-        description = description.strip() if description else ''
-        keywords = keywords.strip() if keywords else ''
-        
-        # 自动提取锚文本逻辑
+            keywords = (meta_keywords.get('content', '') or '').strip()
+
         suggested_anchors = []
         if keywords:
             suggested_anchors = [k.strip() for k in keywords.split(',') if k.strip()]
         if not suggested_anchors and title:
-            # 简单降级处理：尝试把标题分词（按空格或连字符）
             suggested_anchors = [t for t in title.replace('|', '-').replace('_', '-').split('-') if len(t.strip()) > 3][:3]
 
         return {
-            'title': title,
-            'description': description,
-            'keywords': keywords,
-            'suggested_anchors': suggested_anchors,
+            'title': title, 'description': description,
+            'keywords': keywords, 'suggested_anchors': suggested_anchors,
             'status': 'success'
         }
     except Exception as e:
@@ -322,7 +446,6 @@ def _save_schedule_settings(data: dict) -> None:
 
 def _calc_next_available(requested_dt: datetime) -> datetime:
     """Return the earliest publish time that respects min-interval + jitter."""
-    import random
     settings = _load_schedule_settings()
     min_hours = settings.get('min_interval_hours', 4)
     jitter_mins = settings.get('jitter_minutes', 30)
@@ -338,7 +461,7 @@ def _calc_next_available(requested_dt: datetime) -> datetime:
                     if last_published is None or dt > last_published:
                         last_published = dt
                 except ValueError:
-                    pass
+                    plan_logger.warn("_calc_next_available: bad date in drafts_store", ts=ts)
 
     for item in _history_store.load():
         ts = item.get('created_at')
@@ -348,7 +471,7 @@ def _calc_next_available(requested_dt: datetime) -> datetime:
                 if last_published is None or dt > last_published:
                     last_published = dt
             except ValueError:
-                pass
+                plan_logger.warn("_calc_next_available: bad date in history_store", ts=ts)
 
     if last_published is None:
         return requested_dt
@@ -379,14 +502,12 @@ def _load_incomplete_run():
 
 
 def _check_localhost():
-    if request.remote_addr not in ("127.0.0.1", "::1", "localhost"):
-        from flask import abort
+    if request.remote_addr not in _LOOPBACK_HOSTS:
         abort(403)
 
 
 def _validate_webui_run_id(run_id):
     if not run_id or not _RUN_ID_RE.match(run_id):
-        from flask import abort
         abort(400)
 
 
@@ -424,7 +545,6 @@ def _check_csrf_or_abort() -> None:
     token = request.form.get("csrf_token", "")
     expected = session.get("csrf_token", "")
     if not token or not expected or not secrets.compare_digest(token, expected):
-        from flask import abort
         abort(403)
 
 
@@ -536,8 +656,7 @@ def _parse_lines(raw: str) -> list[str]:
 
 
 def _wire_content_fetch_ttl_from_env() -> None:
-    bypass = os.environ.get("BACKLINK_NO_FETCH_VERIFY", "").strip().lower()
-    if bypass in {"1", "true", "yes"}:
+    if _is_fetch_verify_disabled():
         return
     raw = os.environ.get("BACKLINK_GATE_CACHE_TTL_SECONDS", "900").strip()
     try:
@@ -561,7 +680,6 @@ _DERIVED_PARTIAL_SPLIT_RE = re.compile(r"[。.；;，,、]+")
 
 
 def _derive_branded_pool(main_url: str, tdk: dict | None) -> list[str]:
-    from backlink_publisher.config import _domain_label
     if tdk and tdk.get("title"):
         title = str(tdk["title"]).strip()
         if title:
@@ -570,7 +688,6 @@ def _derive_branded_pool(main_url: str, tdk: dict | None) -> list[str]:
 
 
 def _derive_partial_pool(main_url: str, tdk: dict | None) -> list[str]:
-    from backlink_publisher.config import _domain_label
     if tdk and tdk.get("description"):
         desc = str(tdk["description"]).strip()
         if desc:
@@ -585,7 +702,6 @@ def _derive_partial_pool(main_url: str, tdk: dict | None) -> list[str]:
 
 
 def _derive_exact_pool(main_url: str) -> list[str]:
-    from backlink_publisher.config import _domain_label
     return [_domain_label(main_url)]
 
 
@@ -701,6 +817,8 @@ def _settings_context(flash=None):
     except Exception:
         csrf_token = ""
 
+    velog_status = _get_velog_status()
+
     return dict(
         flash=flash,
         csrf_token=csrf_token,
@@ -724,11 +842,14 @@ def _settings_context(flash=None):
         profiles=_profiles_store.load(),
         plans_list=[],
         schedule_settings=_load_schedule_settings(),
+        llm_settings=_load_llm_settings(),
         all_targets=all_targets,
         target_anchor_keywords=cfg.target_anchor_keywords,
         binding_channels=sorted(CHANNELS),
         channel_statuses=channel_statuses,
         bind_error_messages=BIND_ERROR_MESSAGES,
+        velog_status=velog_status,
+        velog_cookies_path=velog_status.get('cookies_path', ''),
     )
 
 
@@ -784,7 +905,6 @@ def _rewrite_cli_cmd(cmd):
 
 def run_pipe(cmd, stdin):
     """Run a pipeline command."""
-    import subprocess
     new_cmd, env = _rewrite_cli_cmd(cmd)
     result = subprocess.run(
         new_cmd,
