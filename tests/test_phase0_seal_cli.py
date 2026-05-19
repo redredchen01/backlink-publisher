@@ -49,11 +49,6 @@ def test_show_no_notes_returns_misuse_not_not_implemented(tmp_path, monkeypatch)
     assert rc != CLI.EXIT_NOT_IMPLEMENTED
 
 
-def test_verify_hook_handler_stub_returns_not_implemented() -> None:
-    rc = CLI.main(["verify-hook", "--stdin-lines"])
-    assert rc == CLI.EXIT_NOT_IMPLEMENTED
-
-
 def test_show_format_choice_validation() -> None:
     """argparse rejects invalid --format choices."""
     with pytest.raises(SystemExit) as excinfo:

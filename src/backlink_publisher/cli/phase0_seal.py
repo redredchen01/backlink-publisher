@@ -726,8 +726,192 @@ def _handle_reseal(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# ---------------------------------------------------------------------------
+# Unit 5: verify-hook
+# ---------------------------------------------------------------------------
+
+
+# Telegraph staged-branch ref pattern. Hook keys on remote_ref (NOT local_ref)
+# per plan v3 — closes the direct-SHA-push bypass surfaced in v1 adversarial
+# review #5 (`git push origin <sha>:refs/heads/local/telegraph-unitN-staged`
+# with a non-staged local_ref would otherwise evade R5).
+_REMOTE_REF_PATTERN = re.compile(
+    r"^refs/heads/local/telegraph-unit(?P<n>\d+)-staged$"
+)
+
+
+def _read_seal_note_at(repo_root: Path, obj_sha: str) -> dict | None:
+    """Return parsed seal note body at *obj_sha*, or None if no note / unparseable.
+
+    Hook-side helper: doesn't raise; the calling loop reports each line's
+    failure with a structured JSON record so multi-ref pushes can surface every
+    failure rather than aborting on the first.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "notes", f"--ref={_NOTES_REF}", "show", obj_sha],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout.strip())
+    except json.JSONDecodeError:
+        return None
+
+
 def _handle_verify_hook(args: argparse.Namespace) -> int:
-    raise NotImplementedError("phase0-seal verify-hook: not yet implemented (lands in Unit 5)")
+    """Hook-side validator invoked by .git/hooks/pre-push.
+
+    Reads `<local_ref> <local_sha> <remote_ref> <remote_sha>` lines on stdin
+    (git's hook contract). For each line whose *remote_ref* matches the
+    Telegraph staged-branch pattern, the seal note at *local_sha* must:
+      1. Parse as JSON conforming to the seal-note schema.
+      2. Carry a ``unit`` matching the unit number embedded in *remote_ref*.
+      3. Carry a ``branch`` matching the remote_ref's branch portion.
+
+    Emits one structured JSON line on stderr per processed line. Exit 0 iff
+    every Telegraph staged-branch line passes (or none were present); exit
+    1 if any failed. Exit codes are passed verbatim through the bash hook
+    per plan v3 auto-fix v2-F6 (no remapping).
+    """
+    if not args.stdin_lines:
+        # Defensive: if invoked without --stdin-lines, refuse rather than read
+        # silently. Hook always passes --stdin-lines; misinvocation should fail
+        # loud at operator time.
+        print(
+            json.dumps({"result": "misuse", "reason": "verify-hook requires --stdin-lines"}),
+            file=sys.stderr,
+        )
+        return EXIT_MISUSE
+
+    try:
+        repo_root = V.find_main_worktree_root()
+    except Exception as exc:
+        print(
+            json.dumps({"result": "fail", "reason": f"cannot resolve main worktree: {exc}"}),
+            file=sys.stderr,
+        )
+        return EXIT_MISUSE
+
+    failed = False
+    matched_any = False
+    for raw_line in sys.stdin:
+        line = raw_line.rstrip("\n")
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) != 4:
+            # Malformed git hook input — surface and skip.
+            print(
+                json.dumps({
+                    "line": line, "result": "skip",
+                    "reason": "expected 4 whitespace-separated fields",
+                }),
+                file=sys.stderr,
+            )
+            continue
+        local_ref, local_sha, remote_ref, remote_sha = parts
+
+        m = _REMOTE_REF_PATTERN.match(remote_ref)
+        if m is None:
+            # Not a Telegraph staged-branch push — hook falls through.
+            continue
+
+        matched_any = True
+        expected_unit = f"unit{m.group('n')}"
+        expected_branch_short = remote_ref.removeprefix("refs/heads/")
+
+        # Special: pushing a deletion (local_sha = 40 zeros). Pre-push contract
+        # for a delete is "remote_sha non-zero, local_sha zero". Refuse —
+        # post-G1 staged branches must not be deletable from the operator side.
+        if set(local_sha) == {"0"}:
+            failed = True
+            print(
+                json.dumps({
+                    "line": line, "result": "fail",
+                    "reason": "refuse to delete a staged Telegraph branch post-G1",
+                    "remote_ref": remote_ref,
+                }),
+                file=sys.stderr,
+            )
+            continue
+
+        note = _read_seal_note_at(repo_root, local_sha)
+        if note is None:
+            failed = True
+            print(
+                json.dumps({
+                    "line": line, "result": "fail",
+                    "reason": "no-seal-note",
+                    "sha": local_sha,
+                    "remote_ref": remote_ref,
+                }),
+                file=sys.stderr,
+            )
+            continue
+
+        try:
+            V.validate_seal_schema(note)
+        except V.SealValidationError as exc:
+            failed = True
+            print(
+                json.dumps({
+                    "line": line, "result": "fail",
+                    "reason": f"seal-schema: {exc}",
+                    "sha": local_sha,
+                    "remote_ref": remote_ref,
+                }),
+                file=sys.stderr,
+            )
+            continue
+
+        seal_unit = note.get("unit", "")
+        if seal_unit != expected_unit:
+            failed = True
+            print(
+                json.dumps({
+                    "line": line, "result": "fail",
+                    "reason": f"unit-mismatch: seal={seal_unit!r} but remote_ref expects {expected_unit!r}",
+                    "sha": local_sha,
+                    "remote_ref": remote_ref,
+                }),
+                file=sys.stderr,
+            )
+            continue
+
+        seal_branch = note.get("branch", "")
+        # The seal's `branch` field is written by `init` as the short ref
+        # (e.g., `local/telegraph-unit2-staged`); normalize remote_ref the same
+        # way and compare. Accept either short or `refs/heads/...` form in the
+        # seal note for forward compatibility.
+        seal_branch_short = seal_branch.removeprefix("refs/heads/")
+        if seal_branch_short != expected_branch_short:
+            failed = True
+            print(
+                json.dumps({
+                    "line": line, "result": "fail",
+                    "reason": f"branch-mismatch: seal={seal_branch!r} but remote_ref={remote_ref!r}",
+                    "sha": local_sha,
+                    "remote_ref": remote_ref,
+                }),
+                file=sys.stderr,
+            )
+            continue
+
+        print(
+            json.dumps({
+                "line": line, "result": "pass",
+                "unit": seal_unit,
+                "sha": local_sha,
+                "remote_ref": remote_ref,
+            }),
+            file=sys.stderr,
+        )
+
+    if not matched_any:
+        # No Telegraph staged-branch refs in the push — fall through (exit 0).
+        return EXIT_OK
+    return EXIT_OK if not failed else EXIT_MISUSE
 
 
 # ---------------------------------------------------------------------------
