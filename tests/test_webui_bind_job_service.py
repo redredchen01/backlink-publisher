@@ -259,6 +259,29 @@ class TestIdentityMismatchWiring:
         from webui_store.channel_status import get_status
         assert get_status("medium")["status"] == "unbound"
 
+    def test_same_string_identity_mismatch_does_not_mark(self, registry):
+        # PR #83 adversarial review (P1 #1): a malformed driver build,
+        # JSONL replay, or downstream lowercase-mismatch could emit
+        # identity_mismatch with old==new. The store + reader both
+        # guard against this; verify the reader catches it before the
+        # store call so we don't waste an import + lock acquisition.
+        registry._popen = _make_popen(_events_jsonl(
+            {"event": "channel.bind.start", "channel": "medium"},
+            {
+                "event": "channel.bind.failed",
+                "channel": "medium",
+                "error_code": "identity_mismatch",
+                "old_account": "alice",
+                "new_account": "alice",
+            },
+        ), returncode=3)
+        job = registry.start("medium")
+        assert _wait_until(lambda: registry.poll(job.id)["status"] == "failed")
+
+        from webui_store.channel_status import get_status
+        # No mark_identity_mismatch call happened — record stays unbound.
+        assert get_status("medium")["status"] == "unbound"
+
 
 class TestReapOrphans:
     def test_v1_noop_does_not_raise(self):

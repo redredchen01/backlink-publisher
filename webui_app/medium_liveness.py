@@ -50,6 +50,17 @@ from backlink_publisher.config.loader import _config_dir
 # Plan 003 Unit 5 / Unit 0 spike output: default OFF until Spike 2
 # confirms headless probe doesn't trip Cloudflare/Datadome on real
 # Medium accounts. Flip to True once spike runs report no challenges.
+#
+# Known limit (PR #83 adversarial review, P1 #5): when the probe runs
+# against medium.com, Cloudflare may issue a FRESH cf_clearance cookie
+# to the probe context. Because we use probe-copy isolation (the live
+# storage_state.json is never mutated), that fresh clearance never
+# propagates back. The IP-reputation side is implicit: the next real
+# publish from this host sends the OLD cf_clearance, which Cloudflare
+# may treat as a fingerprint mismatch and challenge. Before flipping
+# this to True, rate-limit liveness probes well below the 5-min TTL —
+# 1x/day is sufficient for "is the badge green" UX without depleting
+# the publish path's clearance budget.
 MEDIUM_LIVENESS_ACTIVE_PROBE_ENABLED: bool = False
 
 
@@ -102,6 +113,17 @@ def _load_storage_state_for_probe() -> dict[str, Any] | None:
     and a concurrent probe read. ``os.replace`` is atomic at the FS
     level; transient read failures are unlikely but the retry adds
     defense-in-depth at negligible cost.
+
+    Known limit (PR #83 adversarial review, P1 #2): a different race
+    survives this loader — the probe can grab the OLD file's bytes
+    *just before* a concurrent ``_refresh_storage_state`` rename, then
+    use those cookies in ``_active_probe``. If the new file contains
+    rotated session cookies, the probe will hit /m/signin with the
+    stale state and call ``mark_expired``, demoting a credential that
+    was just refreshed seconds ago. Mitigation when the probe ships:
+    re-stat after probe verdict; if mtime advanced, suppress
+    ``mark_expired`` for this tick (next Settings load reads the fresh
+    file with a fresh cache TTL and gets the correct verdict).
     """
     path = _storage_state_path()
     if not path.exists():

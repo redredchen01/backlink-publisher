@@ -282,6 +282,54 @@ class TestMarkIdentityMismatch:
             mark_identity_mismatch("twitter", old_account="a", new_account="b")
 
 
+class TestMarkIdentityMismatchDefensiveGuards:
+    """PR #83 adversarial review (P1 #1): mark_identity_mismatch must
+    reject same-string / empty payloads and not overwrite an existing
+    identity_mismatch record (first mismatch wins until resolution)."""
+
+    def test_same_account_is_noop(self):
+        # alice/alice is not a mismatch — UI rendering it would be
+        # confusing at best and destructive (replace flow) at worst.
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        mark_identity_mismatch("medium", old_account="alice", new_account="alice")
+        assert get_status("medium")["status"] == "bound"
+
+    def test_empty_old_account_is_noop(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        mark_identity_mismatch("medium", old_account="", new_account="bob")
+        assert get_status("medium")["status"] == "bound"
+
+    def test_empty_new_account_is_noop(self):
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        mark_identity_mismatch("medium", old_account="alice", new_account="")
+        assert get_status("medium")["status"] == "bound"
+
+    def test_idempotent_does_not_overwrite_first_mismatch(self):
+        # First mismatch wins. A duplicate JSONL event (driver retry,
+        # stdout double-flush) must NOT mutate the recorded accounts
+        # mid-resolution — the operator's keep/replace decision is
+        # made against the FIRST observed mismatch, not the latest.
+        target = _config_dir() / "medium-storage-state.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}")
+        mark_bound("medium", target)
+        mark_identity_mismatch("medium", old_account="alice", new_account="bob")
+        mark_identity_mismatch("medium", old_account="alice", new_account="carol")
+        rec = get_status("medium")
+        assert rec["status"] == "identity_mismatch"
+        assert rec["identity_mismatch_old"] == "alice"
+        assert rec["identity_mismatch_new"] == "bob"
+
+
 class TestReconcileIgnoresIdentityMismatch:
     """reconcile_on_load must not demote identity_mismatch records."""
 
