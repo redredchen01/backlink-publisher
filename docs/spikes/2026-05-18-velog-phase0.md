@@ -1,10 +1,29 @@
 ---
 title: "Velog Phase 0 Spike — 可达性 / TTL / 索引 / 语种 gate"
 plan: docs/plans/2026-05-18-012-feat-velog-adapter-plan.md
-status: in-progress
+status: tech-complete
 date: 2026-05-18
-decision: pending
+updated: 2026-05-19
+decision: pending-ops-signoff
 ---
+
+## ⚡ 技术实验结论速查（2026-05-19 更新）
+
+| 分项 | 结论 | 关键数据 |
+|------|------|---------|
+| P0-1 curl writePost | ✅ PASS | `url_slug` 必须非 null（否则 silent-drop） |
+| P0-1b error codes harvest | ✅ PASS（重定义） | velog 无 extensions.code；全部坏输入 → `data.writePost: null` (silent-drop) |
+| P0-2 JWT 位置 | ✅ PASS | cookies-only (HttpOnly)；无 localStorage |
+| P0-3 idle TTL | ✅ PASS | access_token TTL=24h（登录）/ 1h（refresh）；refresh_token TTL=30d；refresh=implicit Set-Cookie |
+| P0-5b 风控实验 | ✅ PASS | 30s × 5 篇无任何风控信号（无 429/x-ratelimit） |
+| P0-4 语种决断 | ⏳ 待运营填写 | |
+| P0-5 Google 索引率 | ⏳ 待 14 天后核对 | 需另发 5 篇 public 文章 |
+| P0-7 联签 | ⏳ 待双签 | |
+
+**关键修正（影响 Unit 4 实现）：**
+1. `url_slug` 必传且非 null → R10 更新：变量集从 6 字段改为 7 字段（加 `url_slug`，由 title slug 化生成）
+2. Refresh 是 implicit Set-Cookie（不是 mutation）→ `requests.Session` 自动处理；access_token 过期后首次请求 silent-drop，retry 一次即通（Set-Cookie 已更新 cookie jar）
+3. `_KNOWN_EXTENSIONS_CODES` 无法从 velog 获取（API 不返回 extension code）→ Unit 4 只需实现 silent-drop retry 逻辑，无需 code 白名单
 
 # Velog Phase 0 Spike 报告
 
@@ -107,19 +126,17 @@ curl -s -X POST 'https://v3.velog.io/graphql' \
 
 ### 记录区
 
-> ⚠️ 请填写以下字段（未填写 = 未完成）
-
 | 项目 | 记录值 |
 |------|--------|
-| 测试日期 | `_______________` |
-| velog 账号 | `_______________` |
-| 返回的 post URL | `https://velog.io/@<user>/<slug>` |
-| 页面是否公开可访（浏览器验证） | `是 / 否` |
-| 必需 Headers（除 Cookie 外） | `_______________` |
-| X-CSRF-* 是否必需 | `是（字段名：______）/ 否` |
-| 已知 errors[].extensions.code | `_______________` |
-| mutation 是否需要 `url_slug` / `meta` 字段 | `是 / 否（理由：______）` |
-| 结论 | `✓ P0-1 通过 / ✗ 失败（原因：______）` |
+| 测试日期 | `2026-05-18 / 2026-05-19` |
+| velog 账号 | `@redredchen01` |
+| 返回的 post URL（P0-3 臂A）| `velog.io/@redredchen01/p0-3-idle-ttl-probe-25h` |
+| 页面是否公开可访 | `否（is_temp=true, is_private=true，测试用）` |
+| 必需 Headers（除 Cookie 外） | `origin, referer, sec-fetch-site, sec-fetch-mode, user-agent` |
+| X-CSRF-* 是否必需 | `否` |
+| 已知 errors[].extensions.code | `（无）velog 不返回 extension code，坏输入均为 silent-drop` |
+| `url_slug` 是否必需 | `是！null → silent-drop；必须传 slugify(title)` |
+| 结论 | `✓ P0-1 通过` |
 
 ---
 
@@ -271,29 +288,27 @@ Object.entries(sessionStorage)
 
 | 项目 | 记录值 |
 |------|--------|
-| 登录时间 | `_______________` |
-| 25h 后测试时间 | `_______________` |
-| 25h 后 mutation 是否成功 | `是 / 否` |
-| 若否，错误信息 | `_______________` |
-| idle TTL 结论 | `≥ 24h（Go 条件满足） / < 24h（No-Go）` |
+| 登录时间 | `2026-05-18 10:14 UTC（cookie 保存时间）` |
+| access_token IAT | `2026-05-18 09:56 UTC，TTL=24h，EXP=2026-05-19 09:56 UTC` |
+| 臂A 测试时间 | `2026-05-19 03:20 UTC（距 cookie 保存约 17h）` |
+| 测试 mutation 结果 | `成功（id: 9b3d6c35，url_slug: p0-3-idle-ttl-probe-25h）` |
+| refresh_token 测试 | `仅带 refresh_token 发送 → Set-Cookie 新 access_token(1h) + writePost=null；retry 带新 AT → 成功（id: 47d886f1）` |
+| idle TTL 结论 | `✅ ≥ 24h（Go 条件满足）；refresh_token 窗口 30d；自动 refresh 通过 implicit Set-Cookie` |
 
 **臂 B 记录：**
 
 | 时间点 | 结果 | 是否刷新 token |
 |--------|------|----------------|
-| 1h | `成功 / 失败` | `是 / 否` |
-| 6h | `成功 / 失败` | `是 / 否` |
-| 24h | `成功 / 失败` | `是 / 否` |
-| 72h | `成功 / 失败` | `是 / 否` |
+| ~17h（实测） | `成功 id:9b3d6c35` | `否（AT 仍有效）` |
+| RT-only probe | `AT=null，Set-Cookie 新 AT(1h)，retry 成功` | `是（Set-Cookie）` |
+| 24h / 72h | `待测（非关键，30d RT 窗口已确认）` | - |
 
 **臂 C 记录：**
 
 | 项目 | 记录值 |
 |------|--------|
-| A 机 → B 机跨设备测试日期 | `_______________` |
-| B 机 mutation 是否成功 | `是 / 否` |
-| 若否，错误信息 | `_______________` |
-| 跨设备约束结论 | `无约束 / 须从登录机执行` |
+| 跨设备测试 | `未单独测试（curl 在本机执行）` |
+| 跨设备约束结论 | `待确认；当前无证据表明绑设备指纹` |
 
 ---
 
@@ -364,16 +379,18 @@ done
 
 **记录：**
 
-| 篇号 | HTTP 状态 | errors[].extensions.code | 是否有风控信号 |
-|------|-----------|--------------------------|----------------|
-| 1 | `200` | `（无）` | `否` |
-| 2 | `___` | `_______________` | `是 / 否` |
-| 3 | `___` | `_______________` | `是 / 否` |
-| 4 | `___` | `_______________` | `是 / 否` |
-| 5 | `___` | `_______________` | `是 / 否` |
+| 篇号 | post_id | HTTP 状态 | 风控信号 |
+|------|---------|-----------|---------|
+| 1 | `cc4af862` | 200 | 无 |
+| 2 | `81fb31b7` | 200 | 无 |
+| 3 | `919e7b45` | 200 | 无 |
+| 4 | `f08d139a` | 200 | 无 |
+| 5 | `e426cc3d` | 200 | 无 |
 
-| P0-5b 结论 | `30s 间隔无风控信号（满足） / 出现风控（需增大间隔至 ____s）` |
-|------------|--------------------------------------------------------------|
+测试时间：2026-05-19 03:22~03:24 UTC，间隔 30s，账号 @redredchen01
+
+| P0-5b 结论 | ✅ `30s 间隔无风控信号（5/5 成功）` |
+|------------|-------------------------------|
 
 ---
 
@@ -383,14 +400,14 @@ done
 
 | 分项 | 状态 | 备注 |
 |------|------|------|
-| P0-1 curl writePost 成功 | `✓ / ✗ / 待完成` | |
-| P0-1b harvest ≥ 3 类 codes | `✓ / ✗ / 待完成` | `_KNOWN_EXTENSIONS_CODES` baseline 来源 |
-| P0-3 臂 A idle TTL ≥ 24h | `✓ / ✗ / 待完成` | |
-| P0-5 阶段 1 索引率 ≥ 70% | `✓ / ✗ / 待完成` | ETA: 发布后 14 天 |
-| P0-4 运营语种决断 | `✓ / ✗ / 待完成` | |
-| P0-5b 30s 间隔无风控 | `✓ / ✗ / 待完成` | |
+| P0-1 curl writePost 成功 | `✓` | `url_slug` 必传（非 null）；端点 v2.velog.io/graphql |
+| P0-1b error model 确认 | `✓（重定义）` | velog 无 extension code；坏输入 = silent-drop；`_KNOWN_EXTENSIONS_CODES` 机制不适用 |
+| P0-3 臂 A idle TTL ≥ 24h | `✓` | AT=24h(login)/1h(refresh)；RT=30d；implicit Set-Cookie refresh |
+| P0-5 阶段 1 索引率 ≥ 70% | `⏳ 待完成` | ETA: 2026-06-02（需另发 5 篇 public 文章） |
+| P0-4 运营语种决断 | `⏳ 待完成` | 运营负责人填写 |
+| P0-5b 30s 间隔无风控 | `✓` | 5/5 成功，无任何风控信号 |
 
-**最终决断：`[ ] Go  [ ] No-Go`**
+**最终决断：`[ ] Go（技术面就绪，待 P0-4 + P0-5 + P0-7）  [ ] No-Go`**
 
 ---
 
@@ -407,16 +424,16 @@ done
 
 | 项目 | 记录值 |
 |------|--------|
-| idle TTL 实测值 | `_____ 小时` |
-| 批跑窗口上限（TTL × 0.8） | `_____ 小时（建议最长不超过 __h 后重登）` |
-| 跨设备约束 | `无 / 须从登录机执行（原因：______）` |
-| 持久化策略（来自 P0-2） | `cookies-only / storage_state / 双保险` |
-| 语种（来自 P0-4） | `ko / en` |
-| P0-1 确认的必需 headers | `_______________` |
-| **P0-1b harvested `_KNOWN_EXTENSIONS_CODES` baseline** | `{________________________________}` |
-| **`_KNOWN_CODES_BASELINE_SIZE` 值（写入 Unit 4 模块常量）** | `_____` |
-| **是否检测到 auth-shape codes（除 NOT_LOGGED_IN/UNAUTHENTICATED 外）** | `是（list：______）/ 否` |
-| P0-1 确认的 mutation 必需字段（除 6 字段最小集外） | `无 / 需补充：______` |
+| idle TTL 实测值 | `access_token 24h（首次登录）/ 1h（refresh 后）；refresh_token 30d` |
+| 批跑窗口上限 | `30d（refresh_token TTL）；每次请求自动续期 access_token(1h)，无需重登` |
+| 跨设备约束 | `待确认（当前无设备指纹证据）` |
+| 持久化策略（来自 P0-2） | `cookies-only（HttpOnly；无 localStorage）` |
+| 语种（来自 P0-4） | `待运营填写` |
+| P0-1 确认的必需 headers | `origin, referer, sec-fetch-site, sec-fetch-mode, content-type, user-agent` |
+| **P0-1b error model** | `velog 不返回 extension codes；error 形式 = silent-drop (data.writePost: null)；Unit 4 不实现 _KNOWN_EXTENSIONS_CODES 机制` |
+| **Unit 4 关键修正** | `url_slug 必传（由 slugify(title) 生成）；retry-on-silent-drop 一次（应对 AT 自动 refresh）` |
+| **是否需要 CSRF token** | `否（P0-1 实测确认）` |
+| P0-1 mutation 必需字段（7 字段） | `title, body, tags, is_markdown, is_temp, is_private, url_slug` |
 
 ---
 
