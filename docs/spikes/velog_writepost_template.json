@@ -1,0 +1,30 @@
+{
+  "operationName": "WritePost",
+  "query": "mutation WritePost($title: String, $body: String, $tags: [String], $is_markdown: Boolean, $is_temp: Boolean, $is_private: Boolean, $url_slug: String, $thumbnail: String, $meta: JSON, $series_id: ID, $token: String) {\n  writePost(title: $title, body: $body, tags: $tags, is_markdown: $is_markdown, is_temp: $is_temp, is_private: $is_private, url_slug: $url_slug, thumbnail: $thumbnail, meta: $meta, series_id: $series_id, token: $token) {\n    id\n    user {\n      id\n      username\n      __typename\n    }\n    url_slug\n    __typename\n  }\n}\n",
+  "variables_template": {
+    "title": "<TITLE>",
+    "body": "<BODY_MARKDOWN>",
+    "tags": [],
+    "is_markdown": true,
+    "is_temp": false,
+    "is_private": false,
+    "url_slug": null,
+    "thumbnail": null,
+    "meta": {},
+    "series_id": null,
+    "token": null
+  },
+  "variables_observed_in_curl": {
+    "title": "dummy-1",
+    "body": "hello world",
+    "tags": [],
+    "is_markdown": true,
+    "is_temp": true,
+    "is_private": false,
+    "url_slug": "dummy-1",
+    "thumbnail": null,
+    "meta": {},
+    "series_id": null,
+    "token": null
+  }
+}
