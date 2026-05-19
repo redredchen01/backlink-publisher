@@ -6,7 +6,7 @@ import pytest
 
 from backlink_publisher.adapters.medium_api import MediumAPIAdapter
 from backlink_publisher.config import Config
-from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher.errors import AuthExpiredError, DependencyError, ExternalServiceError
 
 PAYLOAD = {
     "id": "abc123",
@@ -82,12 +82,18 @@ def test_publish_mode_sends_public_status(mock_post, mock_get, _mock_verify):
 
 
 @patch("backlink_publisher.adapters.medium_api.requests.get")
-def test_401_on_me_raises_external_service_error(mock_get):
+def test_401_on_me_raises_auth_expired_error(mock_get):
+    """Plan 2026-05-19-001 Unit 6: /me 401 → AuthExpiredError (not
+    ExternalServiceError). Existing ``except DependencyError`` callers
+    still catch this because AuthExpiredError inherits from it."""
     mock_get.return_value = make_mock_get(status=401)
 
     adapter = MediumAPIAdapter()
-    with pytest.raises(ExternalServiceError, match="invalid"):
+    with pytest.raises(AuthExpiredError) as exc_info:
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_WITH_TOKEN)
+    assert exc_info.value.channel == "medium"
+    assert "Medium /me HTTP 401" in (exc_info.value.reason or "")
+    assert isinstance(exc_info.value, DependencyError)
 
 
 @patch("backlink_publisher.adapters.retry.time.sleep")
@@ -164,13 +170,16 @@ def test_posts_connection_error_retried(mock_post, mock_get, mock_sleep):
 @patch("backlink_publisher.adapters.medium_api.requests.get")
 @patch("backlink_publisher.adapters.medium_api.requests.post")
 def test_posts_401_not_retried(mock_post, mock_get, mock_sleep):
-    """/posts 401 is non-retryable — no sleep, ExternalServiceError immediately."""
+    """Plan 2026-05-19-001 Unit 6: /posts 401 → AuthExpiredError (not
+    ExternalServiceError). Still non-retryable — no sleep."""
     mock_get.return_value = make_mock_get()
     mock_post.return_value = make_mock_post(status=401)
 
     adapter = MediumAPIAdapter()
-    with pytest.raises(ExternalServiceError, match="401"):
+    with pytest.raises(AuthExpiredError) as exc_info:
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_WITH_TOKEN)
+    assert exc_info.value.channel == "medium"
+    assert "Medium /posts HTTP 401" in (exc_info.value.reason or "")
     mock_sleep.assert_not_called()
 
 

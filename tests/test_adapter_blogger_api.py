@@ -8,7 +8,7 @@ import pytest
 from backlink_publisher.adapters.base import AdapterResult
 from backlink_publisher.adapters.blogger_api import BloggerAPIAdapter, _near_expiry
 from backlink_publisher.config import Config, BloggerOAuthConfig
-from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher.errors import AuthExpiredError, DependencyError, ExternalServiceError
 
 PAYLOAD = {
     "id": "abc123",
@@ -68,7 +68,8 @@ def test_missing_blog_id_raises_dependency_error():
 
 @patch("backlink_publisher.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
-def test_http_401_raises_external_service_error(mock_build, mock_creds):
+def test_http_401_raises_auth_expired_error(mock_build, mock_creds):
+    """Plan 2026-05-19-001 Unit 6: HTTP 401 → AuthExpiredError."""
     from googleapiclient.errors import HttpError
     from unittest.mock import MagicMock
     resp = MagicMock()
@@ -80,8 +81,32 @@ def test_http_401_raises_external_service_error(mock_build, mock_creds):
     mock_build.return_value = mock_service
 
     adapter = BloggerAPIAdapter()
-    with pytest.raises(ExternalServiceError, match="authentication failed"):
+    with pytest.raises(AuthExpiredError) as exc_info:
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert exc_info.value.channel == "blogger"
+    assert "Blogger HTTP 401" in (exc_info.value.reason or "")
+    assert isinstance(exc_info.value, DependencyError)
+
+
+@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("googleapiclient.discovery.build")
+def test_http_403_raises_auth_expired_error(mock_build, mock_creds):
+    """Plan 2026-05-19-001 Unit 6: HTTP 403 (token revoked) → AuthExpiredError."""
+    from googleapiclient.errors import HttpError
+    from unittest.mock import MagicMock
+    resp = MagicMock()
+    resp.status = 403
+    exc = HttpError(resp=resp, content=b"Forbidden")
+
+    mock_service = MagicMock()
+    mock_service.posts.return_value.insert.return_value.execute.side_effect = exc
+    mock_build.return_value = mock_service
+
+    adapter = BloggerAPIAdapter()
+    with pytest.raises(AuthExpiredError) as exc_info:
+        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert exc_info.value.channel == "blogger"
+    assert "Blogger HTTP 403" in (exc_info.value.reason or "")
 
 
 @patch("backlink_publisher.adapters.blogger_api._build_credentials")
@@ -165,7 +190,8 @@ def test_429_exhaustion_raises_external_service_error(mock_build, mock_creds, mo
 @patch("backlink_publisher.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_401_not_retried(mock_build, mock_creds, mock_sleep):
-    """HTTP 401 is non-retryable — propagates immediately, no sleep."""
+    """Plan 2026-05-19-001 Unit 6: HTTP 401 is non-retryable —
+    AuthExpiredError immediately, no sleep."""
     from googleapiclient.errors import HttpError
     resp_401 = MagicMock()
     resp_401.status = 401
@@ -176,7 +202,7 @@ def test_401_not_retried(mock_build, mock_creds, mock_sleep):
     mock_build.return_value = mock_service
 
     adapter = BloggerAPIAdapter()
-    with pytest.raises(ExternalServiceError, match="authentication failed"):
+    with pytest.raises(AuthExpiredError):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
     mock_sleep.assert_not_called()
 

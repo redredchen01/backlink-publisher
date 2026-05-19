@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <meta name="csrf-token" content="{{ csrf_token or '' }}">
     <style>
         :root { --primary:#4f46e5; --gradient:linear-gradient(135deg,#667eea 0%,#764ba2 100%); }
         body { font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;
@@ -94,6 +95,7 @@
             <div id="channel-blogger" class="collapse">
                 <div class="card-body">
                     {% include '_settings_channel_blogger.html' %}
+                    {% with channel='blogger' %}{% include '_settings_channel_binding.html' %}{% endwith %}
                 </div>
             </div>
         </div>
@@ -123,6 +125,7 @@
             <div id="channel-medium" class="collapse">
                 <div class="card-body">
                     {% include '_settings_channel_medium.html' %}
+                    {% with channel='medium' %}{% include '_settings_channel_binding.html' %}{% endwith %}
                 </div>
             </div>
         </div>
@@ -339,6 +342,24 @@
     document.addEventListener('DOMContentLoaded', _openCollapseForHash);
     window.addEventListener('hashchange', _openCollapseForHash);
 
+    // ── Bind channel: sessionStorage reopen (Plan 2026-05-19-001 Unit 5) ──
+    // After a bind click + page reload, restore the open card so the operator
+    // sees the badge transition in context. The key is cleared after reopen.
+    document.addEventListener('DOMContentLoaded', function() {
+        var last = null;
+        try { last = sessionStorage.getItem('bind:lastChannel'); } catch (e) {}
+        if (!last) return;
+        var card = document.getElementById('channel-' + last);
+        if (card && !card.classList.contains('show')) {
+            try { bootstrap.Collapse.getOrCreateInstance(card).show(); } catch (e) {}
+            card.addEventListener('shown.bs.collapse', function() {
+                var section = document.getElementById('bind-section-' + last);
+                if (section) section.scrollIntoView({block: 'center'});
+            }, {once: true});
+        }
+        try { sessionStorage.removeItem('bind:lastChannel'); } catch (e) {}
+    });
+
     // ── Loading Overlay ──────────────────────────────────────────
     (function() {
         const MSGS = {
@@ -374,6 +395,8 @@
         });
     })();
     </script>
+
+    <script src="/static/js/bind_channel.js" defer></script>
 
     <!-- Loading Overlay -->
     <div id="_loadingOverlay" style="display:none;position:fixed;inset:0;background:rgba(15,15,15,0.55);z-index:9999;flex-direction:column;align-items:center;justify-content:center;">

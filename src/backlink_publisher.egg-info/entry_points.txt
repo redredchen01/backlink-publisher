@@ -1,5 +1,9 @@
 [console_scripts]
+bind-channel = backlink_publisher.cli.bind_channel:main
+footprint = backlink_publisher.cli.footprint:main
+phase0-seal = backlink_publisher.cli.phase0_seal:main
 plan-backlinks = backlink_publisher.cli.plan_backlinks:main
 publish-backlinks = backlink_publisher.cli.publish_backlinks:main
 report-anchors = backlink_publisher.cli.report_anchors:main
 validate-backlinks = backlink_publisher.cli.validate_backlinks:main
+velog-login = backlink_publisher.cli.velog_login:main

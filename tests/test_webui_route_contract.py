@@ -812,6 +812,22 @@ class TestQueueDashboardRoutes:
         assert data["status"] == "success"
 
 
+class TestBindRoutes:
+    """Plan 2026-05-19-001 Unit 4 — POST + GET smoke for the bind blueprint.
+
+    Deeper lifecycle assertions live in test_webui_bind_routes.py. The two
+    smoke tests here exist to satisfy the route-coverage gate below.
+    """
+
+    def test_post_bind_missing_csrf_returns_403(self, client):
+        resp = client.post("/settings/channels/medium/bind", data={})
+        assert resp.status_code == 403
+
+    def test_poll_bind_unknown_job_returns_404(self, client):
+        resp = client.get("/settings/channels/medium/bind/deadbeef")
+        assert resp.status_code == 404
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Coverage assertion — make sure we exercised every @app.route declared.
 # This is the file's primary regression net for "did anyone add a route?".

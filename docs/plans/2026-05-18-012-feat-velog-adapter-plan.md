@@ -381,6 +381,9 @@ flowchart TB
 
 - [ ] **Unit 3: `velog-login` CLI 子命令（Playwright headed + 共享 host primitive + cookies/origins 双过滤 + 安全持久化）**
 
+> **Amendment 2026-05-19 — see `docs/plans/2026-05-19-001-feat-settings-browser-binding-plan.md`.**
+> `velog-login` is now a **transparent alias** for `bind-channel --channel velog`; the headed Playwright driver, host filter, and storage_state persistence all live in `src/backlink_publisher/cli/_bind/` (plan 2026-05-19-001 Units 1–3). This unit's implementation collapses to a 10-line alias `main()` that prepends `["--channel", "velog"]` and delegates. The shared `_velog_host_allowed` primitive moves to the recipe at `src/backlink_publisher/cli/_bind/recipes/velog.py`; tests for it follow the recipe.
+
 **Goal:** 唯一凭证获取入口；强制 R16；产出 0600 文件供 adapter 读。
 
 **Requirements:** R8、R9、R14、R16
@@ -446,6 +449,9 @@ flowchart TB
 ---
 
 - [ ] **Unit 4: `velog_graphql.py` 适配器（GraphQL + retry + date-gated cap + polling lock + auth-shape pattern + 结构化日志）**
+
+> **Amendment 2026-05-19 — see `docs/plans/2026-05-19-001-feat-settings-browser-binding-plan.md`.**
+> 401/403 + 显式 `extensions.code` 命中 auth-shape pattern (UNAUTH/FORBIDDEN/SESSION/TOKEN/CSRF/EXPIRED) 时，**改 raise `AuthExpiredError(channel="velog", reason=...)`** —— 不再是 `DependencyError("velog cookie expired")`. `AuthExpiredError` 继承自 `DependencyError`（同 `exit_code=3`），所以本 Unit 既有的 `except DependencyError` 调用方仍能兜底；但 `publish_backlinks` 已为 `AuthExpiredError` 加专门 catch（plan 2026-05-19-001 Unit 6），会调用 `webui_store.channel_status.mark_expired("velog")` 并写入 `error_class="auth_expired"` 的 checkpoint row，让 `/settings` Velog 卡显示「已过期 ⚠」+「重新绑定」按钮。
 
 **Goal:** 接入 `--platform velog`；实现 R8/R10/R11/R17/R18 全部行为。
 

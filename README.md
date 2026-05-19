@@ -495,11 +495,14 @@ cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --plat
 
 ## Troubleshooting
 
+If a publish fails with `channel 'X' credentials expired`, open Settings (`/settings`) and click **重新绑定** on the affected channel card. A headed browser opens for you to log in; the badge transitions `绑定中…` → `已绑定 ✓` when the storage_state file is written and `mark_bound` records the bind. CLI alternative: `bind-channel --channel <velog|medium|blogger>`. See `AGENTS.md → Binding a channel` for the full lifecycle.
+
 | Problem | Solution |
 |---|---|
 | `Blogger OAuth not configured` | Add `[blogger.oauth]` to `~/.config/backlink-publisher/config.toml` |
 | `No Blogger blog_id configured for domain` | Add the domain mapping under `[blogger]` in config.toml |
-| `Blogger authentication failed (HTTP 401)` | Delete `~/.config/backlink-publisher/blogger-token.json` and re-run to re-authorize |
+| `channel 'blogger' credentials expired` (exit 3) | Open `/settings` → Blogger → 重新绑定, **or** run `bind-channel --channel blogger` |
+| `channel 'medium' credentials expired` (exit 3) | Open `/settings` → Medium → 重新绑定, **or** run `bind-channel --channel medium` |
 | `medium integration token not configured` | Add `[medium] integration_token = "..."` to config, or install Playwright as fallback |
 | `Medium login expired` | Log in to Medium in the managed Chrome profile |
 | `Medium CAPTCHA detected` | Solve CAPTCHA manually at medium.com, then retry |

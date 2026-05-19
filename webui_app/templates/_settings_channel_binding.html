@@ -1,0 +1,68 @@
+{# Channel browser-binding subsection — Plan 2026-05-19-001 Unit 5.
+
+   Required context vars:
+     channel              str — one of CHANNELS ("velog" | "medium" | "blogger")
+     channel_statuses     dict — webui_store.channel_status.list_all()
+     bind_error_messages  dict — webui_app.services.bind_job.BIND_ERROR_MESSAGES
+
+   The partial renders:
+     - status badge (role=status, aria-live=polite) — 已绑定 ✓ / 已过期 ⚠ / 未绑定 / 绑定中…
+     - if previously bound, "上次绑定 YYYY-MM-DD" subtext
+     - "绑定" or "重新绑定" button with aria-label + data-channel
+     - inline area where bind_channel.js renders streaming events + Chinese
+       error messages.
+
+   The button has no native <form> action — bind_channel.js POSTs via
+   fetch() with the CSRF token from the page's hidden meta tag.
+#}
+{% set _rec = channel_statuses.get(channel) or {"status": "unbound", "bound_at": None} %}
+{% set _status = _rec.get("status", "unbound") %}
+{% set _bound_at = _rec.get("bound_at") %}
+{% set _badge_class = {
+    "bound":   "ok",
+    "expired": "warn",
+    "unbound": "err",
+}.get(_status, "err") %}
+{% set _badge_text = {
+    "bound":   "已绑定 ✓",
+    "expired": "已过期 ⚠",
+    "unbound": "未绑定",
+}.get(_status, "未绑定") %}
+{% set _button_text = "重新绑定" if _status in ("bound", "expired") else "绑定" %}
+
+<hr style="margin:20px 0;">
+
+<div class="bind-section" id="bind-section-{{ channel }}" data-channel="{{ channel }}">
+    <p class="text-muted" style="font-size:13px; margin-bottom:8px;">
+        <strong>🌐 浏览器登录绑定</strong>
+        — 通过本机浏览器登录 {{ channel }}，凭据写入 <code>~/.config/backlink-publisher/{{ channel }}-storage-state.json</code>（0600 权限）。
+    </p>
+
+    <div class="bind-status-row" style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+        <span class="badge-status {{ _badge_class }}"
+              id="bind-badge-{{ channel }}"
+              role="status"
+              aria-live="polite">{{ _badge_text }}</span>
+        {% if _bound_at %}
+        <small class="text-muted" id="bind-bound-at-{{ channel }}">
+            上次绑定 {{ _bound_at[:10] }}
+        </small>
+        {% endif %}
+    </div>
+
+    <div class="d-flex gap-2" style="margin-bottom:8px;">
+        <button type="button"
+                class="btn btn-outline-primary btn-sm bind-channel-btn"
+                data-channel="{{ channel }}"
+                aria-label="{{ _button_text }} {{ channel }} 渠道">
+            <i class="bi bi-box-arrow-in-right me-1" aria-hidden="true"></i>{{ _button_text }}
+        </button>
+    </div>
+
+    <div class="bind-log small text-muted"
+         id="bind-log-{{ channel }}"
+         aria-live="polite"
+         style="display:none; max-height:120px; overflow:auto; padding:8px;
+                background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px;
+                font-family:monospace; font-size:12px; line-height:1.5;"></div>
+</div>
