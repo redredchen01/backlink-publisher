@@ -390,15 +390,33 @@ class TelegraphAPIAdapter(Publisher):
         primary = _token_path(config)
         legacy = _legacy_token_path(config)
         if not primary.exists() and not legacy.exists():
-            # Bootstrap: Telegraph's USP is "no account needed" — honor
-            # it by creating one on demand the very first time.
-            short_name = _DEFAULT_SHORT_NAME
-            access_token = _create_account(short_name)
-            _write_token_atomic(
-                primary,
-                {"access_token": access_token, "short_name": short_name},
-            )
-            log.info("telegraph_token_bootstrapped short_name=%s", short_name)
+            # Bootstrap path — protected by _token_lock to prevent the
+            # TOCTOU race where two concurrent publish processes both
+            # observe "no token file" and each call createAccount.
+            # Without the lock, the second writer's os.replace overwrites
+            # the first writer's token; the first process then continues
+            # with its in-memory (now-orphaned) token, hits 401, enters
+            # self-heal, mints a third account — leaving the first
+            # Telegraph account permanently inaccessible with no audit
+            # trail.  Re-check existence inside the lock in case a peer
+            # bootstrapped while we waited.
+            with _token_lock(primary):
+                if not primary.exists() and not legacy.exists():
+                    short_name = _DEFAULT_SHORT_NAME
+                    access_token = _create_account(short_name)
+                    _write_token_atomic(
+                        primary,
+                        {"access_token": access_token, "short_name": short_name},
+                    )
+                    log.info(
+                        "telegraph_token_bootstrapped short_name=%s", short_name
+                    )
+                else:
+                    # Peer process bootstrapped while we waited on the lock;
+                    # load the token they just wrote.
+                    token_data = _load_token(config)
+                    access_token = token_data["access_token"]
+                    short_name = token_data.get("short_name", _DEFAULT_SHORT_NAME)
         else:
             # A file exists — load it (incl. legacy migration).  Any
             # DependencyError here (wrong perms / corrupt / missing field)

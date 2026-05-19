@@ -248,3 +248,74 @@ def test_orphan_archive_filename_includes_iso_timestamp(seeded_token):
     assert len(suffix) >= 15  # at minimum: YYYYMMDDTHHMMSSZ
     # Sanity: contains the year
     assert "2026" in suffix or "20" in suffix
+
+
+def test_concurrent_bootstrap_creates_only_one_account(isolated_config_dir):
+    """Bootstrap TOCTOU race regression (ce-review P1 / correctness reviewer).
+
+    Two concurrent publish() calls with no token file present must produce
+    exactly ONE createAccount call, not N.  Without the bootstrap-lock fix,
+    both threads see "no token", both call createAccount, second writer's
+    os.replace overwrites the first's token, and the first account is
+    orphaned forever on Telegraph's side with no audit trail.
+    """
+    import threading
+    from itertools import count
+
+    from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
+
+    create_account_calls = []
+    create_page_calls = []
+    token_counter = count(start=1)
+
+    def _post_router(url, *args, **kwargs):
+        if url.endswith("/createAccount"):
+            create_account_calls.append(url)
+            return _create_account_success(token=f"BOOT_TOKEN_{next(token_counter)}")
+        if url.endswith("/createPage"):
+            create_page_calls.append(url)
+            return _create_page_success(url=f"https://telegra.ph/concurrent-{len(create_page_calls)}")
+        raise AssertionError(f"unexpected URL: {url}")
+
+    barrier = threading.Barrier(4)
+    errors = []
+    results = []
+
+    def worker():
+        try:
+            barrier.wait(timeout=5)
+            adapter = TelegraphAPIAdapter()
+            results.append(adapter.publish(PAYLOAD, mode="publish", config=Config()))
+        except Exception as exc:
+            errors.append(exc)
+
+    with patch(
+        "backlink_publisher.publishing.adapters.telegraph_api.requests.post",
+        side_effect=_post_router,
+    ):
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+    assert errors == [], f"workers raised: {errors}"
+    assert len(results) == 4
+
+    # The load-bearing assertions:
+    assert len(create_account_calls) == 1, (
+        f"Bootstrap TOCTOU regression: expected exactly 1 createAccount call "
+        f"across 4 concurrent workers, got {len(create_account_calls)}"
+    )
+
+    # All 4 workers must have published successfully (the 3 that lost the
+    # bootstrap race must have read the winner's token, not failed).
+    assert len(create_page_calls) == 4
+
+    # Final token file contains the one bootstrap token.
+    final = json.loads((isolated_config_dir / "telegraph-token.json").read_text())
+    assert final["access_token"] == "BOOT_TOKEN_1"
+
+    # No orphan archive should exist — bootstrap should never archive.
+    orphans = list(isolated_config_dir.glob("telegraph-token.json.orphaned-*"))
+    assert orphans == [], f"unexpected orphan archives from bootstrap: {orphans}"
