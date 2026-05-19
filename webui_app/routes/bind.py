@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, redirect, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, request
 
 from backlink_publisher._util.errors import UsageError
 from backlink_publisher.cli._bind.channels import CHANNELS
@@ -61,6 +61,24 @@ def start_bind(channel: str):
     _check_csrf_or_abort()
     if channel not in CHANNELS:
         abort(400)
+
+    # PR #83 adversarial review: refuse to start a fresh bind while the
+    # channel is in ``identity_mismatch``. Letting the bind run in
+    # parallel with an open keep/replace decision creates a TOCTOU
+    # window where the resolution route can race the new bind's
+    # ``mark_bound`` and silently accept the new account under the
+    # guise of "keep old".
+    from webui_store.channel_status import get_status
+
+    if get_status(channel).get("status") == "identity_mismatch":
+        return jsonify({
+            "status": "error",
+            "error": "identity_mismatch_unresolved",
+            "message": (
+                "请先在设置页选择保留旧账号或替换为新账号，再发起新的绑定。"
+            ),
+        }), 409
+
     try:
         job = _bind_registry.start(channel)
     except UsageError as exc:
@@ -96,27 +114,42 @@ def identity_mismatch_keep(channel: str):
         abort(400)
 
     from webui_store import channel_status_store
-    from webui_store.channel_status import get_status
 
-    current = get_status(channel)
-    if current.get("status") != "identity_mismatch":
-        # Idempotent — nothing to undo; redirect back to settings.
-        return redirect(url_for("main.settings") if "main.settings" else "/settings")
-
-    storage_state_path = current.get("storage_state_path")
-    if not storage_state_path or not Path(storage_state_path).exists():
-        # Defensive: identity_mismatch state with missing storage_state
-        # means the old credential was wiped externally. Fall through
-        # to "replace" semantics — there's nothing to keep.
-        _execute_replace(channel)
-        return redirect("/settings")
-
+    # PR #83 adversarial review: the precondition check + the resolution
+    # write must be one atomic step. The previous shape (get_status() →
+    # if-check → channel_status_store.update()) had a TOCTOU window where
+    # a concurrent bind subprocess could complete between the check and
+    # the closure, causing the closure to read a freshly-bound (different
+    # account!) record and write status=bound for the WRONG account
+    # under the operator's "keep old" click. By moving the check inside
+    # the closure we either restore the same identity_mismatch record we
+    # observed or no-op cleanly.
     def _restore(current_state: dict) -> dict:
         current_state = dict(current_state)
         existing = current_state.get(channel, {})
-        # Restore bound with the original bound_at (don't pretend it just
-        # happened); clear the identity_mismatch_* sentinel fields and
-        # last_verified_at (probe must re-confirm).
+        if existing.get("status") != "identity_mismatch":
+            # State changed under us (concurrent resolution / bind
+            # completion). No-op so we don't silently accept whatever
+            # the other writer landed.
+            return current_state
+        storage_state_path = existing.get("storage_state_path")
+        if not storage_state_path or not Path(storage_state_path).exists():
+            # Old credential is gone (external wipe or never persisted).
+            # Demote to expired — semantically honest: "you used to be
+            # bound, the credential is no longer on disk, please rebind".
+            # Crucially NOT "replace" (which would also delete sibling
+            # last-account files); the UI label says "keep", and silent
+            # destructive escalation is the bug the reviewer flagged.
+            current_state[channel] = {
+                "status": "expired",
+                "bound_at": existing.get("bound_at"),
+                "storage_state_path": existing.get("storage_state_path"),
+                "last_verified_at": None,
+            }
+            return current_state
+        # Happy path: restore bound with the original bound_at (don't
+        # pretend it just happened); clear identity_mismatch_* sentinels
+        # and last_verified_at (probe must re-confirm).
         current_state[channel] = {
             "status": "bound",
             "bound_at": existing.get("bound_at"),

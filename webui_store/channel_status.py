@@ -166,12 +166,26 @@ def mark_identity_mismatch(
     Operator must explicitly resolve via Settings UI (keep old vs replace
     with new). ``reconcile_on_load`` does NOT demote this state to expired
     even if the underlying storage_state.json file is missing.
+
+    Defensive guards (PR #83 adversarial review findings):
+      - Empty / identical account strings are treated as no-ops rather
+        than written to disk. ``alice/alice`` is not an identity mismatch;
+        rendering the keep/replace UI for it would either confuse the
+        operator or cause a destructive "replace" of a valid credential.
+      - An existing ``identity_mismatch`` record is not overwritten — the
+        first mismatch wins until the operator resolves it. Prevents
+        retry loops or duplicate JSONL events from silently mutating the
+        recorded accounts mid-resolution.
     """
     _validate_channel(channel)
+    if not old_account or not new_account or old_account == new_account:
+        return
 
     def _apply(current: dict[str, Any]) -> dict[str, Any]:
         current = dict(current)
         existing = current.get(channel, {})
+        if existing.get("status") == "identity_mismatch":
+            return current
         current[channel] = {
             "status": "identity_mismatch",
             "bound_at": existing.get("bound_at"),
