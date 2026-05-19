@@ -1,4 +1,4 @@
-{% set vs = velog_status if velog_status is defined else {'state': 'err', 'label': '未绑定', 'guide': 'backlink-publisher velog-login', 'count': 0, 'cap': 5, 'cookies_path': ''} %}
+{% set vs = velog_status if velog_status is defined else {'state': 'err', 'label': '未绑定', 'guide': 'velog-login', 'count': 0, 'cap': 5, 'cookies_path': ''} %}
 
 <!-- 连接状态徽章 -->
 <div class="mb-3 d-flex align-items-center gap-3">
@@ -26,7 +26,7 @@
 {% if vs.state in ('err', 'warn') %}
 <div class="alert alert-warning" style="margin-bottom:16px;">
     <strong>需要操作：</strong>
-    在终端运行：<code>backlink-publisher velog-login</code><br/>
+    在终端运行：<code>velog-login</code><br/>
     <small class="text-muted">会弹出 Chromium，完成 velog 社交登录后凭证自动保存。</small>
 </div>
 {% elif vs.state == 'cap_reached' %}
@@ -93,6 +93,6 @@ function runVelogLogin(e) {
                 alert('启动失败：' + (d.error || '未知错误'));
             }
         })
-        .catch(() => alert('网络错误，请手动在终端运行：\nbacklink-publisher velog-login'));
+        .catch(() => alert('网络错误，请手动在终端运行：\nvelog-login'));
 }
 </script>

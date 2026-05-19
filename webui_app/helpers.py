@@ -172,7 +172,7 @@ def _get_velog_status() -> dict:
             return {
                 'state': 'err',
                 'label': '未绑定',
-                'guide': f'运行: backlink-publisher velog-login',
+                'guide': f'运行: velog-login',
                 'cookies_path': str(cookies_path),
                 'count': 0,
                 'cap': cap,
@@ -208,7 +208,7 @@ def _get_velog_status() -> dict:
                 return {
                     'state': 'warn',
                     'label': 'Cookie 文件为空',
-                    'guide': 'backlink-publisher velog-login',
+                    'guide': 'velog-login',
                     'cookies_path': str(cookies_path),
                     'count': 0,
                     'cap': cap,
@@ -217,7 +217,7 @@ def _get_velog_status() -> dict:
             return {
                 'state': 'warn',
                 'label': 'Cookie 文件解析失败',
-                'guide': 'backlink-publisher velog-login',
+                'guide': 'velog-login',
                 'cookies_path': str(cookies_path),
                 'count': 0,
                 'cap': cap,
@@ -261,7 +261,7 @@ def _get_velog_status() -> dict:
         return {
             'state': 'err',
             'label': f'状态检查失败: {exc}',
-            'guide': 'backlink-publisher velog-login',
+            'guide': 'velog-login',
             'cookies_path': '',
             'count': 0,
             'cap': 5,

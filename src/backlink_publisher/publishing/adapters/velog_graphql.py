@@ -129,7 +129,7 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
     if not cookies_path.exists():
         raise DependencyError(
             f"velog cookies not found: {cookies_path}\n"
-            "Run: backlink-publisher velog-login"
+            "Run: velog-login"
         )
 
     mode = os.stat(cookies_path).st_mode & 0o777
@@ -144,14 +144,14 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
     except (json.JSONDecodeError, OSError) as exc:
         raise DependencyError(
             f"Cannot read velog cookies: {exc}\n"
-            "Run: backlink-publisher velog-login"
+            "Run: velog-login"
         ) from None
 
     cookie_list = raw.get("cookies", [])
     if not cookie_list:
         raise DependencyError(
             "velog-cookies.json is empty or has no cookies.\n"
-            "Run: backlink-publisher velog-login"
+            "Run: velog-login"
         )
 
     return {c["name"]: c["value"] for c in cookie_list if "name" in c and "value" in c}
@@ -412,7 +412,7 @@ class VelogGraphQLAdapter(Publisher):
                     ))
                     raise ExternalServiceError(
                         "velog writePost returned null after retry. "
-                        "Cookie may be expired — run: backlink-publisher velog-login"
+                        "Cookie may be expired — run: velog-login"
                     )
 
             url_slug_returned = (write_post or {}).get("url_slug", "")

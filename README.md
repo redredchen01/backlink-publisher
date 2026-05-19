@@ -451,7 +451,7 @@ pip install playwright && playwright install chromium
 2. Run the login command (opens a headed Chromium window):
 
 ```bash
-backlink-publisher velog-login
+velog-login
 ```
 
 3. Complete social login (Google / GitHub / Facebook) in the browser.

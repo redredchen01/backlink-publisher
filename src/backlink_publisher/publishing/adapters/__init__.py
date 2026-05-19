@@ -110,7 +110,7 @@ def verify_adapter_setup(platform: str, config: Config) -> None:
         if not cookies_path.exists():
             raise DependencyError(
                 f"velog cookies not found: {cookies_path}\n"
-                "Run: backlink-publisher velog-login"
+                "Run: velog-login"
             )
         return
 

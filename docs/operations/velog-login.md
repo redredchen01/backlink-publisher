@@ -19,7 +19,7 @@ playwright install chromium
 ### 步骤
 
 ```bash
-backlink-publisher velog-login
+velog-login
 ```
 
 1. 浏览器自动弹出。
@@ -76,7 +76,7 @@ access_token 到期后，只要 refresh_token 有效（30 天内），
 
 ```bash
 # 重新登录
-backlink-publisher velog-login
+velog-login
 ```
 
 WebUI 设置页的 velog 徽章变红（`err`）或橙（`warn`）时也应运行此命令。
@@ -98,7 +98,7 @@ velog-cookies.json 权限为 **0600**，只有创建该文件的 uid 可读。
 
 ```bash
 # 方式 A（推荐）：统一 uid，重新登录
-backlink-publisher velog-login   # 以 Flask 进程的 uid 运行
+velog-login   # 以 Flask 进程的 uid 运行
 
 # 方式 B：放宽权限至组可读（安全降级）
 chmod 640 ~/.config/backlink-publisher/velog-cookies.json
