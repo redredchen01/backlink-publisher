@@ -6,7 +6,7 @@ import json
 import sys
 from typing import Any, Iterable, Iterator
 
-from backlink_publisher._util.errors import emit_error, InputValidationError
+from backlink_publisher._util.errors import emit_error
 
 MAX_LINE_LENGTH = 65536  # 64 KB per line
 

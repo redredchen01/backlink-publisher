@@ -293,8 +293,28 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
 
             elif status == "succeeded":
                 live_host = _host_of(published_url) or host
-                article_payload = _build_article(
-                    item, host=live_host, target_url=target_url, run_id=run_id
+                payload = item.get("payload") or {}
+                _body = payload.get("content_markdown") if isinstance(payload, dict) else None
+                _anchors = _extract_anchors(payload)
+                _completed_at = item.get("completed_at")
+                if isinstance(_completed_at, str) and _completed_at:
+                    try:
+                        _pub_raw, _pub_utc = _split_iso_with_offset(_completed_at)
+                    except ValueError:
+                        _pub_raw, _pub_utc = _completed_at, None
+                else:
+                    _pub_raw, _pub_utc = None, None
+                _lang = payload.get("lang") if isinstance(payload, dict) else None
+                article_payload = _article_payload(
+                    live_url=published_url,
+                    target_url=target_url,
+                    host=live_host,
+                    anchors_json=json.dumps(_anchors, sort_keys=True, ensure_ascii=False),
+                    run_id=run_id,
+                    body=_body,
+                    lang=_lang if isinstance(_lang, str) and _lang else None,
+                    published_at_raw=_pub_raw,
+                    published_at_utc=_pub_utc,
                 )
                 try:
                     article_id = store.add_article(article_payload, conn=conn)
@@ -378,45 +398,39 @@ def _checkpoint_event_timestamp(
     return None, None
 
 
-def _build_article(
-    item: dict[str, Any],
+def _article_payload(
     *,
-    host: str | None,
+    live_url: str | None,
     target_url: str | None,
-    run_id: str,
+    host: str | None,
+    anchors_json: str = "[]",
+    run_id: str | None = None,
+    body: str | None = None,
+    lang: str | None = None,
+    published_at_raw: str | None = None,
+    published_at_utc: str | None = None,
 ) -> dict[str, Any]:
-    payload = item.get("payload") or {}
-    published_url = item.get("published_url") or None
-    body = payload.get("content_markdown") if isinstance(payload, dict) else None
-    anchors = _extract_anchors(payload)
-    completed_at = item.get("completed_at")
-    if isinstance(completed_at, str) and completed_at:
-        try:
-            pub_raw, pub_utc = _split_iso_with_offset(completed_at)
-        except ValueError:
-            pub_raw, pub_utc = completed_at, None
-    else:
-        pub_raw, pub_utc = None, None
-
-    article: dict[str, Any] = {
-        "body": body,
-        "anchors_json": json.dumps(anchors, sort_keys=True, ensure_ascii=False),
+    """Build an article row dict shared by all three reducers."""
+    payload: dict[str, Any] = {
+        "anchors_json": anchors_json,
         "target_urls_json": json.dumps(
             [target_url] if target_url else [],
             sort_keys=True, ensure_ascii=False,
         ),
         "host": host,
-        "live_url": canonicalize_url(published_url) if published_url else None,
-        "run_id": run_id,
+        "live_url": canonicalize_url(live_url) if live_url else None,
     }
-    if pub_raw is not None:
-        article["published_at_raw"] = pub_raw
-    if pub_utc is not None:
-        article["published_at_utc"] = pub_utc
-    lang = payload.get("lang") if isinstance(payload, dict) else None
-    if isinstance(lang, str) and lang:
-        article["lang"] = lang
-    return article
+    if body is not None:
+        payload["body"] = body
+    if run_id is not None:
+        payload["run_id"] = run_id
+    if lang:
+        payload["lang"] = lang
+    if published_at_raw is not None:
+        payload["published_at_raw"] = published_at_raw
+    if published_at_utc is not None:
+        payload["published_at_utc"] = published_at_utc
+    return payload
 
 
 # ── History reducer ───────────────────────────────────────────────
@@ -491,21 +505,14 @@ def _project_history(
                 for live_url in article_urls:
                     if not isinstance(live_url, str) or not live_url:
                         continue
-                    article = {
-                        "anchors_json": "[]",
-                        "target_urls_json": json.dumps(
-                            [target_url] if target_url else [],
-                            sort_keys=True, ensure_ascii=False,
-                        ),
-                        "host": _host_of(live_url),
-                        "live_url": canonicalize_url(live_url),
-                    }
-                    if language:
-                        article["lang"] = language
-                    if ts_raw is not None:
-                        article["published_at_raw"] = ts_raw
-                    if ts_utc is not None:
-                        article["published_at_utc"] = ts_utc
+                    article = _article_payload(
+                        live_url=live_url,
+                        target_url=target_url,
+                        host=_host_of(live_url),
+                        lang=language,
+                        published_at_raw=ts_raw,
+                        published_at_utc=ts_utc,
+                    )
                     try:
                         article_id = store.add_article(article, conn=conn)
                     except sqlite3.IntegrityError:
@@ -631,22 +638,15 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                 for live_url in article_urls:
                     if not isinstance(live_url, str) or not live_url:
                         continue
-                    article = {
-                        "anchors_json": "[]",
-                        "target_urls_json": json.dumps(
-                            [target_url] if target_url else [],
-                            sort_keys=True, ensure_ascii=False,
-                        ),
-                        "host": _host_of(live_url),
-                        "live_url": canonicalize_url(live_url),
-                    }
-                    lang = row.get("language")
-                    if isinstance(lang, str) and lang:
-                        article["lang"] = lang
-                    if ts_raw is not None:
-                        article["published_at_raw"] = ts_raw
-                    if ts_utc is not None:
-                        article["published_at_utc"] = ts_utc
+                    _lang = row.get("language")
+                    article = _article_payload(
+                        live_url=live_url,
+                        target_url=target_url,
+                        host=_host_of(live_url),
+                        lang=_lang if isinstance(_lang, str) and _lang else None,
+                        published_at_raw=ts_raw,
+                        published_at_utc=ts_utc,
+                    )
                     try:
                         article_id = store.add_article(article, conn=conn)
                     except sqlite3.IntegrityError:

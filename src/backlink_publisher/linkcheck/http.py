@@ -5,7 +5,6 @@ from __future__ import annotations
 import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 

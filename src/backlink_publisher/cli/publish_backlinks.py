@@ -10,10 +10,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-_HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+_HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from .. import checkpoint, config_echo
@@ -131,6 +131,118 @@ def _do_verify(
         max_wait=max_wait,
     )
     return vr.ok, vr.reason
+
+
+# ── Shared helpers ──────────────────────────────────────────────────────────
+
+
+def _build_failure_row(
+    status: str,
+    row: dict[str, Any],
+    platform: str,
+    error: str,
+    ts: str,
+    *,
+    adapter: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build a publish-failure output row. ``extra`` kwargs overlay additional fields."""
+    out: dict[str, Any] = {
+        "id": row.get("id", ""),
+        "platform": platform,
+        "status": status,
+        "title": row.get("title", ""),
+        "draft_url": "",
+        "published_url": "",
+        "created_at": ts,
+        "adapter": adapter,
+        "error": error,
+    }
+    out.update(extra)
+    return out
+
+
+def _try_update_ckpt_failed(
+    run_id: str | None,
+    row_id: str,
+    error: str,
+    error_class: str,
+) -> str | None:
+    """Try writing a failed checkpoint item. Returns ``None`` on error to disable further updates."""
+    if run_id is None:
+        return None
+    try:
+        checkpoint.update_item(run_id, row_id, "failed", error=error, error_class=error_class)
+    except Exception as ckpt_exc:
+        print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+        return None
+    return run_id
+
+
+def _load_throttle_config() -> tuple[int, int]:
+    """Read MEDIUM_THROTTLE_MIN/MAX env vars with defaults 60/300."""
+    return (
+        int(os.environ.get("MEDIUM_THROTTLE_MIN", "60")),
+        int(os.environ.get("MEDIUM_THROTTLE_MAX", "300")),
+    )
+
+
+def _sleep_with_throttle(throttle_min: int, throttle_max: int, context: str = "") -> None:
+    """Sleep a random interval in [throttle_min, throttle_max] with a log line."""
+    sleep_secs = random.uniform(throttle_min, throttle_max)
+    label = f" ({context})" if context else ""
+    publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s{label}")
+    time.sleep(sleep_secs)
+
+
+def _record_publish_failure(
+    outputs: list[dict[str, Any]],
+    row: dict[str, Any],
+    platform: str,
+    ts: str,
+    run_id: str | None,
+    exc: Exception,
+    err_class: str,
+    err_msg: str,
+) -> str | None:
+    """Append a failure row, log the error, and attempt checkpoint update."""
+    outputs.append(_build_failure_row("failed", row, platform, err_msg, ts, adapter=platform))
+    new_run_id = _try_update_ckpt_failed(run_id, row.get("id", ""), err_msg, err_class)
+    publish_logger.error(
+        f"publish failed: {exc}",
+        extra={"id": row.get("id"), "platform": platform},
+    )
+    return new_run_id
+
+
+def _medium_throttle_sleep(
+    row_idx: int,
+    last_success_idx: int,
+    platform: str,
+    throttle_min: int,
+    throttle_max: int,
+    *,
+    dry_run: bool,
+) -> None:
+    if dry_run or row_idx == 0:
+        return
+    if last_success_idx != row_idx - 1 or platform != "medium":
+        return
+    _sleep_with_throttle(throttle_min, throttle_max, "next Medium post")
+
+
+def _record_resume_failure(
+    run_id: str,
+    item: dict[str, Any],
+    exc: Exception,
+    err_class: str,
+    err_msg: str,
+) -> None:
+    checkpoint.update_item(run_id, item["id"], "failed", error=err_msg, error_class=err_class)
+    publish_logger.error(
+        f"publish failed: {exc}",
+        extra={"id": item["id"], "platform": item.get("platform", "")},
+    )
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
@@ -251,8 +363,7 @@ def _run_resume(args: Any) -> None:
         raise SystemExit(0)
 
     # R8: find last done Medium item and compute elapsed
-    throttle_min = int(os.environ.get("MEDIUM_THROTTLE_MIN", "60"))
-    throttle_max = int(os.environ.get("MEDIUM_THROTTLE_MAX", "300"))
+    throttle_min, throttle_max = _load_throttle_config()
     resume_elapsed_skip_throttle = False
     for item in ckpt["items"]:
         # Throttle bookkeeping for the resume path. Platform-keyed because at
@@ -283,14 +394,10 @@ def _run_resume(args: Any) -> None:
         if platform == "medium":
             if first_medium_in_resume:
                 if not resume_elapsed_skip_throttle:
-                    sleep_secs = random.uniform(throttle_min, throttle_max)
-                    publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s before resume Medium post")
-                    time.sleep(sleep_secs)
+                    _sleep_with_throttle(throttle_min, throttle_max, "resume first Medium post")
                 first_medium_in_resume = False
             elif last_medium_success_idx == item_idx - 1:
-                sleep_secs = random.uniform(throttle_min, throttle_max)
-                publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s before next Medium post")
-                time.sleep(sleep_secs)
+                _sleep_with_throttle(throttle_min, throttle_max, "next Medium post")
 
         publish_logger.info(
             f"resume publishing: {platform} id={item['id']}",
@@ -334,22 +441,16 @@ def _run_resume(args: Any) -> None:
             emit_error(str(exc), exit_code=3)
             return
         except ExternalServiceError as exc:
-            err_msg = f"service error: {exc}"
-            checkpoint.update_item(
-                run_id, item["id"], "failed",
-                error=err_msg,
-                error_class=_error_class(exc),
+            _record_resume_failure(
+                run_id, item, exc,
+                _error_class(exc), f"service error: {exc}",
             )
-            publish_logger.error(f"publish failed: {exc}", extra={"id": item["id"], "platform": platform})
             continue
         except Exception as exc:
-            err_msg = f"unexpected error: {exc}"
-            checkpoint.update_item(
-                run_id, item["id"], "failed",
-                error=err_msg,
-                error_class="unexpected",
+            _record_resume_failure(
+                run_id, item, exc,
+                "unexpected", f"unexpected error: {exc}",
             )
-            publish_logger.error(f"publish failed: {exc}", extra={"id": item["id"], "platform": platform})
             continue
 
         completed_at = datetime.now(timezone.utc).isoformat()
@@ -617,21 +718,15 @@ def main(argv: list[str] | None = None) -> None:
     skipped_unreachable_count = 0
     last_medium_success_idx: int = -1
 
-    throttle_min = int(os.environ.get("MEDIUM_THROTTLE_MIN", "60"))
-    throttle_max = int(os.environ.get("MEDIUM_THROTTLE_MAX", "300"))
+    throttle_min, throttle_max = _load_throttle_config()
 
     for row_idx, row in enumerate(rows):
-        # Throttle: sleep between Medium rows when previous was a successful Medium publish
-        if (
-            not args.dry_run
-            and row_idx > 0
-            and last_medium_success_idx == row_idx - 1
-        ):
-            platform_next = args.platform or row.get("platform", "")
-            if platform_next == "medium":
-                sleep_secs = random.uniform(throttle_min, throttle_max)
-                publish_logger.info(f"throttle: sleeping {sleep_secs:.0f}s before next Medium post")
-                time.sleep(sleep_secs)
+        _medium_throttle_sleep(
+            row_idx, last_medium_success_idx,
+            args.platform or row.get("platform", ""),
+            throttle_min, throttle_max,
+            dry_run=args.dry_run,
+        )
 
         platform = args.platform or row.get("platform", "")
         mode = args.mode or row.get("publish_mode", "draft")
@@ -650,34 +745,22 @@ def main(argv: list[str] | None = None) -> None:
                     f"[publish-backlinks] row_id={row_id} "
                     f"status=skipped_unreachable url={failing_url}"
                 )
-                outputs.append({
-                    "id": row_id,
-                    "platform": platform,
-                    "status": "skipped_unreachable",
-                    "title": row.get("title", ""),
-                    "draft_url": "",
-                    "published_url": "",
-                    "created_at": ts,
-                    "adapter": "",
-                    "error": f"target unreachable at publish-time: {failing_url}",
-                    "failing_url": failing_url,
-                })
+                outputs.append(_build_failure_row(
+                    "skipped_unreachable", row, platform,
+                    f"target unreachable at publish-time: {failing_url}",
+                    ts,
+                    failing_url=failing_url,
+                ))
                 skipped_unreachable_count += 1
                 # Leave checkpoint item in 'pending' so --resume retries.
                 continue
 
         if platform not in supported_platforms():
-            outputs.append({
-                "id": row.get("id", ""),
-                "platform": platform,
-                "status": "failed",
-                "title": row.get("title", ""),
-                "draft_url": "",
-                "published_url": "",
-                "created_at": ts,
-                "adapter": f"{platform}",
-                "error": f"unsupported platform: {platform}",
-            })
+            outputs.append(_build_failure_row(
+                "failed", row, platform,
+                f"unsupported platform: {platform}",
+                ts, adapter=platform,
+            ))
             fail_count += 1
             continue
 
@@ -750,62 +833,17 @@ def main(argv: list[str] | None = None) -> None:
             emit_error(str(exc), exit_code=3)
             return  # unreachable but satisfies type checker
         except ExternalServiceError as exc:
-            err_class = _error_class(exc)
-            err_msg = f"service error: {exc}"
-            outputs.append({
-                "id": row.get("id", ""),
-                "platform": platform,
-                "status": "failed",
-                "title": row.get("title", ""),
-                "draft_url": "",
-                "published_url": "",
-                "created_at": ts,
-                "adapter": f"{platform}",
-                "error": err_msg,
-            })
             fail_count += 1
-            if run_id is not None:
-                try:
-                    checkpoint.update_item(
-                        run_id, row.get("id", ""), "failed",
-                        error=err_msg,
-                        error_class=err_class,
-                    )
-                except Exception as ckpt_exc:
-                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
-                    run_id = None
-            publish_logger.error(
-                f"publish failed: {exc}",
-                extra={"id": row.get("id"), "platform": platform},
+            run_id = _record_publish_failure(
+                outputs, row, platform, ts, run_id, exc,
+                _error_class(exc), f"service error: {exc}",
             )
             continue
         except Exception as exc:
-            err_msg = f"unexpected error: {exc}"
-            outputs.append({
-                "id": row.get("id", ""),
-                "platform": platform,
-                "status": "failed",
-                "title": row.get("title", ""),
-                "draft_url": "",
-                "published_url": "",
-                "created_at": ts,
-                "adapter": f"{platform}",
-                "error": err_msg,
-            })
             fail_count += 1
-            if run_id is not None:
-                try:
-                    checkpoint.update_item(
-                        run_id, row.get("id", ""), "failed",
-                        error=err_msg,
-                        error_class="unexpected",
-                    )
-                except Exception as ckpt_exc:
-                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
-                    run_id = None
-            publish_logger.error(
-                f"publish failed: {exc}",
-                extra={"id": row.get("id"), "platform": platform},
+            run_id = _record_publish_failure(
+                outputs, row, platform, ts, run_id, exc,
+                "unexpected", f"unexpected error: {exc}",
             )
             continue
 

@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import json
-import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from backlink_publisher._util.markdown import render_to_html
+from backlink_publisher.logger import plan_logger
 
 from flask import Blueprint, request, session
 
+from webui_store import history_store
+
 from ..helpers import (
     _normalize_url,
+    _parse_publish_results,
     _persist_three_tier_config,
     _render,
     _verify_urls_or_error,
@@ -62,7 +69,7 @@ def ce_plan():
 
     tier_urls = [u for u in (main_url, category_url, work_url) if u]
     gate_urls = tier_urls + extra_urls
-    _survivors, gate_err = _verify_urls_or_error(gate_urls, "URL")
+    _, gate_err = _verify_urls_or_error(gate_urls, "URL")
     if gate_err:
         return _render(
             'index.html', error=gate_err,
@@ -73,7 +80,6 @@ def ce_plan():
         try:
             _persist_three_tier_config(main_url, category_url, work_url)
         except Exception as exc:
-            from backlink_publisher.logger import plan_logger
             plan_logger.warn(
                 "homepage_form_persist_failed",
                 main=main_url, reason=type(exc).__name__, detail=str(exc)[:120],
@@ -167,7 +173,33 @@ def ce_generate():
         seed['custom_tags'] = custom_tags
     if extra_urls:
         seed['extra_urls'] = extra_urls
-                error=f"解析生成结果失败。原始输出: {plans[:200]}")
+    if tdk_data and tdk_data.get('status') == 'success':
+        suggested = tdk_data.get('suggested_anchors', [])
+        if suggested:
+            seed['suggested_anchors'] = suggested
+
+    seed_json = json.dumps(seed, ensure_ascii=False)
+
+    try:
+        result = run_pipe(['plan-backlinks'], seed_json)
+        plans = result['stdout']
+        if not plans.strip():
+            error_msg = result['stderr'] or "生成失败，没有输出"
+            return _render('index.html', target_url=main_url, error=error_msg,
+                           config=stored_config)
+
+        plans_list = []
+        for line in plans.strip().split('\n'):
+            if line.strip():
+                try:
+                    plans_list.append(json.loads(line))
+                except json.JSONDecodeError as je:
+                    plan_logger.warn("json_parse_error", error=str(je), line=line[:100])
+
+        if not plans_list:
+            return _render('index.html', target_url=main_url,
+                           error=f"解析生成结果失败。原始输出: {plans[:200]}",
+                           config=stored_config)
 
         config = {
             'platform': platform, 'target_language': target_language,
@@ -221,11 +253,6 @@ def ce_publish():
                 error=result['stderr'] or "发布失败",
                 config=config, history_active=True)
 
-        from ..helpers import _parse_publish_results
-        from webui_store import history_store
-        from datetime import datetime
-        import uuid
-
         publish_results = _parse_publish_results(published)
         article_urls = [r.get('published_url') or r.get('draft_url', '')
                         for r in publish_results if r]
@@ -248,11 +275,10 @@ def ce_publish():
 
 @bp.route('/ce:preview', methods=['POST'])
 def ce_preview():
-    from backlink_publisher._util.markdown import render_to_html
     urls_json = request.form.get('urls_json', '[]')
     try:
         urls = json.loads(urls_json)
-    except:
+    except json.JSONDecodeError:
         return "Invalid URLs"
         
     seed = {
@@ -270,7 +296,7 @@ def ce_preview():
         seed['tdk'] = fetch_full_tdk(urls[0])
         
     pipe_out = run_pipe(['plan-backlinks', '-'], json.dumps([seed]))
-    content = pipe_out.stdout
+    content = pipe_out.get('stdout', '')
     
     fmt = request.args.get('format', 'md')
     if fmt == 'html':
