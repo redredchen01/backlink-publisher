@@ -1,9 +1,10 @@
 ---
 title: "feat: Plan-Doc Claims Contract + Merge-Time HEAD-Drift Gate"
 type: feat
-status: active
+status: shipped
 date: 2026-05-19
 deepened: 2026-05-19
+shipped: 2026-05-19
 origin: docs/brainstorms/2026-05-19-plan-doc-claims-and-head-drift-gate-requirements.md
 claims:
   paths:
