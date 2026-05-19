@@ -34,6 +34,7 @@ phase0-seal = "backlink_publisher.cli.phase0_seal:main"
 publish-backlinks = "backlink_publisher.cli.publish_backlinks:main"
 report-anchors = "backlink_publisher.cli.report_anchors:main"
 bind-channel = "backlink_publisher.cli.bind_channel:main"
+velog-login = "backlink_publisher.cli.velog_login:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

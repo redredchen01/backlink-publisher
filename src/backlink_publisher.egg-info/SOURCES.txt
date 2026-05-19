@@ -35,6 +35,7 @@ src/backlink_publisher/cli/plan_backlinks.py
 src/backlink_publisher/cli/publish_backlinks.py
 src/backlink_publisher/cli/report_anchors.py
 src/backlink_publisher/cli/validate_backlinks.py
+src/backlink_publisher/cli/velog_login.py
 src/backlink_publisher/cli/_bind/__init__.py
 src/backlink_publisher/cli/_bind/driver.py
 src/backlink_publisher/cli/_bind/channels/__init__.py
@@ -160,6 +161,7 @@ tests/test_url_utils.py
 tests/test_url_utils_canonicalize.py
 tests/test_validate_backlinks.py
 tests/test_validate_zh_short_payload.py
+tests/test_velog_login_alias.py
 tests/test_verify_publish.py
 tests/test_webui_checkpoint.py
 tests/test_webui_route_contract.py
