@@ -12,8 +12,8 @@
 # is `git blame` -- every intentional bump leaves a reviewable record with rationale.
 
 [files."src/backlink_publisher/cli/plan_backlinks.py"]
-ceiling = 1270
-rationale = "Largest file in the repo (SLOC 1231 at seed). Generation orchestrator: anchor handling, content-fetch gate wiring, work_themed callout. P1-queued decomposition will surface seams; lower ceiling in those landing PRs."
+ceiling = 1280
+rationale = "Largest file in the repo (SLOC 1231 at seed). Generation orchestrator: anchor handling, content-fetch gate wiring, work_themed callout. Bumped 1270→1280 to accommodate LLM anchor-provider temperature/system_prompt support (2026-05-19). P1-queued decomposition will surface seams; lower ceiling in those landing PRs."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
 ceiling = 780

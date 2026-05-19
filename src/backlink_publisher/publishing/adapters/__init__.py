@@ -33,6 +33,7 @@ from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
+from .velog_graphql import VelogGraphQLAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
@@ -40,6 +41,7 @@ from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 register("blogger", BloggerAPIAdapter)
 register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
 register("telegraph", TelegraphAPIAdapter)
+register("velog", VelogGraphQLAdapter)
 
 
 def publish(
@@ -97,6 +99,19 @@ def verify_adapter_setup(platform: str, config: Config) -> None:
         # only raises if the config_dir cannot be created (filesystem-level
         # fault) or an existing token file is malformed / wrong perms.
         verify_telegraph_setup(config)
+        return
+
+    if platform == "velog":
+        velog_cfg = config.velog
+        cookies_path = (
+            velog_cfg.cookies_path if velog_cfg else
+            config.config_dir / "velog-cookies.json"
+        )
+        if not cookies_path.exists():
+            raise DependencyError(
+                f"velog cookies not found: {cookies_path}\n"
+                "Run: backlink-publisher velog-login"
+            )
         return
 
     raise DependencyError(f"No adapter configured for platform: {platform}")
