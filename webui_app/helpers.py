@@ -428,6 +428,107 @@ def _check_csrf_or_abort() -> None:
         abort(403)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Plan 2026-05-19-003 Unit 3 — bind-route security helpers
+#
+# These stack with the existing _check_localhost (off-host network attacker)
+# and _check_csrf_or_abort (same-origin XSS) defenses. Each helper defends
+# a distinct attack class:
+#
+#   _check_localhost              — network-level (RemoteAddr filter)
+#   _check_bind_origin_or_abort   — browser-level (cross-origin + DNS rebinding)
+#   _check_csrf_or_abort          — same-origin XSS (token check)
+#   _refuse_when_allow_network    — operator-mode (hard-disable under
+#                                     BACKLINK_PUBLISHER_ALLOW_NETWORK=1)
+#
+# Plan 001 Unit 4's bind routes are expected to call all four. There is no
+# CI gate enforcing this (deferred per Plan 003 scope-guardian); coordinate
+# via PR review.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _check_bind_origin_or_abort() -> None:
+    """Reject browser-originated cross-origin POSTs and DNS rebinding.
+
+    Decision tree:
+      1. ``Origin`` present and allowlisted (loopback host + ``_FLASK_PORT``
+         + HTTP scheme) → check Referer if also present.
+      2. ``Origin`` present but not allowlisted (including ``null``) → 403.
+      3. ``Origin`` absent + ``Referer`` present and allowlisted → pass.
+         (Some browsers strip Origin from same-site POSTs; Referer is the
+         legitimate fallback signal.)
+      4. ``Origin`` absent + ``Referer`` absent → 403 (state-changing
+         routes MUST carry at least one signal).
+      5. When both Origin and Referer are present, BOTH must allowlist —
+         a mismatch indicates an off-origin redirect chain.
+
+    HTTPS Origin claiming a loopback host is rejected: our webui is
+    HTTP-only on loopback; an HTTPS origin is a TLS-stripping vector.
+    """
+    from flask import abort
+    from urllib.parse import urlparse
+
+    origin = request.headers.get("Origin")
+    referer = request.headers.get("Referer")
+
+    def _is_allowlisted(url: str | None) -> bool:
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return False
+        if parsed.scheme != "http":
+            return False
+        host = (parsed.hostname or "").lower()
+        if host not in _LOOPBACK_HOSTS:
+            return False
+        # Default port for http is 80; absent port means 80, which
+        # doesn't match _FLASK_PORT. Compare explicit ports only.
+        if parsed.port != _FLASK_PORT:
+            return False
+        return True
+
+    origin_ok = _is_allowlisted(origin) if origin else None  # None = absent
+    referer_ok = _is_allowlisted(referer) if referer else None
+
+    if origin is not None and not origin_ok:
+        abort(403)
+    if referer is not None and not referer_ok:
+        abort(403)
+    if origin is None and referer is None:
+        abort(403)
+    # At this point: at least one signal is present and that signal
+    # allowlists. If both are present, both allowlist. Pass.
+
+
+def _refuse_when_allow_network() -> None:
+    """Hard-disable bind endpoints when the operator has opted into
+    network exposure via ``BACKLINK_PUBLISHER_ALLOW_NETWORK=1``.
+
+    Returns 403 with a JSON body carrying the discriminator
+    ``"bind_disabled_under_allow_network"`` so the operator / UI knows
+    this isn't a generic auth or CSRF rejection. Plan 003 Key Technical
+    Decisions reserves the future env var name ``BACKLINK_PUBLISHER_BIND_
+    TOKEN`` for a possible v1.1 escape hatch (not implemented here).
+    """
+    if os.environ.get("BACKLINK_PUBLISHER_ALLOW_NETWORK") == "1":
+        from flask import abort, make_response, jsonify
+        response = make_response(
+            jsonify(
+                error="bind_disabled_under_allow_network",
+                message=(
+                    "Bind endpoints are disabled when "
+                    "BACKLINK_PUBLISHER_ALLOW_NETWORK=1. Bind in v1 "
+                    "requires loopback-only access; un-set the env var, "
+                    "bind locally, then re-export it."
+                ),
+            ),
+            403,
+        )
+        abort(response)
+
+
 def _parse_lines(raw: str) -> list[str]:
     if not raw:
         return []
@@ -777,6 +878,7 @@ __all__ = [
     '_check_localhost', '_validate_webui_run_id',
     '_oauth_callback_uri', '_resolve_bind_host',
     '_ensure_csrf_token', '_check_csrf_or_abort',
+    '_check_bind_origin_or_abort', '_refuse_when_allow_network',
     '_parse_lines',
     '_wire_content_fetch_ttl_from_env',
     '_derive_branded_pool', '_derive_partial_pool', '_derive_exact_pool',
