@@ -1,28 +1,36 @@
 """Medium browser fallback adapter using Playwright.
 
-Storage convergence (Plan 2026-05-19-003 Unit 6):
-The adapter loads its credential from ``<config_dir>/medium-storage-state.json``
-(written by ``bind-channel medium``, Plan 2026-05-19-001 Unit 2) via
-``new_context(storage_state=...)``. The legacy ``launch_persistent_context``
-flow that read from ``~/.config/backlink-publisher/chrome-profile-default/``
-is removed; that directory is unused as of Plan 003 and gets a one-time
-deprecation notice on adapter import-detection.
+Cookies-only hard-cut (Plan 2026-05-19-005 Unit 1):
+The adapter loads its credential from ``<config_dir>/medium-cookies.json``
+(velog-style schema, written by ``bind-channel medium`` /
+``medium-login``). Replaces the Plan 003 Unit 6 contract that read
+``medium-storage-state.json`` via ``new_context(storage_state=...)``;
+that file is no longer written and no longer read. Operators upgrading
+across this PR must re-run ``medium-login`` (or ``bind-channel medium``)
+once to repopulate the cookies file — the friendly DependencyError below
+spells out exactly what to do.
+
+Load path: ``new_context()`` (no storage_state) then
+``context.add_cookies([...])`` with the apex-filtered cookies recipe
+post_persist wrote. No localStorage / IndexedDB / origins are consumed —
+Medium's auth state lives entirely in HttpOnly cookies (Spike 3a
+verdict).
 
 On ``/m/signin`` redirect during publish: writes ``mark_expired('medium')``
 (channel_status_store, Plan 001 Unit 1) inside a try/except so filesystem
 failure doesn't mask the auth error, then raises ``AuthExpiredError(
-channel='medium', reason=...)`` (Plan 001 Unit 1 class). The operator
-re-binds via the webui Settings page.
+channel='medium', reason=...)``. The operator re-runs ``medium-login``.
 
-On successful publish: refreshes ``medium-storage-state.json`` via
-``context.storage_state(path=...)`` with atomic temp+rename so Medium's
-rotated session cookies stay fresh.
+On successful publish: refreshes ``medium-cookies.json`` via
+``context.cookies('https://medium.com')`` (apex filter) with atomic
+temp+rename so Medium's rotated session cookies stay fresh.
 
 Always runs headed (Medium detects headless aggressively).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import tempfile
@@ -53,12 +61,7 @@ except ImportError:  # pragma: no cover — tested via DependencyError path
     PlaywrightTimeoutError = Exception  # type: ignore[assignment,misc]
 
 
-# Module-level flag for once-per-process legacy-dir notice.
-_LEGACY_NOTICE_LOGGED = False
-
-
 def _json_log(**kwargs: Any) -> str:
-    import json
     return json.dumps(kwargs)
 
 
@@ -73,15 +76,61 @@ def _paste_key() -> str:
     return "Meta+V" if platform.system() == "Darwin" else "Control+V"
 
 
-def _storage_state_path() -> Path:
-    """Plan 003 Unit 6: ``<config_dir>/medium-storage-state.json``.
+def _cookies_path() -> Path:
+    """Plan 2026-05-19-005 Unit 1: ``<config_dir>/medium-cookies.json``.
 
     Single source of truth for Medium browser credentials. Written by
-    ``bind-channel medium`` (Plan 001 Unit 2); read by this adapter via
-    ``new_context(storage_state=...)``; refreshed on every successful
-    publish to keep up with Medium's session cookie rotation.
+    ``bind-channel medium`` recipe post_persist (or ``medium-login``);
+    read by this adapter via ``context.add_cookies([...])``; refreshed
+    on every successful publish to keep up with Medium's session cookie
+    rotation.
     """
-    return _config_dir() / "medium-storage-state.json"
+    return _config_dir() / "medium-cookies.json"
+
+
+def _load_medium_cookies() -> list[dict[str, Any]]:
+    """Read ``medium-cookies.json`` and return the cookies list.
+
+    Raises ``DependencyError`` if (a) the file is missing — operator
+    needs to run ``medium-login``; (b) the file is not mode 0600 —
+    refuse to load creds with leaky perms; (c) JSON is malformed.
+    All three errors carry the absolute path so the operator can fix
+    them without ambiguity.
+    """
+    path = _cookies_path()
+    if not path.exists():
+        raise DependencyError(
+            f"medium-cookies.json not found at {path}. Run `medium-login` "
+            f"(or `bind-channel --channel medium`) to bind your Medium "
+            f"session. Pre-Plan-005 storage_state.json is no longer read."
+        )
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError as exc:
+        raise DependencyError(
+            f"medium-cookies.json at {path} is unreadable: {exc}"
+        ) from exc
+    if mode != 0o600:
+        raise DependencyError(
+            f"medium-cookies.json at {path} has mode {oct(mode)}, expected "
+            f"0o600. Run `chmod 600 {path}` (or re-run `medium-login` "
+            f"which will write 0600)."
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DependencyError(
+            f"medium-cookies.json at {path} is invalid: "
+            f"{type(exc).__name__}: {exc}. Re-run `medium-login`."
+        ) from exc
+    cookies = payload.get("cookies", [])
+    if not isinstance(cookies, list):
+        raise DependencyError(
+            f"medium-cookies.json at {path} has malformed 'cookies' field "
+            f"(expected list, got {type(cookies).__name__}). Re-run "
+            f"`medium-login`."
+        )
+    return cookies
 
 
 def _safe_mark_expired() -> None:
@@ -101,23 +150,31 @@ def _safe_mark_expired() -> None:
         )
 
 
-def _refresh_storage_state(context: Any) -> None:
-    """Atomically refresh ``medium-storage-state.json`` from the current
-    Playwright context's cookies (Medium rotates session cookies during
-    publish flows). Best-effort: failure here is logged but does NOT fail
-    the publish — the credentials are merely slightly stale, not invalid."""
-    target = _storage_state_path()
+def _refresh_cookies(context: Any) -> None:
+    """Atomically refresh ``medium-cookies.json`` from the current Playwright
+    context's cookies (Medium rotates session cookies during publish flows).
+    Best-effort: failure here is logged but does NOT fail the publish —
+    the credentials are merely slightly stale, not invalid."""
+    target = _cookies_path()
     try:
+        # Apex-only filter (matches recipe host filter — defense in depth).
+        try:
+            live_cookies = context.cookies("https://medium.com") or []
+        except Exception:
+            live_cookies = []
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
-            prefix=".medium-storage-state.",
+            prefix=".medium-cookies.",
             suffix=".tmp",
             dir=str(target.parent),
         )
         os.close(fd)
         tmp_path = Path(tmp_name)
         try:
-            context.storage_state(path=str(tmp_path))
+            tmp_path.write_text(
+                json.dumps({"cookies": live_cookies}, ensure_ascii=False),
+                encoding="utf-8",
+            )
             os.chmod(tmp_path, 0o600)
             os.replace(tmp_path, target)
         except Exception:
@@ -129,41 +186,9 @@ def _refresh_storage_state(context: Any) -> None:
             raise
     except Exception as exc:  # noqa: BLE001 — best-effort refresh
         log.warn(
-            f"medium_browser: failed to refresh storage_state.json: "
+            f"medium_browser: failed to refresh medium-cookies.json: "
             f"{type(exc).__name__}: {exc}"
         )
-
-
-def _emit_legacy_notice(config: Config) -> None:
-    """Log once-per-process if the legacy persistent profile dir from
-    pre-Unit-6 builds is still on disk.
-
-    The directory at ``~/.config/backlink-publisher/chrome-profile-default/``
-    (or wherever ``config.medium_user_data_dir`` pointed) is unused by this
-    adapter as of Plan 003 Unit 6. Existing operators are advised to
-    re-bind via the webui Settings page and then delete the legacy dir.
-    Suppress with ``BACKLINK_PUBLISHER_MEDIUM_LEGACY_NOTICE=0``.
-    """
-    global _LEGACY_NOTICE_LOGGED
-    if _LEGACY_NOTICE_LOGGED:
-        return
-    if os.environ.get("BACKLINK_PUBLISHER_MEDIUM_LEGACY_NOTICE", "1") == "0":
-        _LEGACY_NOTICE_LOGGED = True
-        return
-    legacy = config.medium_user_data_dir or (config.config_dir / "chrome-profile-default")
-    try:
-        if legacy.is_dir() and not legacy.is_symlink():
-            log.info(
-                f"medium_browser: legacy Chromium profile dir at {legacy} is "
-                f"unused as of Plan 2026-05-19-003 Unit 6. Re-bind via "
-                f"`bind-channel medium` or the webui Settings page; the "
-                f"legacy dir is safe to delete after verifying the new "
-                f"storage_state.json. Suppress this notice with "
-                f"BACKLINK_PUBLISHER_MEDIUM_LEGACY_NOTICE=0."
-            )
-    except OSError:
-        pass  # stat-on-missing is fine; we're only advising
-    _LEGACY_NOTICE_LOGGED = True
 
 
 class MediumBrowserAdapter(Publisher):
@@ -180,30 +205,19 @@ class MediumBrowserAdapter(Publisher):
                 "Playwright is not installed. Run: playwright install chromium"
             )
 
-        # Plan 2026-05-19-003 Unit 6: log once-per-process if the legacy
-        # persistent profile dir is on disk (operator UX nudge to re-bind).
-        _emit_legacy_notice(config)
-
         article_id = payload.get("id", "")
         t0 = time.monotonic()
         log.info(_json_log(adapter="medium-browser", phase="start", id=article_id))
 
-        # Plan 003 Unit 6: storage_state.json is the credential. Absent file
-        # means the operator has never run `bind-channel medium` (or
-        # storage was wiped). Mark expired + raise AuthExpiredError BEFORE
-        # launching Playwright so the operator sees a fast actionable error
-        # rather than a 30s page-goto timeout.
-        storage_state = _storage_state_path()
-        if not storage_state.exists():
-            _safe_mark_expired()
-            raise AuthExpiredError(
-                channel="medium",
-                reason=(
-                    f"storage_state.json missing at {storage_state}; run "
-                    f"`bind-channel medium` or use the webui Settings page "
-                    f"to bind first"
-                ),
-            )
+        # Plan 2026-05-19-005 Unit 1: cookies.json is the credential. Load
+        # + validate (0600 + JSON shape) BEFORE launching Playwright so the
+        # operator sees a fast actionable error rather than a 30s page-goto
+        # timeout. _load_medium_cookies raises DependencyError on missing /
+        # wrong-mode / malformed — DependencyError lets the dispatcher try
+        # the next adapter in the chain (Brave/Browser), but for missing
+        # cookies that's pointless (they'd hit the same file) so a CLI/log
+        # message with the medium-login command is more actionable.
+        cookies = _load_medium_cookies()
 
         # Plan 2026-05-18-006 Unit 5 R9: medium is platform-tier (b)
         # (browser-paste WYSIWYG sanitize is lossy) — helper renders MD even
@@ -216,14 +230,16 @@ class MediumBrowserAdapter(Publisher):
         def _run_browser_publish() -> AdapterResult:
             """One full browser publish attempt — opens and closes its own context."""
             with sync_playwright() as pw:
-                # Plan 003 Unit 6: non-persistent launch + storage_state from
-                # the bind output. Playwright manages an ephemeral profile
-                # dir internally and cleans up on browser.close().
+                # Plan 2026-05-19-005 Unit 1: non-persistent launch + cookies
+                # injected via add_cookies. Playwright manages an ephemeral
+                # profile dir internally and cleans up on browser.close().
                 browser = pw.chromium.launch(
                     headless=False,
                     args=["--disable-blink-features=AutomationControlled"],
                 )
-                context = browser.new_context(storage_state=str(storage_state))
+                context = browser.new_context()
+                if cookies:
+                    context.add_cookies(cookies)
                 page = context.new_page()
                 try:
                     context.grant_permissions(
@@ -250,17 +266,17 @@ class MediumBrowserAdapter(Publisher):
                             pass  # probe failed; let retry handle the timeout
                         raise  # re-raise PlaywrightTimeoutError for retry_transient_call
 
-                    # Plan 003 Unit 6: detect login redirect; mark expired +
-                    # raise AuthExpiredError (replaces the old
-                    # ExternalServiceError("Medium login expired...") path).
+                    # Plan 2026-05-19-005 Unit 1: detect login redirect;
+                    # mark expired + raise AuthExpiredError. Operator must
+                    # re-run medium-login (or bind-channel medium).
                     if sel.LOGIN_PATH in page.url:
                         _safe_mark_expired()
                         raise AuthExpiredError(
                             channel="medium",
                             reason=(
                                 "redirected to /m/signin during publish; "
-                                "storage_state cookies are no longer valid — "
-                                "re-bind via the webui Settings page"
+                                "cookies in medium-cookies.json are no "
+                                "longer valid — re-run `medium-login`"
                             ),
                         )
 
@@ -319,11 +335,12 @@ class MediumBrowserAdapter(Publisher):
                         )
                     )
 
-                    # Plan 003 Unit 6: refresh storage_state.json from the
-                    # current context (Medium rotates session cookies during
-                    # publish). Best-effort: failure here is logged but does
-                    # NOT fail the publish — cookies are merely slightly stale.
-                    _refresh_storage_state(context)
+                    # Plan 2026-05-19-005 Unit 1: refresh medium-cookies.json
+                    # from the current context (Medium rotates session cookies
+                    # during publish). Best-effort: failure here is logged
+                    # but does NOT fail the publish — cookies are merely
+                    # slightly stale, not invalid.
+                    _refresh_cookies(context)
 
                     context.close()
                     browser.close()

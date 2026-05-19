@@ -1,20 +1,22 @@
 """Tests for MediumBrowserAdapter (Playwright mocked).
 
-Plan 2026-05-19-003 Unit 6: adapter rewritten to use ``new_context(
-storage_state=...)`` instead of ``launch_persistent_context``. Tests
+Plan 2026-05-19-005 Unit 1: adapter hard-cut from
+``new_context(storage_state=<medium-storage-state.json>)`` to
+``new_context() + context.add_cookies(<medium-cookies.json>)``. Tests
 updated to mock the new API surface and to exercise:
 
-- ``storage_state.json`` absent → ``mark_expired`` + ``AuthExpiredError``
-  raised BEFORE Playwright launches.
+- ``medium-cookies.json`` absent → ``DependencyError`` raised BEFORE
+  Playwright launches; message points operator at ``medium-login``.
+- ``medium-cookies.json`` mode != 0o600 → ``DependencyError``.
+- ``medium-cookies.json`` malformed JSON → ``DependencyError``.
 - ``/m/signin`` redirect during publish → ``mark_expired`` called +
-  ``AuthExpiredError`` raised (replaces old ``ExternalServiceError``).
-- Successful publish refreshes ``storage_state.json`` via
-  ``context.storage_state(path=...)``.
-- Legacy ``chrome-profile-default/`` dir triggers a one-time notice.
+  ``AuthExpiredError`` raised (Plan 003 behavior preserved).
+- Successful publish refreshes ``medium-cookies.json`` via
+  ``context.cookies('https://medium.com')``.
 
 All tests use the autouse ``_isolate_user_dirs`` fixture (from conftest)
 to point ``_config_dir()`` at a per-session tmp dir, and pre-create the
-``medium-storage-state.json`` file inside that dir.
+``medium-cookies.json`` file inside that dir.
 """
 
 from pathlib import Path
@@ -43,18 +45,19 @@ CONFIG = Config(medium_user_data_dir=Path("/tmp/test-chrome-profile"))
 
 
 @pytest.fixture(autouse=True)
-def _prepare_storage_state(monkeypatch):
-    """Pre-create ``<config_dir>/medium-storage-state.json`` so the adapter
-    finds a credential to load. Reset the legacy-notice flag between tests."""
+def _prepare_cookies(monkeypatch):
+    """Pre-create ``<config_dir>/medium-cookies.json`` (0600) so the adapter
+    finds a credential to load. Each test starts with one apex-cookie."""
+    import os
     cfg = _config_dir()
     cfg.mkdir(parents=True, exist_ok=True)
-    storage = cfg / "medium-storage-state.json"
-    if not storage.exists():
-        storage.write_text('{"cookies": [], "origins": []}')
-
-    # Reset module-level once-per-process legacy notice flag
-    import backlink_publisher.publishing.adapters.medium_browser as mod
-    monkeypatch.setattr(mod, "_LEGACY_NOTICE_LOGGED", False, raising=False)
+    cookies_path = cfg / "medium-cookies.json"
+    cookies_path.write_text(
+        '{"cookies": [{"name": "sid", "value": "test-sid", '
+        '"domain": "medium.com", "path": "/", "httpOnly": true, '
+        '"secure": true, "sameSite": "Lax"}]}'
+    )
+    os.chmod(cookies_path, 0o600)
 
 
 @pytest.fixture(autouse=True)
@@ -69,8 +72,9 @@ def _reset_channel_status(monkeypatch):
 
 
 def make_mock_pw(page_url="https://medium.com/@user/test-draft-abc123"):
-    """Build a Playwright mock for the Plan 003 Unit 6 API:
-    ``launch() + browser.new_context(storage_state=...) + context.new_page()``.
+    """Build a Playwright mock for the Plan 005 Unit 1 API:
+    ``launch() + browser.new_context() + context.add_cookies(...) +
+    context.new_page()``.
     """
     mock_page = MagicMock()
     mock_page.url = page_url
@@ -83,8 +87,12 @@ def make_mock_pw(page_url="https://medium.com/@user/test-draft-abc123"):
     mock_context.new_page.return_value = mock_page
     mock_context.__enter__ = MagicMock(return_value=mock_context)
     mock_context.__exit__ = MagicMock(return_value=False)
-    # storage_state(path=...) writes the refresh file; just no-op in tests
-    mock_context.storage_state = MagicMock()
+    # context.cookies(...) returns fresh cookies for refresh path
+    mock_context.cookies.return_value = [
+        {"name": "sid", "value": "refreshed-sid", "domain": "medium.com",
+         "path": "/", "httpOnly": True, "secure": True, "sameSite": "Lax"}
+    ]
+    mock_context.add_cookies = MagicMock()
 
     mock_browser = MagicMock()
     mock_browser.new_context.return_value = mock_context
@@ -128,22 +136,27 @@ def test_publish_mode_clicks_publish_button(mock_sync_pw):
 
 
 @patch("backlink_publisher.adapters.medium_browser.sync_playwright")
-def test_uses_new_context_with_storage_state(mock_sync_pw):
-    """Plan 003 Unit 6 contract: adapter MUST load credentials via
-    ``new_context(storage_state=<path>)``, NOT via
-    ``launch_persistent_context(user_data_dir)``."""
+def test_uses_add_cookies_not_storage_state(mock_sync_pw):
+    """Plan 005 Unit 1 contract: adapter MUST load credentials via
+    ``new_context() + add_cookies([...])``, NOT via
+    ``new_context(storage_state=...)`` (Plan 003 contract is gone)."""
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
     mock_sync_pw.return_value = mock_pw
 
     adapter = MediumBrowserAdapter()
     adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
 
-    # new_context called with storage_state pointing at the config_dir path
+    # new_context was called WITHOUT storage_state kwarg
     new_context_call = mock_br.new_context.call_args
     assert new_context_call is not None
-    storage_state_arg = new_context_call.kwargs.get("storage_state")
-    assert storage_state_arg is not None
-    assert "medium-storage-state.json" in storage_state_arg
+    assert "storage_state" not in new_context_call.kwargs
+
+    # add_cookies was called with the apex-cookie from the fixture
+    assert mock_ctx.add_cookies.call_count == 1
+    cookies_arg = mock_ctx.add_cookies.call_args.args[0]
+    assert isinstance(cookies_arg, list)
+    assert any(c.get("name") == "sid" and c.get("domain") == "medium.com"
+               for c in cookies_arg)
 
     # launch was called (NOT launch_persistent_context)
     mock_pw.chromium.launch.assert_called_once()
@@ -151,57 +164,106 @@ def test_uses_new_context_with_storage_state(mock_sync_pw):
 
 
 @patch("backlink_publisher.adapters.medium_browser.sync_playwright")
-def test_success_refreshes_storage_state(mock_sync_pw):
-    """Plan 003 Unit 6: successful publish refreshes storage_state.json
-    via context.storage_state(path=...) so rotated session cookies stay
-    fresh."""
+def test_success_refreshes_cookies_json(mock_sync_pw):
+    """Plan 005 Unit 1: successful publish refreshes medium-cookies.json
+    via context.cookies('https://medium.com') so rotated session cookies
+    stay fresh."""
+    import json
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
     mock_sync_pw.return_value = mock_pw
 
     adapter = MediumBrowserAdapter()
     adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
 
-    # context.storage_state was called once with a path keyword
-    mock_ctx.storage_state.assert_called_once()
-    storage_call_kwargs = mock_ctx.storage_state.call_args.kwargs
-    assert "path" in storage_call_kwargs
+    # context.cookies was called with the apex URL
+    mock_ctx.cookies.assert_called_with("https://medium.com")
+
+    # File on disk reflects the refresh
+    cookies_path = _config_dir() / "medium-cookies.json"
+    payload = json.loads(cookies_path.read_text())
+    assert payload["cookies"][0]["value"] == "refreshed-sid"
 
 
-# ─── Auth-expired paths ───
-
-
-def test_storage_state_absent_raises_auth_expired():
-    """Plan 003 Unit 6: storage_state.json missing → mark_expired +
-    AuthExpiredError raised BEFORE Playwright launches."""
-    storage = _config_dir() / "medium-storage-state.json"
-    if storage.exists():
-        storage.unlink()
-
-    adapter = MediumBrowserAdapter()
-    with pytest.raises(AuthExpiredError) as excinfo:
-        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
-    assert excinfo.value.channel == "medium"
-    assert "storage_state.json missing" in (excinfo.value.reason or "")
-
-
-def test_storage_state_absent_marks_expired_in_store():
-    """mark_expired('medium') is called when storage_state.json absent."""
-    storage = _config_dir() / "medium-storage-state.json"
-    if storage.exists():
-        storage.unlink()
+@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+def test_refreshed_cookies_file_is_0600(mock_sync_pw):
+    """Plan 005 Unit 1 R3: the refresh must preserve 0o600 mode."""
+    mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
+    mock_sync_pw.return_value = mock_pw
 
     adapter = MediumBrowserAdapter()
-    with pytest.raises(AuthExpiredError):
-        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
 
-    from webui_store.channel_status import get_status
-    assert get_status("medium")["status"] == "expired"
+    cookies_path = _config_dir() / "medium-cookies.json"
+    assert (cookies_path.stat().st_mode & 0o777) == 0o600
+
+
+# ─── Credential-missing / bad-mode / malformed paths ───
+
+
+def test_cookies_absent_raises_dependency_error():
+    """Plan 005 Unit 1: medium-cookies.json missing → DependencyError with
+    actionable message pointing at medium-login. NOT AuthExpiredError —
+    missing creds is a setup state, not an auth-expired state."""
+    cookies_path = _config_dir() / "medium-cookies.json"
+    if cookies_path.exists():
+        cookies_path.unlink()
+
+    adapter = MediumBrowserAdapter()
+    with pytest.raises(DependencyError) as excinfo:
+        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert "medium-cookies.json not found" in str(excinfo.value)
+    assert "medium-login" in str(excinfo.value)
+
+
+def test_cookies_wrong_mode_raises_dependency_error():
+    """Plan 005 Unit 1 R3: medium-cookies.json with mode != 0o600 →
+    fail-loud DependencyError (don't trust leaky creds)."""
+    import os
+    cookies_path = _config_dir() / "medium-cookies.json"
+    os.chmod(cookies_path, 0o644)
+
+    adapter = MediumBrowserAdapter()
+    with pytest.raises(DependencyError) as excinfo:
+        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert "0o600" in str(excinfo.value)
+    assert "0o644" in str(excinfo.value)
+
+
+def test_cookies_malformed_json_raises_dependency_error():
+    """Plan 005 Unit 1: corrupt JSON → DependencyError pointing at
+    medium-login for re-binding."""
+    import os
+    cookies_path = _config_dir() / "medium-cookies.json"
+    cookies_path.write_text("{not valid json")
+    os.chmod(cookies_path, 0o600)
+
+    adapter = MediumBrowserAdapter()
+    with pytest.raises(DependencyError) as excinfo:
+        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert "invalid" in str(excinfo.value).lower()
+    assert "medium-login" in str(excinfo.value)
+
+
+def test_cookies_wrong_shape_raises_dependency_error():
+    """``cookies`` field must be a list. Anything else → DependencyError."""
+    import os
+    cookies_path = _config_dir() / "medium-cookies.json"
+    cookies_path.write_text('{"cookies": "not a list"}')
+    os.chmod(cookies_path, 0o600)
+
+    adapter = MediumBrowserAdapter()
+    with pytest.raises(DependencyError) as excinfo:
+        adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
+    assert "malformed" in str(excinfo.value).lower()
+
+
+# ─── Auth-expired during publish (unchanged from Plan 003) ───
 
 
 @patch("backlink_publisher.adapters.medium_browser.sync_playwright")
 def test_login_redirect_raises_auth_expired_error(mock_sync_pw):
-    """Plan 003 Unit 6: /m/signin redirect during publish raises
-    AuthExpiredError (was ExternalServiceError in pre-Unit-6 code)."""
+    """``/m/signin`` redirect during publish raises AuthExpiredError — this
+    is genuinely auth-expired (cookies are stale, not missing)."""
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
     mock_page.url = "https://medium.com/m/signin?redirect=..."
     mock_sync_pw.return_value = mock_pw
@@ -211,11 +273,12 @@ def test_login_redirect_raises_auth_expired_error(mock_sync_pw):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
     assert excinfo.value.channel == "medium"
     assert "/m/signin" in (excinfo.value.reason or "")
+    assert "medium-login" in (excinfo.value.reason or "")
 
 
 @patch("backlink_publisher.adapters.medium_browser.sync_playwright")
 def test_login_redirect_marks_expired_in_store(mock_sync_pw):
-    """mark_expired('medium') is called when /m/signin redirect detected."""
+    """``mark_expired('medium')`` is called when /m/signin redirect detected."""
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
     mock_page.url = "https://medium.com/m/signin?redirect=..."
     mock_sync_pw.return_value = mock_pw
@@ -289,6 +352,7 @@ def test_playwright_timeout_retried_and_recovers(mock_sync_pw, mock_sleep):
             fail_ctx.new_page.return_value = fail_page
             fail_ctx.__enter__ = MagicMock(return_value=fail_ctx)
             fail_ctx.__exit__ = MagicMock(return_value=False)
+            fail_ctx.add_cookies = MagicMock()
 
             fail_br = MagicMock()
             fail_br.new_context.return_value = fail_ctx
@@ -326,6 +390,7 @@ def test_captcha_after_timeout_not_retried(mock_sync_pw, mock_sleep):
 
     mock_ctx = MagicMock()
     mock_ctx.new_page.return_value = mock_page
+    mock_ctx.add_cookies = MagicMock()
 
     mock_br = MagicMock()
     mock_br.new_context.return_value = mock_ctx
@@ -361,44 +426,3 @@ def test_html_clipboard_content_matches_render(mock_sync_pw):
     assert any(expected_html in arg for arg in html_args), (
         f"Expected rendered HTML in clipboard evaluate args. Got: {html_args}"
     )
-
-
-# ─── Legacy-dir notice ───
-
-
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
-def test_legacy_dir_notice_logs_once_per_process(mock_sync_pw, monkeypatch, tmp_path, caplog):
-    """Plan 003 Unit 6 / Unit 2.5: if legacy chrome-profile-default/ exists,
-    log a once-per-process deprecation notice."""
-    import logging
-    caplog.set_level(logging.INFO)
-
-    mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
-    mock_sync_pw.return_value = mock_pw
-
-    # Synthesize a legacy dir at the config-derived location used by the
-    # notice helper (we point medium_user_data_dir at a real temp dir).
-    legacy_dir = tmp_path / "chrome-profile-default"
-    legacy_dir.mkdir()
-    cfg = Config(medium_user_data_dir=legacy_dir)
-
-    adapter = MediumBrowserAdapter()
-    adapter.publish(PAYLOAD, mode="draft", config=cfg)
-    adapter.publish(PAYLOAD, mode="draft", config=cfg)  # second call: no extra log
-
-
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
-def test_legacy_notice_suppressed_by_env(mock_sync_pw, monkeypatch, tmp_path):
-    """``BACKLINK_PUBLISHER_MEDIUM_LEGACY_NOTICE=0`` suppresses the notice."""
-    monkeypatch.setenv("BACKLINK_PUBLISHER_MEDIUM_LEGACY_NOTICE", "0")
-
-    mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
-    mock_sync_pw.return_value = mock_pw
-
-    legacy_dir = tmp_path / "chrome-profile-default"
-    legacy_dir.mkdir()
-    cfg = Config(medium_user_data_dir=legacy_dir)
-
-    adapter = MediumBrowserAdapter()
-    # Should not raise; suppression is best-effort and silent.
-    adapter.publish(PAYLOAD, mode="draft", config=cfg)
