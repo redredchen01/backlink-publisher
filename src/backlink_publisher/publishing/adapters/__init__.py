@@ -191,9 +191,12 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
     if platform == "ghpages":
         return _verify_ghpages_live(config)
 
+    if platform == "blogger":
+        return _verify_blogger_live(config)
+
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
-    # than fake-green. Per-adapter live impls (Medium /me, Blogger users.get,
-    # Velog currentUser) land in follow-up PRs (#93 / #95 / others).
+    # than fake-green. Per-adapter live impls (Medium /me, Velog currentUser)
+    # land in follow-up PRs (#95 / others).
     return VerifyResult(
         ok=True,
         last_verify_result="unverifiable_live",
@@ -392,6 +395,109 @@ def _verify_ghpages_live(config: Config) -> VerifyResult:
         )
 
     identity = body.get("login") or body.get("name")
+    return VerifyResult(
+        ok=True,
+        identity=identity,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=True,
+    )
+
+
+_BLOGGER_USERS_SELF = "https://www.googleapis.com/blogger/v3/users/self"
+_BLOGGER_VERIFY_TIMEOUT_S = 5
+
+
+def _verify_blogger_live(config: Config) -> VerifyResult:
+    """GET ``blogger/v3/users/self`` with the stored access_token as Bearer.
+
+    Plan 2026-05-19-006 Unit 6c — replaces the stub for blogger.
+
+    Strict read-only: the stored ``blogger-token.json`` is NEVER mutated.
+    OAuth refresh (and the corresponding ``save_blogger_token`` write) is a
+    publish-path concern — verify reads whatever access_token is currently
+    on disk and reports the outcome. Practical consequence: an operator who
+    has not published in over an hour will see ``token_expired`` until they
+    re-bind or publish once. The dashboard surfaces a hint to re-bind; this
+    is the deliberate trade for the read-only invariant that protects token
+    files from being rotated by an observe-only UI action.
+
+    Status mapping:
+      - 200 → ``ok`` with identity=displayName, dofollow=True
+      - 401 → ``token_expired`` (operator action: re-bind)
+      - ``requests.Timeout`` → ``timeout``
+      - everything else (403/5xx/connection/parse) → ``never``
+    """
+    import requests
+    from backlink_publisher.config import load_blogger_token
+
+    try:
+        token_data = load_blogger_token(config.blogger_token_path)
+    except Exception as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"blogger token file unreadable: {e}"],
+        )
+
+    access_token = (token_data or {}).get("token")
+    if not access_token:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[
+                "blogger access token not stored yet (bind via /settings or publish once)"
+            ],
+        )
+
+    try:
+        resp = requests.get(
+            _BLOGGER_USERS_SELF,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=_BLOGGER_VERIFY_TIMEOUT_S,
+        )
+    except requests.Timeout:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="timeout",
+            blockers=[
+                f"blogger users.self timed out after {_BLOGGER_VERIFY_TIMEOUT_S}s"
+            ],
+        )
+    except requests.RequestException as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"blogger network failure: {e}"],
+        )
+
+    if resp.status_code == 401:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="token_expired",
+            blockers=[
+                "blogger access token expired or revoked — re-bind from /settings "
+                "(access tokens are 1h; refresh happens on publish)"
+            ],
+        )
+
+    if resp.status_code != 200:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"blogger users.self returned HTTP {resp.status_code}"],
+        )
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["blogger returned non-JSON response"],
+        )
+
+    identity = body.get("displayName") or body.get("id")
     return VerifyResult(
         ok=True,
         identity=identity,
