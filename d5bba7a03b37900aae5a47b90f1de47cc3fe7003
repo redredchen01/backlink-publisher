@@ -1,0 +1,12 @@
+{
+  "unit": "unit2",
+  "branch": "feat/telegraph-adapter-unit2-smoke",
+  "main_sha": "a05a6a14334dae85379d6de27d024942a424456b",
+  "sealed_at": "2026-05-19T06:22:39Z",
+  "sealed_by": "operator:smoke-bootstrap",
+  "verdict_ref": {
+    "kind": "manual",
+    "evidence_path": "docs/phase0/smoke-evidence.md",
+    "evidence_sha256": "d11fb6c40c72ab0e844be0460c6a24dfa059697cf963680077395eba9c5d3cd6"
+  }
+}
