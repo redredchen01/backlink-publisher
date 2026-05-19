@@ -332,20 +332,34 @@ def run_bind(
     # security control.
     _promote_last_account_if_pending(channel)
 
+    # Plan 2026-05-19-005 Unit 1: optional recipe-specific post_persist hook.
+    # The medium recipe uses this to convert storage_state.json → cookies-only
+    # medium-cookies.json + medium-meta.json (for the future MediumGraphQLAdapter
+    # consumer) and unlink the now-redundant storage_state.json. Returns the
+    # new canonical credential path; if the hook returns None, the driver keeps
+    # the original storage_state path. Failure inside post_persist propagates
+    # — the bind is NOT marked successful if the hook fails, because consumers
+    # downstream of mark_bound rely on the canonical-path contract.
+    canonical_path: Path = persisted
+    if recipe.post_persist is not None:
+        replacement = recipe.post_persist(_config_dir(), persisted)
+        if replacement is not None:
+            canonical_path = replacement
+
     # Status flip lives at the end — only AFTER the file is on disk 0600.
     from webui_store.channel_status import mark_bound
-    mark_bound(channel, persisted)
+    mark_bound(channel, canonical_path)
 
     _emit(
         "channel.bind.persisted",
         channel=channel,
-        storage_state_path=str(persisted),
+        storage_state_path=str(canonical_path),
     )
 
     return BindResult(
         success=True,
         channel=channel,
-        storage_state_path=persisted,
+        storage_state_path=canonical_path,
         error_code=None,
     )
 

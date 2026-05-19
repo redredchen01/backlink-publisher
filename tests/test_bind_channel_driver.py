@@ -456,3 +456,116 @@ class TestTentativeLastAccountRename:
         # On predicate_timeout, no rename happens; tentative stays.
         assert tentative.exists()
         assert not (_config_dir() / "medium-last-account.txt").exists()
+
+
+class TestPostPersistHook:
+    """Plan 2026-05-19-005 Unit 1: optional recipe.post_persist hook.
+
+    Contract:
+    - When recipe.post_persist is None (velog/blogger default), driver skips
+      it and records the original storage_state_path in channel_status_store.
+    - When recipe.post_persist returns None, the driver still records the
+      original storage_state_path.
+    - When recipe.post_persist returns a Path, that Path becomes the canonical
+      bound credential path recorded in channel_status_store.
+    - Hook is called AFTER _persist_storage_state (file exists on disk) and
+      BEFORE mark_bound (so a hook that unlinks storage_state.json + returns
+      a new path leaves the store consistent).
+    - Hook receives (config_dir, persisted_storage_state_path).
+    """
+
+    def test_no_hook_keeps_original_path(self, capsys):
+        recipe = _make_fake_recipe(predicate_outcome="ok")
+        # default ChannelRecipe has post_persist=None
+        assert recipe.post_persist is None
+        drv.run_bind(
+            channel="velog",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+        status = get_status("velog")
+        assert status["status"] == "bound"
+        assert status["storage_state_path"].endswith("velog-storage-state.json")
+
+    def test_hook_receives_config_dir_and_persisted_path(self, capsys):
+        from backlink_publisher.cli._bind.recipes import ChannelRecipe
+
+        received: list[tuple[Path, Path]] = []
+
+        def _capture(config_dir: Path, persisted: Path) -> None:
+            received.append((config_dir, persisted))
+            return None  # keep original path
+
+        recipe = ChannelRecipe(
+            login_url="https://example.test/login",
+            bound_predicate=lambda page: None,
+            cookie_host_filter=lambda host: True,
+            post_persist=_capture,
+        )
+
+        drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+
+        assert len(received) == 1
+        cfg_arg, persisted_arg = received[0]
+        assert cfg_arg == _config_dir()
+        assert persisted_arg == _config_dir() / "medium-storage-state.json"
+        assert persisted_arg.exists()  # file is on disk when hook fires
+
+    def test_hook_return_replaces_canonical_path(self, capsys):
+        from backlink_publisher.cli._bind.recipes import ChannelRecipe
+
+        def _replace_with_cookies_only(config_dir: Path, persisted: Path) -> Path:
+            cookies_path = config_dir / "medium-cookies.json"
+            cookies_path.write_text('{"cookies": []}')
+            import os
+            os.chmod(cookies_path, 0o600)
+            persisted.unlink()  # remove storage_state; cookies.json is canonical now
+            return cookies_path
+
+        recipe = ChannelRecipe(
+            login_url="https://example.test/login",
+            bound_predicate=lambda page: None,
+            cookie_host_filter=lambda host: True,
+            post_persist=_replace_with_cookies_only,
+        )
+
+        result = drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+
+        assert result.success is True
+        status = get_status("medium")
+        assert status["status"] == "bound"
+        # canonical path is the cookies.json the hook returned
+        assert status["storage_state_path"].endswith("medium-cookies.json")
+        # the original storage_state.json is gone
+        assert not (_config_dir() / "medium-storage-state.json").exists()
+        # BindResult also reflects the new canonical path
+        assert result.storage_state_path.name == "medium-cookies.json"
+
+    def test_hook_return_none_keeps_original_path(self, capsys):
+        from backlink_publisher.cli._bind.recipes import ChannelRecipe
+
+        def _none_hook(config_dir: Path, persisted: Path) -> None:
+            return None
+
+        recipe = ChannelRecipe(
+            login_url="https://example.test/login",
+            bound_predicate=lambda page: None,
+            cookie_host_filter=lambda host: True,
+            post_persist=_none_hook,
+        )
+
+        drv.run_bind(
+            channel="medium",
+            recipe=recipe,
+            _browser_runner=_FakeBrowserRunner(success=True),
+        )
+        status = get_status("medium")
+        assert status["storage_state_path"].endswith("medium-storage-state.json")

@@ -20,7 +20,8 @@ Playwright wait primitives. No driver changes required.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from pathlib import Path
+from typing import Any, Callable, Optional, Protocol
 
 
 class _PageLike(Protocol):
@@ -34,6 +35,17 @@ class _PageLike(Protocol):
 
 BoundPredicate = Callable[[Any], None]
 HostFilter = Callable[[str], bool]
+# Plan 2026-05-19-005 Unit 1 (Medium cookies-only hardcut): optional hook the
+# driver invokes after ``_persist_storage_state`` succeeds, BEFORE
+# ``mark_bound``. Receives the config dir and the just-written storage_state
+# path; returns the path the driver should record in ``channel_status_store``
+# (or ``None`` to keep the original storage_state path).
+#
+# Used by the medium recipe to derive cookies-only ``medium-cookies.json`` +
+# ``medium-meta.json`` from the just-written storage_state, then unlink the
+# now-redundant storage_state.json and return the cookies.json path as the
+# new canonical bound credential. Other recipes leave this ``None``.
+PostPersistHook = Callable[[Path, Path], Optional[Path]]
 
 
 @dataclass(frozen=True)
@@ -48,6 +60,7 @@ class ChannelRecipe:
     login_url: str
     bound_predicate: BoundPredicate
     cookie_host_filter: HostFilter
+    post_persist: PostPersistHook | None = None
 
 
 # ───────── public registry — keys must == CHANNELS exactly ─────────
@@ -65,4 +78,4 @@ RECIPES: dict[str, ChannelRecipe] = {
 }
 
 
-__all__ = ["ChannelRecipe", "BoundPredicate", "HostFilter", "RECIPES"]
+__all__ = ["ChannelRecipe", "BoundPredicate", "HostFilter", "PostPersistHook", "RECIPES"]
