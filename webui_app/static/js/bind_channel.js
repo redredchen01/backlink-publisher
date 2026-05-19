@@ -1,0 +1,155 @@
+/*  bind_channel.js — Plan 2026-05-19-001 Unit 5.
+
+    Wires every .bind-channel-btn on the settings page to:
+      1. POST /settings/channels/<channel>/bind  (CSRF from <meta name="csrf-token">)
+      2. Poll GET /settings/channels/<channel>/bind/<job_id> at 1Hz until
+         status ∈ {done, failed}.
+      3. Reflect status + last error message in the per-channel badge and
+         show streaming events in the inline log area.
+      4. Remember the clicked channel in sessionStorage so a page reload
+         re-opens the same card (handled in settings.html DOMContentLoaded).
+
+    No frameworks; vanilla DOM + fetch.
+*/
+(function () {
+    'use strict';
+
+    var POLL_INTERVAL_MS = 1000;
+    var BADGE_TEXTS = {
+        bound:   '已绑定 ✓',
+        expired: '已过期 ⚠',
+        unbound: '未绑定',
+        running: '绑定中…',
+        done:    '已绑定 ✓',
+        failed:  '已过期 ⚠'
+    };
+    var BADGE_CLASSES = {
+        bound:   'ok',
+        expired: 'warn',
+        unbound: 'err',
+        running: 'warn',
+        done:    'ok',
+        failed:  'err'
+    };
+
+    function getCsrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') || '' : '';
+    }
+
+    function setBadge(channel, statusKey) {
+        var badge = document.getElementById('bind-badge-' + channel);
+        if (!badge) return;
+        badge.textContent = BADGE_TEXTS[statusKey] || statusKey;
+        badge.classList.remove('ok', 'warn', 'err');
+        badge.classList.add(BADGE_CLASSES[statusKey] || 'err');
+    }
+
+    function appendLog(channel, line) {
+        var log = document.getElementById('bind-log-' + channel);
+        if (!log) return;
+        log.style.display = 'block';
+        var row = document.createElement('div');
+        row.textContent = line;
+        log.appendChild(row);
+        log.scrollTop = log.scrollHeight;
+    }
+
+    function describeEvent(ev) {
+        if (!ev || !ev.event) return '';
+        switch (ev.event) {
+            case 'channel.bind.start':          return '开始绑定…';
+            case 'channel.bind.browser_ready':  return '浏览器已启动，请完成登录';
+            case 'channel.bind.login_detected': return '登录成功，正在保存凭据…';
+            case 'channel.bind.persisted':      return '凭据已保存 ✓';
+            case 'channel.bind.failed':         return '绑定失败：' + (ev.error_code || 'unknown');
+            default:                            return ev.event;
+        }
+    }
+
+    function pollJob(channel, jobId) {
+        var url = '/settings/channels/' + encodeURIComponent(channel)
+                + '/bind/' + encodeURIComponent(jobId);
+        fetch(url, {credentials: 'same-origin'})
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data) return;
+                var renderedCount = parseInt(
+                    document.getElementById('bind-log-' + channel)
+                        .getAttribute('data-rendered') || '0', 10);
+                var events = data.events || [];
+                for (var i = renderedCount; i < events.length; i++) {
+                    appendLog(channel, describeEvent(events[i]));
+                }
+                document.getElementById('bind-log-' + channel)
+                    .setAttribute('data-rendered', String(events.length));
+
+                if (data.status === 'done') {
+                    setBadge(channel, 'done');
+                } else if (data.status === 'failed') {
+                    setBadge(channel, 'failed');
+                    if (data.error_message) appendLog(channel, data.error_message);
+                } else {
+                    setBadge(channel, 'running');
+                    setTimeout(function () { pollJob(channel, jobId); }, POLL_INTERVAL_MS);
+                }
+            })
+            .catch(function (err) {
+                appendLog(channel, '轮询出错：' + err);
+                setBadge(channel, 'failed');
+            });
+    }
+
+    function startBind(channel) {
+        try { sessionStorage.setItem('bind:lastChannel', channel); } catch (e) {}
+        var log = document.getElementById('bind-log-' + channel);
+        if (log) {
+            log.innerHTML = '';
+            log.setAttribute('data-rendered', '0');
+        }
+        setBadge(channel, 'running');
+
+        var body = new FormData();
+        body.append('csrf_token', getCsrfToken());
+
+        fetch('/settings/channels/' + encodeURIComponent(channel) + '/bind', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: body
+        })
+            .then(function (r) { return r.json().then(function (j) {
+                return {status: r.status, body: j};
+            }); })
+            .then(function (resp) {
+                if (resp.status !== 200 || !resp.body || !resp.body.job_id) {
+                    setBadge(channel, 'failed');
+                    appendLog(channel, '启动失败：' + (resp.body && resp.body.error || resp.status));
+                    return;
+                }
+                pollJob(channel, resp.body.job_id);
+            })
+            .catch(function (err) {
+                setBadge(channel, 'failed');
+                appendLog(channel, '请求出错：' + err);
+            });
+    }
+
+    function init() {
+        var buttons = document.querySelectorAll('.bind-channel-btn');
+        for (var i = 0; i < buttons.length; i++) {
+            var btn = buttons[i];
+            (function (button) {
+                button.addEventListener('click', function () {
+                    var channel = button.getAttribute('data-channel');
+                    if (channel) startBind(channel);
+                });
+            })(btn);
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();

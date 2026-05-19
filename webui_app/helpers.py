@@ -559,6 +559,9 @@ def _settings_context(flash=None):
     from flask import session as _flask_session
 
     from backlink_publisher.config import load_medium_token
+    from backlink_publisher.cli._bind.channels import CHANNELS
+    from webui_store.channel_status import list_all as _channel_list_all
+    from .services.bind_job import BIND_ERROR_MESSAGES
 
     cfg = load_config()
     token_data = load_blogger_token(cfg.blogger_token_path)
@@ -571,8 +574,20 @@ def _settings_context(flash=None):
         set(cfg.blogger_blog_ids.keys()) | set(cfg.target_anchor_keywords.keys())
     )
 
+    try:
+        channel_statuses = _channel_list_all()
+    except Exception:
+        channel_statuses = {}
+
+    # csrf_token consumed by Unit 5's bind_channel.js (via <meta name="csrf-token">)
+    try:
+        csrf_token = _ensure_csrf_token()
+    except Exception:
+        csrf_token = ""
+
     return dict(
         flash=flash,
+        csrf_token=csrf_token,
         medium_browser_status=_get_medium_browser_status(cfg, session=_flask_session),
         blogger_token=bool(token_data),
         blogger_client_id=cfg.blogger_oauth.client_id if cfg.blogger_oauth else "",
@@ -595,6 +610,9 @@ def _settings_context(flash=None):
         schedule_settings=_load_schedule_settings(),
         all_targets=all_targets,
         target_anchor_keywords=cfg.target_anchor_keywords,
+        binding_channels=sorted(CHANNELS),
+        channel_statuses=channel_statuses,
+        bind_error_messages=BIND_ERROR_MESSAGES,
     )
 
 
