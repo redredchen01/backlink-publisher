@@ -263,8 +263,8 @@ def _medium_bound_predicate(page) -> None:
         IdentityMismatch: scraped @username differs from stored
             last_account. Driver maps to BindResult(error_code=
             'identity_mismatch', extras=...).
-        BoundPredicateTimeout: idle (90s no nav) OR absolute (1200s
-            wall) timeout exceeded.
+        BoundPredicateTimeout: idle (90s no nav since *first* observed nav)
+            OR absolute (1200s wall) timeout exceeded.
     """
     # Lazy-import Playwright's TimeoutError so the recipe module is
     # importable in non-Playwright contexts (e.g., webui process that
@@ -274,7 +274,13 @@ def _medium_bound_predicate(page) -> None:
     from backlink_publisher.cli._bind.driver import BoundPredicateTimeout
 
     started_at = time.monotonic()
-    last_nav_at = [started_at]  # list-ref to mutate from closure
+    # last_nav_at is None until the first ``framenavigated`` event lands.
+    # Idle-timeout enforcement is gated on this — see Spike 7 verdict
+    # in the module docstring: in cross-origin SSO scenarios the listener
+    # may never observe a single nav event despite a successful login.
+    # If we treated "no nav events" as 90s of idleness, the predicate
+    # would raise long before the absolute floor the docstring promises.
+    last_nav_at: list[float | None] = [None]
 
     def _on_nav(_frame) -> None:
         last_nav_at[0] = time.monotonic()
@@ -283,7 +289,10 @@ def _medium_bound_predicate(page) -> None:
 
     while True:
         now = time.monotonic()
-        if now - last_nav_at[0] > _IDLE_TIMEOUT_SECONDS:
+        if (
+            last_nav_at[0] is not None
+            and now - last_nav_at[0] > _IDLE_TIMEOUT_SECONDS
+        ):
             raise BoundPredicateTimeout()
         if now - started_at > _ABSOLUTE_TIMEOUT_SECONDS:
             raise BoundPredicateTimeout()
