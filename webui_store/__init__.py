@@ -24,6 +24,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .base import JsonStore, Store
+from .channel_status import channel_status_store
 from .drafts import DraftsStore
 from .queue_store import QueueStore
 
@@ -61,4 +62,5 @@ __all__ = [
     "drafts_store",
     "schedule_store",
     "queue_store",
+    "channel_status_store",
 ]

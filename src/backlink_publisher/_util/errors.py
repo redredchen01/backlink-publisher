@@ -26,15 +26,64 @@ class InputValidationError(PipelineError):
 
 
 class DependencyError(PipelineError):
-    """Missing dependency (e.g. OpenCLI not installed)."""
+    """Missing dependency or external precondition that requires user action.
+
+    Family rule (Plan 2026-05-19-001):
+        DependencyError = "user must take action" (install a tool, re-bind
+        credentials, rebuild a config file).
+        ExternalServiceError = "service reachable but rejected our well-formed
+        call; retrying later may succeed".
+
+    AuthExpiredError lives under this family for coordination with
+    plan-012 §Unit 4 (velog cookie expired → DependencyError); see plan
+    §Open Questions Resolved for the coordination-not-semantics rationale.
+    """
 
     exit_code = 3
 
 
 class ExternalServiceError(PipelineError):
-    """External service failure (unreachable URL, API error, etc.)."""
+    """External service failure (unreachable URL, API error, etc.).
+
+    See ``DependencyError`` docstring for the family-vs-family rule.
+    """
 
     exit_code = 4
+
+
+class AuthExpiredError(DependencyError):
+    """Channel credentials expired — user must re-bind via webui or CLI.
+
+    Plan 2026-05-19-001 Unit 1. Inherits from ``DependencyError`` (exit
+    code 3, not 4) for coordination with plan-012 which raises
+    ``DependencyError("velog cookie expired")`` for the same logical
+    event. See plan §Key Technical Decisions.
+
+    Construction validates ``channel`` against the
+    ``cli._bind.channels.CHANNELS`` frozenset; ``UsageError`` is raised
+    for unknown / traversal payloads (defense-in-depth against supply-
+    chain adapters injecting ``channel="../evil"``).
+    """
+
+    exit_code = 3
+
+    def __init__(self, *, channel: str, reason: str | None = None) -> None:
+        # Local import avoids a top-level cycle (errors.py is imported
+        # very early in package init; cli._bind.channels is leaf-level
+        # but importing the whole cli package here would be premature).
+        from backlink_publisher.cli._bind.channels import CHANNELS
+
+        if not channel or channel not in CHANNELS:
+            raise UsageError(
+                f"AuthExpiredError: unknown channel {channel!r} "
+                f"(allowed: {sorted(CHANNELS)})"
+            )
+        self.channel = channel
+        self.reason = reason
+        msg = f"channel {channel!r} credentials expired"
+        if reason:
+            msg += f" ({reason})"
+        super().__init__(msg)
 
 
 class InternalError(PipelineError):
