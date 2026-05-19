@@ -10,12 +10,19 @@ claims:
     - src/backlink_publisher/cli/report_anchors.py
     - src/backlink_publisher/cli/footprint.py
     - src/backlink_publisher/_util/errors.py
-    - src/backlink_publisher/_util/cli_flags.py
     - src/backlink_publisher/phase0/validation.py
     - .github/workflows/ci.yml
     - pyproject.toml
     - tests/test_cli_footprint.py
   shas: []
+# Dogfood honesty note: an earlier draft of `claims.paths` also listed
+# `src/backlink_publisher/_util/cli_flags.py`. That file is uncommitted in
+# the canonical worktree at plan-author time (in-flight on a parallel branch)
+# and does NOT exist on origin/main. The Unit 3 self-dogfood caught it — the
+# very scenario adversarial-reviewer finding A3 predicted. Removed from
+# claims.paths to keep the dogfood honest. Unit 3's `plan_check.py` inlines
+# the `--json` flag and does not depend on cli_flags.py, so this removal
+# does not invalidate the implementation guidance.
 ---
 
 # Plan-Doc Claims Contract + Merge-Time HEAD-Drift Gate
