@@ -127,12 +127,70 @@ class TestCountFile:
 
     def test_today_returns_count(self, tmp_path):
         p = tmp_path / "count.json"
-        from datetime import date
-        today = date.today().isoformat()
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat()
         p.write_text(json.dumps({"date_utc": today, "count": 3, "last_publish_at": 9999.0}))
         count, last = _read_count(p)
         assert count == 3
         assert last == 9999.0
+
+    def test_read_and_write_use_utc_date_not_local(self, tmp_path, monkeypatch):
+        """Regression: ``_read_count`` and ``_write_count`` must derive the
+        ``date_utc`` field from UTC, not the host's local timezone.
+
+        Prior code used ``date.today()`` which returns the local-time date.
+        On a machine in UTC+9 (KST), at 2026-05-19T22:00 UTC the local
+        date is already 2026-05-20; the cap would reset 9 hours early
+        relative to the documented UTC boundary. Conversely, in UTC-8,
+        the cap would still report 2026-05-19 hours after UTC midnight.
+
+        Simulates a UTC+9 host at 2026-05-19T23:30Z (local = 2026-05-20):
+        - UTC-derived implementation writes ``date_utc=2026-05-19``.
+        - ``date.today()``-based implementation writes ``date_utc=2026-05-20``.
+        """
+        from datetime import datetime, timezone
+
+        from backlink_publisher.publishing.adapters import velog_graphql
+
+        UTC_DATE = "2026-05-19"
+        LOCAL_DATE_IN_FAKE_KST = "2026-05-20"
+
+        class _FakeDate:
+            """Stand-in for ``datetime.date`` matching the bug's local-time semantics."""
+
+            @classmethod
+            def today(cls):
+                from datetime import date as _real_date
+                return _real_date.fromisoformat(LOCAL_DATE_IN_FAKE_KST)
+
+        class _FakeDatetime(datetime):
+            """Stand-in for ``datetime.datetime`` returning the correct UTC instant."""
+
+            @classmethod
+            def now(cls, tz=None):
+                base = datetime(2026, 5, 19, 23, 30, 0, tzinfo=timezone.utc)
+                if tz is None:
+                    return _FakeDate.today()  # local naive
+                return base.astimezone(tz)
+
+        # Patch both names that either implementation might use. The
+        # current fix only touches ``datetime``; the bug version reads
+        # ``date.today()``. raising=False so the test passes against
+        # either source state.
+        monkeypatch.setattr(velog_graphql, "datetime", _FakeDatetime)
+        monkeypatch.setattr(velog_graphql, "date", _FakeDate, raising=False)
+
+        p = tmp_path / "count.json"
+        _write_count(p, 5, 1.0)
+        body = json.loads(p.read_text())
+        assert body["date_utc"] == UTC_DATE, (
+            f"date_utc={body['date_utc']!r} — derived from local time "
+            "instead of UTC. Cap reset boundary must be UTC midnight."
+        )
+
+        # And the corresponding read on the same UTC day must NOT reset.
+        count, _ = _read_count(p)
+        assert count == 5
 
     def test_stale_date_resets(self, tmp_path):
         p = tmp_path / "count.json"

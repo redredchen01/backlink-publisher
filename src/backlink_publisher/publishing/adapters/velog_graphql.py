@@ -35,7 +35,7 @@ import os
 import random
 import re
 import time
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -202,9 +202,21 @@ def _release_lock(fd: int) -> None:
         pass
 
 
+def _utc_today_iso() -> str:
+    """Return today's date in UTC as ISO-8601 — the canonical reset boundary.
+
+    The count file's ``date_utc`` field and the user-facing daily-cap error
+    define UTC as the reset boundary. Using ``date.today()`` (local time)
+    would let the cap reset at local midnight on machines in non-UTC
+    timezones, either blocking publishes for hours after UTC midnight
+    or opening an early second quota window.
+    """
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _read_count(count_path: Path) -> tuple[int, float]:
     """Read ``(count, last_publish_at)`` from *count_path*, resetting on new UTC day."""
-    today = date.today().isoformat()
+    today = _utc_today_iso()
     try:
         data = json.loads(count_path.read_text())
         if data.get("date_utc") != today:
@@ -215,7 +227,7 @@ def _read_count(count_path: Path) -> tuple[int, float]:
 
 
 def _write_count(count_path: Path, count: int, last_publish_at: float) -> None:
-    today = date.today().isoformat()
+    today = _utc_today_iso()
     payload = {"date_utc": today, "count": count, "last_publish_at": last_publish_at}
     tmp = count_path.with_suffix(".tmp")
     old_umask = os.umask(0o077)
