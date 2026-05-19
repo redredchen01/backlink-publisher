@@ -13,6 +13,7 @@ from .types import (
     Config,
     MediumOAuthConfig,
     ThreeUrlConfig,
+    GhpagesConfig,
     VelogConfig,
 )
 
@@ -163,6 +164,18 @@ def load_config(path: Path | None = None) -> Config:
         else:
             velog = VelogConfig(cookies_path=Path(raw_path).expanduser())
 
+    ghpages_section = data.get("ghpages")
+    ghpages: GhpagesConfig | None = None
+    if ghpages_section is not None:
+        # PAT lives in ghpages-token.json (SEC-3) — only routing fields here.
+        ghpages = GhpagesConfig(
+            repo=str(ghpages_section.get("repo", "")),
+            branch=str(ghpages_section.get("branch", "gh-pages")),
+            path_template=str(
+                ghpages_section.get("path_template", "_posts/{date}-{slug}.md")
+            ),
+        )
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -177,6 +190,7 @@ def load_config(path: Path | None = None) -> Config:
         target_three_url=target_three_url,
         anchor_alarm=anchor_alarm,
         velog=velog,
+        ghpages=ghpages,
     )
 
 

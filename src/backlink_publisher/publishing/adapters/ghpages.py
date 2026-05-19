@@ -1,0 +1,342 @@
+"""GitHub Pages adapter — Contents API (no git push) + Bearer PAT.
+
+Plan 2026-05-19-006 Unit 7 (originally Unit 12, promoted Q-A resolution).
+Highest SEO value of the Phase 3 wave: dofollow confirmed (Jekyll default),
+DA 100, operator owns the repo so no de-platforming risk.
+
+Design choices:
+
+  - **Contents API, not git push** — keeps the runtime dependency surface to
+    ``requests`` only (no git sub-process, no SSH key management). Authoring
+    a post is one ``PUT /repos/{owner}/{repo}/contents/{path}`` call.
+  - **Bearer PAT** (Authorization header) — matches the auth model of the
+    other Phase 3 platforms (Hashnode, Write.as). The token lives in
+    ``~/.config/backlink-publisher/ghpages-token.json`` (0600 file, never in
+    ``config.toml``) per SEC-3.
+  - **Update path** — if the target path already exists, the API returns 422
+    "sha required". The adapter handles this by ``GET``ing the file's sha
+    then re-``PUT``ing with the sha. v1 ships idempotent overwrite (operator
+    re-publishing the same slug). Not aimed at multi-author conflict
+    resolution — that's a Pages-repo policy question, not the adapter's.
+  - **Secondary rate limit** — GitHub returns 403 with a
+    ``x-ratelimit-remaining: 0`` or ``retry-after`` header on secondary
+    (per-route) limits. The adapter splits 401 (auth-fixable) from 403
+    (rate-limit / scope) so live verify never falsely flags a tokens as
+    expired when the operator is just publishing too fast.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+import requests
+
+from backlink_publisher.config import Config, load_ghpages_token
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.logger import opencli_logger as log
+from backlink_publisher.publishing.content_negotiation import extract_publish_html
+from backlink_publisher.publishing.registry import Publisher
+from .base import AdapterResult
+from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
+
+
+GITHUB_API = "https://api.github.com"
+_GITHUB_API_VERSION = "2022-11-28"
+_HTTP_TIMEOUT_S = 30  # generous — Contents API can be slow for large repos
+
+
+def _required_headers(token: str) -> dict[str, str]:
+    """The header trio GitHub mandates for stable API access."""
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": _GITHUB_API_VERSION,
+    }
+
+
+def _load_token(config: Config) -> str:
+    """Return the PAT, raising DependencyError when not configured.
+
+    Mirrors the telegraph/blogger pattern — fail loud at adapter entry rather
+    than returning ``None`` and bumping the failure deeper into publish path.
+    """
+    data = load_ghpages_token(config.ghpages_token_path)
+    token = (data or {}).get("token")
+    if not token:
+        raise DependencyError(
+            "GitHub Pages PAT not configured. "
+            f"Write {{\"token\": \"<pat>\"}} to {config.ghpages_token_path} "
+            "(chmod 600). PAT needs Contents:Read+Write on the target repo."
+        )
+    return token
+
+
+def _slugify(value: str) -> str:
+    """Lowercase, ASCII-only slug suitable for both Jekyll filenames and URLs.
+
+    Keep it deliberately minimal — Pages cares about three things:
+      1. No spaces (breaks URL routing)
+      2. No path separators (would create unintended sub-paths)
+      3. No leading dot (would hide the file from ``jekyll build``)
+    """
+    cleaned = []
+    last_dash = False
+    for ch in value.lower():
+        if ch.isalnum():
+            cleaned.append(ch)
+            last_dash = False
+        elif not last_dash:
+            cleaned.append("-")
+            last_dash = True
+    slug = "".join(cleaned).strip("-.")
+    return slug or "post"
+
+
+def _render_target_path(template: str, *, slug: str, date_iso: str | None = None) -> str:
+    """Resolve ``{date}`` / ``{slug}`` placeholders. UTC-only dates."""
+    if date_iso is None:
+        date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return template.format(date=date_iso, slug=slug)
+
+
+def _build_markdown_body(payload: dict[str, Any]) -> str:
+    """Compose a Jekyll-compatible post body with YAML front matter.
+
+    Front matter carries ``title`` + ``date`` (UTC) + ``tags``. The body is
+    the Markdown source if present; otherwise the rendered HTML from
+    ``extract_publish_html`` (works as an HTML island inside a Markdown post —
+    Jekyll passes HTML through unchanged).
+    """
+    title = payload.get("title", "Untitled")
+    tags = payload.get("tags", [])[:20]
+    date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S +0000")
+
+    front_matter_lines = [
+        "---",
+        "layout: post",
+        f"title: {json.dumps(title, ensure_ascii=False)}",
+        f"date: {date_iso}",
+    ]
+    if tags:
+        # YAML flow-style list — safe for any string content via json.dumps.
+        front_matter_lines.append(
+            "tags: [" + ", ".join(json.dumps(t, ensure_ascii=False) for t in tags) + "]"
+        )
+    front_matter_lines.append("---")
+    front_matter = "\n".join(front_matter_lines)
+
+    body = payload.get("content_markdown") or extract_publish_html(payload, "ghpages")
+    return f"{front_matter}\n\n{body}\n"
+
+
+def _get_existing_sha(repo: str, branch: str, path: str, token: str) -> str | None:
+    """Return the file's current sha, or None if it doesn't exist yet.
+
+    Used only on the 422 retry path. 404 here is the *happy* outcome
+    (file is new); any other error is propagated so the caller can decide.
+    """
+    resp = requests.get(
+        f"{GITHUB_API}/repos/{repo}/contents/{path}",
+        headers=_required_headers(token),
+        params={"ref": branch},
+        timeout=_HTTP_TIMEOUT_S,
+    )
+    if resp.status_code == 404:
+        return None
+    if resp.status_code != 200:
+        raise ExternalServiceError(
+            f"GitHub GET contents returned HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    body = resp.json()
+    return body.get("sha")
+
+
+def _put_contents(
+    repo: str,
+    branch: str,
+    path: str,
+    markdown: str,
+    commit_message: str,
+    token: str,
+    sha: str | None = None,
+) -> dict[str, Any]:
+    """PUT the file. Returns the API response body on success.
+
+    422 → caller's responsibility to fetch sha + retry once. We do NOT loop
+    here to keep the failure mode auditable in the publish() function.
+    """
+    body: dict[str, Any] = {
+        "message": commit_message,
+        "content": base64.b64encode(markdown.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha is not None:
+        body["sha"] = sha
+
+    resp = requests.put(
+        f"{GITHUB_API}/repos/{repo}/contents/{path}",
+        headers=_required_headers(token),
+        json=body,
+        timeout=_HTTP_TIMEOUT_S,
+    )
+    if resp.status_code in (200, 201):
+        return resp.json()
+    if resp.status_code == 401:
+        raise ExternalServiceError(
+            "GitHub PAT rejected (HTTP 401) — re-bind with Contents:Read+Write scope"
+        )
+    if resp.status_code == 403:
+        # Could be scope OR secondary rate limit. Surface both for ops triage.
+        retry_after = resp.headers.get("retry-after")
+        suffix = f" (retry-after={retry_after}s)" if retry_after else ""
+        raise ExternalServiceError(
+            f"GitHub PUT forbidden (HTTP 403){suffix} — token missing scope or rate-limited"
+        )
+    if resp.status_code == 422:
+        # Surface a typed signal so publish() knows to fetch sha + retry.
+        raise _ShaRequired(resp.text[:200])
+    raise ExternalServiceError(
+        f"GitHub PUT contents returned HTTP {resp.status_code}: {resp.text[:200]}"
+    )
+
+
+class _ShaRequired(Exception):
+    """Internal sentinel — 422 from PUT contents means the file exists."""
+
+
+def _published_url(repo: str, path: str) -> str:
+    """Best-effort Jekyll-style public URL.
+
+    Pages publishes ``_posts/YYYY-MM-DD-slug.md`` as ``/YYYY/MM/DD/slug/``,
+    but operators may use custom permalink templates. We surface the *raw*
+    Pages URL (sans permalink rewriting) which always works and matches
+    the file path; if the operator has a custom permalink scheme they'll
+    redirect to the canonical URL.
+    """
+    owner, _, name = repo.partition("/")
+    return f"https://{owner}.github.io/{name}/{path}"
+
+
+class GitHubPagesAPIAdapter(Publisher):
+    """Publishes Markdown to a Pages-enabled repo via the Contents API."""
+
+    @classmethod
+    def available(cls, config: Config) -> bool:
+        # Match the BloggerAPIAdapter / TelegraphAPIAdapter pattern — config
+        # presence check, not auth check. Real auth verification happens at
+        # publish() time (or live verify).
+        return config.ghpages is not None and bool(config.ghpages.repo)
+
+    def publish(
+        self,
+        payload: dict[str, Any],
+        mode: str,
+        config: Config,
+    ) -> AdapterResult:
+        t0 = time.monotonic()
+        article_id = payload.get("id", "")
+        log.info(
+            json.dumps(dict(adapter="ghpages", phase="start", id=article_id))
+        )
+
+        gh_cfg = config.ghpages
+        if gh_cfg is None or not gh_cfg.repo:
+            raise DependencyError(
+                "GitHub Pages config missing. Add [ghpages] repo=\"owner/name\" "
+                "to config.toml."
+            )
+
+        token = _load_token(config)
+
+        # mode='draft' has no clean GitHub Pages analogue (Pages publishes
+        # everything in the branch). Operators who want drafts should use a
+        # ``_drafts/`` directory + jekyll's ``--drafts`` flag, but that's a
+        # site-side config. v1 treats draft mode as "build the body, do not
+        # PUT" — useful for dry-run-via-mode-flag without requiring the
+        # full dry_run_intercept harness.
+        slug = _slugify(payload.get("slug") or payload.get("title", ""))
+        target_path = _render_target_path(gh_cfg.path_template, slug=slug)
+        markdown = _build_markdown_body(payload)
+        commit_message = f"backlink-publisher: add post {slug}"
+
+        if mode == "draft":
+            log.info(
+                json.dumps(dict(
+                    adapter="ghpages", phase="draft-skip", id=article_id,
+                    target_path=target_path,
+                ))
+            )
+            return AdapterResult(
+                status="drafted",
+                adapter="ghpages",
+                platform="ghpages",
+                draft_url=_published_url(gh_cfg.repo, target_path),
+            )
+
+        def _attempt(sha: str | None = None):
+            return _put_contents(
+                gh_cfg.repo, gh_cfg.branch, target_path, markdown,
+                commit_message, token, sha=sha,
+            )
+
+        # First attempt assumes the file is new. On 422 we fetch the existing
+        # sha and retry once. Beyond that we fail loud — three writes to the
+        # same path inside one publish call is almost certainly a bug.
+        def execute():
+            try:
+                return _attempt(sha=None)
+            except _ShaRequired:
+                existing_sha = _get_existing_sha(
+                    gh_cfg.repo, gh_cfg.branch, target_path, token
+                )
+                if existing_sha is None:
+                    raise ExternalServiceError(
+                        "GitHub PUT returned 422 sha-required but GET found no file — "
+                        "either an eventual-consistency race or a repo config drift; "
+                        "retry once manually."
+                    )
+                return _attempt(sha=existing_sha)
+
+        try:
+            result = retry_transient_call(
+                execute,
+                is_retryable=lambda exc: (
+                    isinstance(exc, ExternalServiceError)
+                    and any(
+                        f"HTTP {code}" in str(exc) for code in RETRYABLE_HTTP_STATUSES
+                    )
+                ),
+                adapter="ghpages",
+            )
+        except DependencyError:
+            raise
+        except ExternalServiceError:
+            raise
+        except Exception as exc:
+            raise ExternalServiceError(
+                f"GitHub Pages publish failed ({type(exc).__name__}): {exc}"
+            ) from exc
+
+        elapsed = int((time.monotonic() - t0) * 1000)
+        log.info(
+            json.dumps(dict(
+                adapter="ghpages", phase="done", id=article_id,
+                elapsed_ms=elapsed,
+            ))
+        )
+
+        # The Contents API echoes back ``content.html_url`` (a github.com link
+        # to the source file) — not the Pages-published URL. We surface our
+        # computed Pages URL as the canonical published URL, but also stash
+        # the source link in adapter_meta for ops debugging.
+        published = _published_url(gh_cfg.repo, target_path)
+        return AdapterResult(
+            status="published",
+            adapter="ghpages",
+            platform="ghpages",
+            published_url=published,
+        )

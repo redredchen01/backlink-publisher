@@ -91,6 +91,27 @@ class LLMProviderConfig:
 
 
 @dataclass(frozen=True)
+class GhpagesConfig:
+    """GitHub Pages adapter configuration.
+
+    Token is stored in a separate 0600 JSON file (``ghpages-token.json``),
+    NOT in ``config.toml`` (per Plan 2026-05-19-006 SEC-3 — PAT is too
+    sensitive to live in TOML which gets backed up/screenshotted/shared).
+    This dataclass holds only the non-secret routing fields.
+
+    ``repo`` — ``"owner/name"`` of the Pages-enabled repository.
+    ``branch`` — the branch Pages publishes from (Jekyll default ``gh-pages``;
+                 modern repos often use ``main`` with /docs or ``main`` root).
+    ``path_template`` — where to place each post, with ``{date}`` and
+                        ``{slug}`` placeholders.
+    """
+
+    repo: str = ""
+    branch: str = "gh-pages"
+    path_template: str = "_posts/{date}-{slug}.md"
+
+
+@dataclass(frozen=True)
 class VelogConfig:
     """Velog adapter configuration.
 
@@ -226,6 +247,13 @@ class Config:
     absent — the adapter will use its default path
     ``~/.config/backlink-publisher/velog-cookies.json``."""
 
+    ghpages: GhpagesConfig | None = None
+    """GitHub Pages adapter config (repo / branch / path_template).
+
+    Populated from ``[ghpages]`` in config.toml. ``None`` when section is
+    absent. The PAT lives in a separate 0600 file at
+    ``~/.config/backlink-publisher/ghpages-token.json`` (per SEC-3)."""
+
     @property
     def config_dir(self) -> Path:
         from backlink_publisher import config as _cfg
@@ -240,6 +268,11 @@ class Config:
     def blogger_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "blogger-token.json"
+
+    @property
+    def ghpages_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "ghpages-token.json"
 
     @property
     def screenshot_dir(self) -> Path:

@@ -30,6 +30,7 @@ from ..registry import dispatch, register, registered_platforms
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
+from .ghpages import GitHubPagesAPIAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
@@ -43,6 +44,7 @@ register("blogger", BloggerAPIAdapter)
 register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
 register("telegraph", TelegraphAPIAdapter)
 register("velog", VelogGraphQLAdapter)
+register("ghpages", GitHubPagesAPIAdapter)
 
 
 def publish(
@@ -141,15 +143,29 @@ def verify_adapter_setup(
             )
         return
 
+    if platform == "ghpages":
+        if config.ghpages is None or not config.ghpages.repo:
+            raise DependencyError(
+                "GitHub Pages config missing. Add [ghpages] repo=\"owner/name\" "
+                "to ~/.config/backlink-publisher/config.toml"
+            )
+        if not config.ghpages_token_path.exists():
+            raise DependencyError(
+                "GitHub Pages PAT not stored. Write "
+                f"{{\"token\": \"<pat>\"}} to {config.ghpages_token_path} "
+                "(chmod 600). PAT needs Contents:Read+Write on the target repo."
+            )
+        return
+
     raise DependencyError(f"No adapter configured for platform: {platform}")
 
 
 def _verify_live(platform: str, config: Config) -> VerifyResult:
-    """Live verify — calls platform's lightweight verify endpoint.
+    """Live verify — dispatches to per-platform real-API impls when available,
+    falls back to ``unverifiable_live`` for platforms still pending backfill.
 
-    Returns 'never' if known-unbound (no credentials), 'ok' / 'token_expired'
-    / 'timeout' once configured. Per-channel real impls land per adapter:
-    Telegraph (Unit 6a, this commit) → Blogger users.get → Medium /me → ...
+    Per-channel real impls land per adapter: Telegraph (Unit 6a) →
+    GitHub Pages (Unit 7) → Blogger users.get → Medium /me → Velog currentUser.
     """
     if platform not in registered_platforms():
         return VerifyResult(
@@ -168,11 +184,16 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
             blockers=[str(e)],
         )
 
-    # Per-channel live verify dispatch.
+    # Per-platform live verify dispatch.
     if platform == "telegraph":
         return _verify_telegraph_live(config)
 
-    # Blogger / Medium etc. — real live verify lands in follow-up commits.
+    if platform == "ghpages":
+        return _verify_ghpages_live(config)
+
+    # Bound but live-verify-endpoint not yet wired. Surface honestly rather
+    # than fake-green. Per-adapter live impls (Medium /me, Blogger users.get,
+    # Velog currentUser) land in follow-up PRs (#93 / #95 / others).
     return VerifyResult(
         ok=True,
         last_verify_result="unverifiable_live",
@@ -270,6 +291,107 @@ def _verify_telegraph_live(config: Config) -> VerifyResult:
     result_data = body.get("result") or {}
     identity = result_data.get("short_name") or token_data.get("short_name")
 
+    return VerifyResult(
+        ok=True,
+        identity=identity,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=True,
+    )
+
+
+_GHPAGES_VERIFY_TIMEOUT_S = 5
+
+
+def _verify_ghpages_live(config: Config) -> VerifyResult:
+    """GET ``api.github.com/user`` to confirm the PAT is still valid.
+
+    Plan 2026-05-19-006 Unit 7 — ships GitHub Pages adapter with live
+    verify built in.
+
+    Strict read-only: ``ghpages-token.json`` is never mutated. Verify just
+    reads the PAT and pings the user endpoint. Token rotation is the
+    operator's job (PAT regeneration in github.com/settings/tokens).
+
+    Status mapping:
+      - 200 → ``ok``, identity = ``login``, dofollow=True (Jekyll default)
+      - 401 → ``token_expired`` (PAT revoked or scope removed)
+      - 403 → ``never`` (rate-limit / scope mismatch — not auth-fixable)
+      - ``requests.Timeout`` → ``timeout``
+      - other (5xx / connection / parse) → ``never``
+    """
+    import requests as _r
+    from .ghpages import GITHUB_API, _load_token, _required_headers
+
+    try:
+        token = _load_token(config)
+    except DependencyError as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[str(e)],
+        )
+
+    try:
+        resp = _r.get(
+            f"{GITHUB_API}/user",
+            headers=_required_headers(token),
+            timeout=_GHPAGES_VERIFY_TIMEOUT_S,
+        )
+    except _r.Timeout:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="timeout",
+            blockers=[
+                f"github.com/user timed out after {_GHPAGES_VERIFY_TIMEOUT_S}s"
+            ],
+        )
+    except _r.RequestException as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"github network failure: {e}"],
+        )
+
+    if resp.status_code == 401:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="token_expired",
+            blockers=[
+                "GitHub PAT rejected (HTTP 401) — regenerate at "
+                "github.com/settings/tokens and re-save to ghpages-token.json"
+            ],
+        )
+
+    if resp.status_code == 403:
+        retry_after = resp.headers.get("retry-after")
+        suffix = f" (retry-after={retry_after}s)" if retry_after else ""
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[
+                f"GitHub /user forbidden (HTTP 403){suffix} — token missing scope "
+                "or hit secondary rate limit"
+            ],
+        )
+
+    if resp.status_code != 200:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"GitHub /user returned HTTP {resp.status_code}"],
+        )
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["GitHub /user returned non-JSON response"],
+        )
+
+    identity = body.get("login") or body.get("name")
     return VerifyResult(
         ok=True,
         identity=identity,

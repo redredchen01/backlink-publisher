@@ -265,3 +265,23 @@ client_secret = "your-client-secret"
 # # api_key = "sk-..."                   # prefer the BACKLINK_LLM_API_KEY env var
 # model = "gpt-4o-mini"
 # timeout_s = 30
+
+# ────────────────────────────────────────────────────────────
+# [ghpages] — GitHub Pages adapter (Phase 3 Unit 7)
+# ────────────────────────────────────────────────────────────
+# The PAT does NOT live here — store it in a separate 0600 file at
+# ~/.config/backlink-publisher/ghpages-token.json (format: {"token": "<pat>"}).
+# Per Plan 2026-05-19-006 SEC-3: TOML files get backed up / screenshotted /
+# pushed to dotfile repos. PATs with Contents:Read+Write must never end up
+# in TOML.
+#
+# Token setup (do this once):
+#   1. Create a fine-grained PAT at github.com/settings/tokens with
+#      "Contents: Read and write" on the target repo.
+#   2. echo '{"token":"<paste>"}' > ~/.config/backlink-publisher/ghpages-token.json
+#   3. chmod 600 ~/.config/backlink-publisher/ghpages-token.json
+#
+# [ghpages]
+# repo = "your-github-handle/your-pages-repo"
+# branch = "gh-pages"                # or "main" for modern Pages repos
+# path_template = "_posts/{date}-{slug}.md"
