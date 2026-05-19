@@ -194,9 +194,11 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
     if platform == "blogger":
         return _verify_blogger_live(config)
 
+    if platform == "velog":
+        return _verify_velog_live(config)
+
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
-    # than fake-green. Per-adapter live impls (Medium /me, Velog currentUser)
-    # land in follow-up PRs (#95 / others).
+    # than fake-green. Per-adapter live impls (Medium /me) land in follow-up PRs.
     return VerifyResult(
         ok=True,
         last_verify_result="unverifiable_live",
@@ -498,6 +500,113 @@ def _verify_blogger_live(config: Config) -> VerifyResult:
         )
 
     identity = body.get("displayName") or body.get("id")
+    return VerifyResult(
+        ok=True,
+        identity=identity,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=True,
+    )
+
+
+_VELOG_VERIFY_TIMEOUT_S = 5
+_VELOG_CURRENT_USER_QUERY = (
+    "query CurrentUser { currentUser { id username display_name } }"
+)
+
+
+def _verify_velog_live(config: Config) -> VerifyResult:
+    """POST velog GraphQL ``currentUser`` to confirm the cookie session is live.
+
+    Plan 2026-05-19-006 Unit 6b — replaces the stub for velog.
+
+    Strict read-only: the on-disk ``velog-cookies.json`` is never mutated.
+    Velog's implicit-refresh model (server issues a fresh ``access_token``
+    via ``Set-Cookie`` on any authenticated request) is captured by
+    ``requests.Session`` in-memory only — we do not persist any updated
+    cookies back to disk, matching the publish adapter's behaviour.
+
+    Status mapping:
+      - 200 + ``data.currentUser`` non-null → ``ok``, identity=username,
+        dofollow=True (velog is confirmed dofollow per Plan R-Phase4 roster)
+      - 200 + ``data.currentUser`` is null → ``token_expired`` (velog's
+        silent-drop signal that the session is no longer authenticated)
+      - ``requests.Timeout`` → ``timeout``
+      - everything else (HTTP non-200 / parse failure / connection error)
+        → ``never``
+    """
+    import requests
+    from .velog_graphql import (
+        _VELOG_GRAPHQL_ENDPOINT,
+        _VELOG_REQUIRED_HEADERS,
+        _load_cookies,
+    )
+
+    velog_cfg = config.velog
+    cookies_path = (
+        velog_cfg.cookies_path if velog_cfg else
+        config.config_dir / "velog-cookies.json"
+    )
+
+    try:
+        cookies = _load_cookies(cookies_path)
+    except DependencyError as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[str(e)],
+        )
+
+    try:
+        resp = requests.post(
+            _VELOG_GRAPHQL_ENDPOINT,
+            json={"query": _VELOG_CURRENT_USER_QUERY},
+            cookies=cookies,
+            headers=_VELOG_REQUIRED_HEADERS,
+            timeout=_VELOG_VERIFY_TIMEOUT_S,
+        )
+    except requests.Timeout:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="timeout",
+            blockers=[
+                f"velog currentUser timed out after {_VELOG_VERIFY_TIMEOUT_S}s"
+            ],
+        )
+    except requests.RequestException as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"velog network failure: {e}"],
+        )
+
+    if resp.status_code != 200:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"velog GraphQL returned HTTP {resp.status_code}"],
+        )
+
+    try:
+        body = resp.json()
+    except (ValueError, Exception):
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["velog returned non-JSON response"],
+        )
+
+    current_user = ((body or {}).get("data") or {}).get("currentUser")
+    if current_user is None:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="token_expired",
+            blockers=[
+                "velog cookie session expired or revoked — run velog-login again"
+            ],
+        )
+
+    identity = current_user.get("username") or current_user.get("display_name")
     return VerifyResult(
         ok=True,
         identity=identity,
