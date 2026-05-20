@@ -13,11 +13,8 @@ from .types import (
     Config,
     MediumOAuthConfig,
     ThreeUrlConfig,
-    DevtoConfig,
     GhpagesConfig,
     HashnodeConfig,
-    MastodonConfig,
-    WpcomConfig,
     VelogConfig,
     WriteAsConfig,
 )
@@ -199,34 +196,6 @@ def load_config(path: Path | None = None) -> Config:
             api_base=str(writeas_section.get("api_base", "https://write.as/api")),
         )
 
-    devto_section = data.get("devto")
-    devto: DevtoConfig | None = None
-    if devto_section is not None:
-        # API key lives in devto-token.json (SEC-3); only api_base override here.
-        devto = DevtoConfig(
-            api_base=str(devto_section.get("api_base", "https://dev.to/api")),
-        )
-
-    wpcom_section = data.get("wpcom")
-    wpcom: WpcomConfig | None = None
-    if wpcom_section is not None:
-        # OAuth bearer lives in wpcom-token.json (SEC-3); routing fields only.
-        wpcom = WpcomConfig(
-            site_id=str(wpcom_section.get("site_id", "")),
-            api_base=str(
-                wpcom_section.get("api_base", "https://public-api.wordpress.com")
-            ),
-        )
-
-    mastodon_section = data.get("mastodon")
-    mastodon: MastodonConfig | None = None
-    if mastodon_section is not None:
-        # Instance-scoped access token lives in mastodon-token.json (SEC-3).
-        mastodon = MastodonConfig(
-            instance_url=str(mastodon_section.get("instance_url", "")),
-            visibility=str(mastodon_section.get("visibility", "public")),
-        )
-
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -244,9 +213,6 @@ def load_config(path: Path | None = None) -> Config:
         ghpages=ghpages,
         hashnode=hashnode,
         writeas=writeas,
-        devto=devto,
-        wpcom=wpcom,
-        mastodon=mastodon,
     )
 
 

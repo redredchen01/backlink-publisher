@@ -50,17 +50,6 @@ register("ghpages", GitHubPagesAPIAdapter)
 register("hashnode", HashnodeAPIAdapter)
 register("writeas", WriteAsAPIAdapter)
 
-# ── Phase 4 platforms ────────────────────────────────────────────────
-# Enabled 2026-05-20. Each follows the canonical adapter pattern; the
-# dispatcher / argparse / schema / throttle / tier matrix all consume
-# registry dynamically (R9 extension readiness contract).
-from .devto import DevToAPIAdapter
-from .wpcom import WpcomAPIAdapter
-from .mastodon import MastodonAPIAdapter
-register("devto", DevToAPIAdapter)
-register("wpcom", WpcomAPIAdapter)
-register("mastodon", MastodonAPIAdapter)
-
 
 def publish(
     payload: dict[str, Any],
