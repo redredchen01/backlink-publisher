@@ -34,8 +34,8 @@ import string
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-from backlink_publisher.anchor_metrics import normalize
-from backlink_publisher.language_check import (
+from backlink_publisher.anchor.metrics import normalize
+from backlink_publisher.linkcheck.language import (
     EN_HINTS,
     RU_HINTS,
     SUPPORTED_LANGUAGES,
@@ -43,7 +43,7 @@ from backlink_publisher.language_check import (
     detect_language,
     language_matches,
 )
-from backlink_publisher.verify_publish import (
+from backlink_publisher.linkcheck.verify import (
     _link_in_body,
     _title_in_body,
 )

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from backlink_publisher.adapters.telegraph_node import (
+from backlink_publisher.publishing.adapters.telegraph_node import (
     _is_safe_href,
     markdown_to_telegraph_nodes,
 )
@@ -182,7 +182,7 @@ def test_unsafe_or_missing_href_collapses_anchor_to_text(bad_href: str):
     # Build raw HTML directly — markdown can't easily emit some of these.
     # We call render_to_html ourselves to confirm behaviour, but the
     # collapse path is verified by feeding the HTML through the builder.
-    from backlink_publisher.adapters.telegraph_node import _TelegraphNodeBuilder
+    from backlink_publisher.publishing.adapters.telegraph_node import _TelegraphNodeBuilder
 
     builder = _TelegraphNodeBuilder()
     builder.feed(f'<p>before <a href="{bad_href}">click</a> after</p>')
@@ -239,7 +239,7 @@ def test_utf8_bytes_reflects_cjk_expansion():
 def test_br_via_handle_starttag_emits_void_node():
     # <br> in HTML5 (no slash) arrives via handle_starttag. The walker
     # must treat it as void — no children key, no dangling frame.
-    from backlink_publisher.adapters.telegraph_node import _TelegraphNodeBuilder
+    from backlink_publisher.publishing.adapters.telegraph_node import _TelegraphNodeBuilder
 
     builder = _TelegraphNodeBuilder()
     builder.feed("<p>a<br>b</p>")
@@ -249,7 +249,7 @@ def test_br_via_handle_starttag_emits_void_node():
 
 
 def test_br_via_handle_startendtag_emits_void_node():
-    from backlink_publisher.adapters.telegraph_node import _TelegraphNodeBuilder
+    from backlink_publisher.publishing.adapters.telegraph_node import _TelegraphNodeBuilder
 
     builder = _TelegraphNodeBuilder()
     builder.feed("<p>a<br/>b</p>")
@@ -261,7 +261,7 @@ def test_br_via_handle_startendtag_emits_void_node():
 def test_malformed_html_does_not_raise():
     # Unclosed tags, mismatched closes — html.parser is permissive in
     # Python 3.5+ and never raises. Verify the walker survives.
-    from backlink_publisher.adapters.telegraph_node import _TelegraphNodeBuilder
+    from backlink_publisher.publishing.adapters.telegraph_node import _TelegraphNodeBuilder
 
     builder = _TelegraphNodeBuilder()
     builder.feed("<p>open <b>bold </p>")  # </b> missing

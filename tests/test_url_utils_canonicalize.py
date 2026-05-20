@@ -11,7 +11,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from backlink_publisher.url_utils import canonicalize_url
+from backlink_publisher._util.url import canonicalize_url
 
 
 # ----- Lowercase / port stripping -----

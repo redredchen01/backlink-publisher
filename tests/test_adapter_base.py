@@ -1,6 +1,6 @@
 """Tests for AdapterResult base type."""
 
-from backlink_publisher.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters.base import AdapterResult
 
 
 def test_adapter_result_defaults():

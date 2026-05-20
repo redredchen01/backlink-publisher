@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, call, patch, PropertyMock
 
 import pytest
 
-from backlink_publisher.adapters.base import AdapterResult
-from backlink_publisher.adapters.blogger_api import BloggerAPIAdapter, _near_expiry
+from backlink_publisher.publishing.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters.blogger_api import BloggerAPIAdapter, _near_expiry
 from backlink_publisher.config import Config, BloggerOAuthConfig
-from backlink_publisher.errors import AuthExpiredError, DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import AuthExpiredError, DependencyError, ExternalServiceError
 
 PAYLOAD = {
     "id": "abc123",
@@ -34,7 +34,7 @@ def make_mock_service(url="https://myblog.blogspot.com/2026/05/post.html"):
     return mock_service
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_draft_mode_returns_draft_url(mock_build, mock_creds):
     mock_build.return_value = make_mock_service()
@@ -47,7 +47,7 @@ def test_draft_mode_returns_draft_url(mock_build, mock_creds):
     assert result.adapter == "blogger-api"
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_publish_mode_returns_published_url(mock_build, mock_creds):
     mock_build.return_value = make_mock_service()
@@ -66,7 +66,7 @@ def test_missing_blog_id_raises_dependency_error():
         adapter.publish(PAYLOAD, mode="draft", config=cfg)
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_http_401_raises_auth_expired_error(mock_build, mock_creds):
     """Plan 2026-05-19-001 Unit 6: HTTP 401 → AuthExpiredError."""
@@ -88,7 +88,7 @@ def test_http_401_raises_auth_expired_error(mock_build, mock_creds):
     assert isinstance(exc_info.value, DependencyError)
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_http_403_raises_auth_expired_error(mock_build, mock_creds):
     """Plan 2026-05-19-001 Unit 6: HTTP 403 (token revoked) → AuthExpiredError."""
@@ -109,7 +109,7 @@ def test_http_403_raises_auth_expired_error(mock_build, mock_creds):
     assert "Blogger HTTP 403" in (exc_info.value.reason or "")
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_http_429_raises_rate_limited(mock_build, mock_creds):
     from googleapiclient.errors import HttpError
@@ -126,8 +126,8 @@ def test_http_429_raises_rate_limited(mock_build, mock_creds):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG)
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_429_retried_and_recovers(mock_build, mock_creds, mock_sleep):
     """HTTP 429 on first attempt triggers retry; success on second returns result."""
@@ -146,8 +146,8 @@ def test_429_retried_and_recovers(mock_build, mock_creds, mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_5xx_not_retried(mock_build, mock_creds, mock_sleep):
     """HTTP 503 is NOT retried (no idempotency guarantee from Blogger API)."""
@@ -166,8 +166,8 @@ def test_5xx_not_retried(mock_build, mock_creds, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_429_exhaustion_raises_external_service_error(mock_build, mock_creds, mock_sleep):
     """Three consecutive 429s exhaust retries and raise ExternalServiceError."""
@@ -186,8 +186,8 @@ def test_429_exhaustion_raises_external_service_error(mock_build, mock_creds, mo
     assert mock_sleep.call_count == 2  # 2 retries → 2 sleeps
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_401_not_retried(mock_build, mock_creds, mock_sleep):
     """Plan 2026-05-19-001 Unit 6: HTTP 401 is non-retryable —
@@ -207,7 +207,7 @@ def test_401_not_retried(mock_build, mock_creds, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.blogger_api._build_credentials")
+@patch("backlink_publisher.publishing.adapters.blogger_api._build_credentials")
 @patch("googleapiclient.discovery.build")
 def test_tags_truncated_to_20(mock_build, mock_creds):
     many_tags = [f"tag{i}" for i in range(30)]
@@ -281,11 +281,11 @@ def test_near_expiry_false_when_expiry_is_none():
 # _build_credentials pre-flight refresh tests
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.blogger_api.save_blogger_token")
-@patch("backlink_publisher.adapters.blogger_api.load_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.save_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.load_blogger_token")
 def test_build_credentials_refreshes_near_expiry_token(mock_load, mock_save):
     """Token expiring in 200s triggers pre-flight refresh; token persisted to disk."""
-    from backlink_publisher.adapters.blogger_api import _build_credentials
+    from backlink_publisher.publishing.adapters.blogger_api import _build_credentials
 
     mock_creds = _make_creds(
         expiry=_now_naive() + timedelta(seconds=200),
@@ -308,11 +308,11 @@ def test_build_credentials_refreshes_near_expiry_token(mock_load, mock_save):
     assert result is mock_creds
 
 
-@patch("backlink_publisher.adapters.blogger_api.save_blogger_token")
-@patch("backlink_publisher.adapters.blogger_api.load_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.save_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.load_blogger_token")
 def test_build_credentials_does_not_refresh_healthy_token(mock_load, mock_save):
     """Token with 600s remaining is returned as-is; no refresh call made."""
-    from backlink_publisher.adapters.blogger_api import _build_credentials
+    from backlink_publisher.publishing.adapters.blogger_api import _build_credentials
 
     mock_creds = _make_creds(
         expiry=_now_naive() + timedelta(seconds=600),
@@ -331,13 +331,13 @@ def test_build_credentials_does_not_refresh_healthy_token(mock_load, mock_save):
 
 
 @patch("google_auth_oauthlib.flow.InstalledAppFlow.from_client_config")
-@patch("backlink_publisher.adapters.blogger_api.save_blogger_token")
-@patch("backlink_publisher.adapters.blogger_api.load_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.save_blogger_token")
+@patch("backlink_publisher.publishing.adapters.blogger_api.load_blogger_token")
 def test_build_credentials_falls_to_reauth_when_preflight_refresh_fails(
     mock_load, mock_save, mock_flow_factory
 ):
     """refresh() failure sets creds=None and triggers full re-auth (R3)."""
-    from backlink_publisher.adapters.blogger_api import _build_credentials
+    from backlink_publisher.publishing.adapters.blogger_api import _build_credentials
 
     mock_creds = _make_creds(
         expiry=_now_naive() + timedelta(seconds=100),

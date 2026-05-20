@@ -17,7 +17,7 @@ from backlink_publisher.cli.plan_backlinks import (
     _plan_zh_short_row,
     _scheduler_enabled_for,
 )
-from backlink_publisher.anchor_scheduler import ScheduleDecision, SecondaryLink
+from backlink_publisher.anchor.scheduler import ScheduleDecision, SecondaryLink
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ from backlink_publisher.anchor_scheduler import ScheduleDecision, SecondaryLink
 def profile_cache(tmp_path):
     """Redirect _cache_dir for anchor_profile writes."""
     fake = tmp_path / "cache"
-    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=fake):
+    with patch("backlink_publisher.anchor.profile._cache_dir", return_value=fake):
         yield fake
 
 
@@ -174,7 +174,7 @@ def test_happy_path_records_profile_entries(profile_cache):
     payload = _plan_zh_short_row(row, cfg, llm_provider=None, rng=random.Random(0))
     assert payload is not None
 
-    from backlink_publisher.anchor_profile import load_profile
+    from backlink_publisher.anchor.profile import load_profile
     state = load_profile("https://51acgs.com")
     # 2 or 3 link records — 1 main + 1-2 secondaries
     assert len(state.entries) in (2, 3)
@@ -280,7 +280,7 @@ def test_degrade_when_no_llm_and_pool_exhausted(profile_cache):
         assert a in {"51漫画首页", "51漫画"}
 
     # Profile entries should be marked degraded=True
-    from backlink_publisher.anchor_profile import load_profile
+    from backlink_publisher.anchor.profile import load_profile
     state = load_profile("https://51acgs.com")
     assert all(e.degraded for e in state.entries)
 
@@ -317,7 +317,7 @@ def test_degrade_path_respects_recent_texts_dedup(profile_cache):
     """Regression for the ce:review adversarial finding: the degrade path
     must apply the same 20-entry text-dedup filter the normal resolver uses,
     so a burst of degrades can't resurrect an anchor that just shipped."""
-    from backlink_publisher.anchor_profile import (
+    from backlink_publisher.anchor.profile import (
         ProfileEntry,
         now_iso,
         record_article,
@@ -402,7 +402,7 @@ def test_retry_then_succeed(profile_cache):
     cfg = _config()
     # Patch the resolver to return None on the first call, real result after
     real_resolve = __import__(
-        "backlink_publisher.anchor_resolver", fromlist=["resolve_anchor"]
+        "backlink_publisher.anchor.resolver", fromlist=["resolve_anchor"]
     ).resolve_anchor
     call_count = {"n": 0}
 
@@ -417,7 +417,7 @@ def test_retry_then_succeed(profile_cache):
 
     assert payload is not None
     # No entries marked degraded (the retry succeeded)
-    from backlink_publisher.anchor_profile import load_profile
+    from backlink_publisher.anchor.profile import load_profile
     state = load_profile("https://51acgs.com")
     assert state.entries
     assert all(not e.degraded for e in state.entries)
@@ -509,7 +509,7 @@ def test_multi_article_distribution_approaches_target(profile_cache):
         payload = _plan_zh_short_row(row, cfg, None, rng=rng)
         assert payload is not None
 
-    from backlink_publisher.anchor_profile import load_profile, recent_type_counts
+    from backlink_publisher.anchor.profile import load_profile, recent_type_counts
     state = load_profile("https://51acgs.com")
     counts = recent_type_counts(state)
     total = sum(counts.values())

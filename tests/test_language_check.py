@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from backlink_publisher.language_check import (
+from backlink_publisher.linkcheck.language import (
     SUPPORTED_LANGUAGES,
     detect_language,
     language_matches,
@@ -176,7 +176,7 @@ def test_detect_pure_url_only_text_returns_unknown() -> None:
 # --- Plan 2026-05-18-006 Unit 2: ko language detection -----------------------
 
 
-from backlink_publisher.language_check import (  # noqa: E402
+from backlink_publisher.linkcheck.language import (  # noqa: E402
     KO_HINTS,
     detect_language_from_html,
     detect_language_from_markdown,

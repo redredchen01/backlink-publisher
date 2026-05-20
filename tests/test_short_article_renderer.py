@@ -7,8 +7,8 @@ import re
 
 import pytest
 
-from backlink_publisher.errors import InputValidationError
-from backlink_publisher.markdown_utils import (
+from backlink_publisher._util.errors import InputValidationError
+from backlink_publisher._util.markdown import (
     render_to_html,
     render_zh_short_article,
 )

@@ -9,14 +9,14 @@ from unittest.mock import patch, call
 
 import pytest
 
-from backlink_publisher.adapters.retry import (
+from backlink_publisher.publishing.adapters.retry import (
     MAX_ATTEMPTS,
     BACKOFF_BASE,
     JITTER_FACTOR,
     RETRYABLE_HTTP_STATUSES,
     retry_transient_call,
 )
-from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ def test_success_on_first_attempt_returns_value():
     assert result == 42
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_success_on_first_attempt_never_sleeps(mock_sleep):
     retry_transient_call(lambda: "ok", is_retryable=_always_retry)
     mock_sleep.assert_not_called()
@@ -58,7 +58,7 @@ def test_success_on_first_attempt_never_sleeps(mock_sleep):
 # Retry + recovery
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_retry_and_recovery_on_attempt_2(mock_sleep):
     calls = []
 
@@ -74,7 +74,7 @@ def test_retry_and_recovery_on_attempt_2(mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_sleep_duration_within_jitter_bounds(mock_sleep):
     """First retry wait is backoff_base^1 = 2s, ±15% → [1.7, 2.3]."""
     calls = []
@@ -92,7 +92,7 @@ def test_sleep_duration_within_jitter_bounds(mock_sleep):
     assert low <= wait <= high, f"sleep {wait} outside [{low}, {high}]"
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_retry_recovery_on_attempt_3(mock_sleep):
     calls = []
 
@@ -111,7 +111,7 @@ def test_retry_recovery_on_attempt_3(mock_sleep):
 # Retry exhaustion
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_exhaustion_reraises_last_exception(mock_sleep):
     exc = _TransientError("boom")
 
@@ -119,7 +119,7 @@ def test_exhaustion_reraises_last_exception(mock_sleep):
         retry_transient_call(lambda: (_ for _ in ()).throw(exc), is_retryable=_always_retry)
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_exhaustion_sleeps_before_each_retry(mock_sleep):
     """3 attempts → 2 sleeps (before attempt 2 and before attempt 3)."""
     with pytest.raises(_TransientError):
@@ -130,7 +130,7 @@ def test_exhaustion_sleeps_before_each_retry(mock_sleep):
     assert mock_sleep.call_count == 2
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_exhaustion_sleep_durations_increase(mock_sleep):
     """Backoff: wait before attempt 2 = 2s, before attempt 3 = 4s (±jitter)."""
     with pytest.raises(_TransientError):
@@ -146,7 +146,7 @@ def test_exhaustion_sleep_durations_increase(mock_sleep):
 # Non-retryable exception
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_non_retryable_propagates_immediately(mock_sleep):
     with pytest.raises(_PermanentError):
         retry_transient_call(
@@ -156,7 +156,7 @@ def test_non_retryable_propagates_immediately(mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_non_retryable_is_retryable_called_once(mock_sleep):
     calls = []
 
@@ -176,7 +176,7 @@ def test_non_retryable_is_retryable_called_once(mock_sleep):
 # DependencyError / ExternalServiceError passthrough
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_dependency_error_passes_through_immediately(mock_sleep):
     with pytest.raises(DependencyError):
         retry_transient_call(
@@ -186,7 +186,7 @@ def test_dependency_error_passes_through_immediately(mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_external_service_error_passes_through_immediately(mock_sleep):
     with pytest.raises(ExternalServiceError):
         retry_transient_call(
@@ -200,7 +200,7 @@ def test_external_service_error_passes_through_immediately(mock_sleep):
 # Bare raise preserves exception type (R6 contract)
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_exception_type_preserved_on_non_retryable(mock_sleep):
     """Bare raise must preserve exact type — no re-wrapping."""
     class MySpecificError(Exception):
@@ -213,7 +213,7 @@ def test_exception_type_preserved_on_non_retryable(mock_sleep):
         )
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_exception_type_preserved_on_exhaustion(mock_sleep):
     class MySpecificError(Exception):
         pass
@@ -229,7 +229,7 @@ def test_exception_type_preserved_on_exhaustion(mock_sleep):
 # max_attempts=1 edge case
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_max_attempts_1_no_retry(mock_sleep):
     with pytest.raises(_TransientError):
         retry_transient_call(
@@ -244,7 +244,7 @@ def test_max_attempts_1_no_retry(mock_sleep):
 # Stderr content (R3a) — no credentials/bodies
 # ---------------------------------------------------------------------------
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_stderr_emitted_on_retry(mock_sleep, capsys):
     calls = []
 
@@ -265,14 +265,14 @@ def test_stderr_emitted_on_retry(mock_sleep, capsys):
     assert msg["adapter"] == "test-adapter"
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_stderr_not_emitted_on_success(mock_sleep, capsys):
     retry_transient_call(lambda: "ok", is_retryable=_always_retry, adapter="x")
     captured = capsys.readouterr()
     assert captured.err == ""
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
 def test_stderr_not_emitted_on_non_retryable(mock_sleep, capsys):
     with pytest.raises(_PermanentError):
         retry_transient_call(

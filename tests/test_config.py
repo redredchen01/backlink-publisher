@@ -16,7 +16,7 @@ from backlink_publisher.config import (
     save_blogger_token,
     save_config,
 )
-from backlink_publisher.errors import DependencyError
+from backlink_publisher._util.errors import DependencyError
 
 
 SAMPLE_TOML = b"""

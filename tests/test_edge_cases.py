@@ -13,8 +13,8 @@ import pytest
 
 from backlink_publisher.cli.plan_backlinks import main as plan_main
 from backlink_publisher.cli.validate_backlinks import main as validate_main
-from backlink_publisher.errors import DependencyError, ExternalServiceError
-from backlink_publisher.verify_publish import VerificationResult
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher.linkcheck.verify import VerificationResult
 
 
 @pytest.fixture(autouse=True)
@@ -239,7 +239,7 @@ class TestPublishEdgeCases:
     @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
     def test_publish_platform_from_row(self, mock_pub, mock_verify):
         """Platform is read from row when --platform not specified."""
-        from backlink_publisher.adapters.base import AdapterResult
+        from backlink_publisher.publishing.adapters.base import AdapterResult
         p = copy.deepcopy(VALID_OUTPUT)
         p["platform"] = "blogger"
         data = json.dumps(p)
@@ -338,7 +338,7 @@ class TestPipelineIntegration:
         assert validated_rows[0]["language"] == "en"
 
         # Stage 3: publish dry-run — only the en row reaches publish.
-        from backlink_publisher.adapters.base import AdapterResult
+        from backlink_publisher.publishing.adapters.base import AdapterResult
         mock_pub.return_value = AdapterResult(
             status="draft",
             adapter="medium-api",

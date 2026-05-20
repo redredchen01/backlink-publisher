@@ -108,7 +108,7 @@ def _mock_content_fetch(request, monkeypatch: pytest.MonkeyPatch) -> None:
     in ``pyproject.toml [tool.pytest.ini_options] markers``.
     """
     # Reset cache state up front so previous tests don't contaminate this one.
-    from backlink_publisher import content_fetch as _content_fetch
+    from backlink_publisher.content import fetch as _content_fetch
 
     _content_fetch.reset_cache()
 
@@ -124,12 +124,12 @@ def _mock_content_fetch(request, monkeypatch: pytest.MonkeyPatch) -> None:
         return (True, None, "mock title")
 
     monkeypatch.setattr(
-        "backlink_publisher.content_fetch.verify_urls_batch",
+        "backlink_publisher.content.fetch.verify_urls_batch",
         _ok_batch,
         raising=True,
     )
     monkeypatch.setattr(
-        "backlink_publisher.content_fetch.verify_url_has_content",
+        "backlink_publisher.content.fetch.verify_url_has_content",
         _ok_single,
         raising=True,
     )

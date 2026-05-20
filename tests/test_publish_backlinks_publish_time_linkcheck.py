@@ -63,7 +63,7 @@ def _run_publish(input_data: str, extra_argv: list[str] | None = None) -> tuple[
                 with patch(
                     "backlink_publisher.cli.publish_backlinks.adapter_publish"
                 ) as mock_pub:
-                    from backlink_publisher.adapters.base import AdapterResult
+                    from backlink_publisher.publishing.adapters.base import AdapterResult
                     mock_pub.return_value = AdapterResult(
                         status="draft",
                         adapter="medium-api",

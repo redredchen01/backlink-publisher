@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backlink_publisher.adapters.medium_api import MediumAPIAdapter
+from backlink_publisher.publishing.adapters.medium_api import MediumAPIAdapter
 from backlink_publisher.config import Config
-from backlink_publisher.errors import AuthExpiredError, DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import AuthExpiredError, DependencyError, ExternalServiceError
 
 PAYLOAD = {
     "id": "abc123",
@@ -47,8 +47,8 @@ def test_no_token_raises_dependency_error():
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
 
 
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_draft_mode_returns_draft_url(mock_post, mock_get):
     mock_get.return_value = make_mock_get()
     mock_post.return_value = make_mock_post()
@@ -63,11 +63,11 @@ def test_draft_mode_returns_draft_url(mock_post, mock_get):
 
 
 @patch(
-    "backlink_publisher.adapters.medium_api.verify_link_attributes",
+    "backlink_publisher.publishing.adapters.medium_api.verify_link_attributes",
     return_value={"verification": "skipped", "reason": "test-mock"},
 )
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_publish_mode_sends_public_status(mock_post, mock_get, _mock_verify):
     mock_get.return_value = make_mock_get()
     pub_resp = {"data": {"id": "post789", "url": "https://medium.com/@testuser/live-post"}}
@@ -81,7 +81,7 @@ def test_publish_mode_sends_public_status(mock_post, mock_get, _mock_verify):
     assert post_body["publishStatus"] == "public"
 
 
-@patch("backlink_publisher.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
 def test_401_on_me_raises_auth_expired_error(mock_get):
     """Plan 2026-05-19-001 Unit 6: /me 401 → AuthExpiredError (not
     ExternalServiceError). Existing ``except DependencyError`` callers
@@ -96,9 +96,9 @@ def test_401_on_me_raises_auth_expired_error(mock_get):
     assert isinstance(exc_info.value, DependencyError)
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_429_raises_rate_limited(mock_post, mock_get, mock_sleep):
     """429 on all retry attempts → ExternalServiceError after retries exhausted."""
     mock_get.return_value = make_mock_get()
@@ -109,9 +109,9 @@ def test_429_raises_rate_limited(mock_post, mock_get, mock_sleep):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_WITH_TOKEN)
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_posts_429_retried_and_recovers(mock_post, mock_get, mock_sleep):
     """/posts 429 on first call triggers retry; second call succeeds."""
     mock_get.return_value = make_mock_get()
@@ -123,9 +123,9 @@ def test_posts_429_retried_and_recovers(mock_post, mock_get, mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
 def test_posts_503_not_retried(mock_get, mock_post, mock_sleep):
     """/posts 503 is NOT retried (no idempotency guarantee from Medium API)."""
     mock_get.return_value = make_mock_get()
@@ -137,9 +137,9 @@ def test_posts_503_not_retried(mock_get, mock_post, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_me_429_retried_and_recovers(mock_post, mock_get, mock_sleep):
     """/me 429 on first call triggers retry; second call succeeds."""
     mock_get.side_effect = [make_mock_get(status=429), make_mock_get()]
@@ -151,9 +151,9 @@ def test_me_429_retried_and_recovers(mock_post, mock_get, mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_posts_connection_error_retried(mock_post, mock_get, mock_sleep):
     """/posts ConnectionError triggers retry; second call succeeds."""
     import requests as req
@@ -166,9 +166,9 @@ def test_posts_connection_error_retried(mock_post, mock_get, mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_posts_401_not_retried(mock_post, mock_get, mock_sleep):
     """Plan 2026-05-19-001 Unit 6: /posts 401 → AuthExpiredError (not
     ExternalServiceError). Still non-retryable — no sleep."""
@@ -183,9 +183,9 @@ def test_posts_401_not_retried(mock_post, mock_get, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_user_id_not_refetched_on_posts_retry(mock_post, mock_get, mock_sleep):
     """user_id from /me is cached — /me called once even on /posts retry."""
     import requests as req
@@ -197,8 +197,8 @@ def test_user_id_not_refetched_on_posts_retry(mock_post, mock_get, mock_sleep):
     assert mock_get.call_count == 1  # /me called exactly once
 
 
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_tags_truncated_to_5(mock_post, mock_get):
     mock_get.return_value = make_mock_get()
     mock_post.return_value = make_mock_post()
@@ -210,8 +210,8 @@ def test_tags_truncated_to_5(mock_post, mock_get):
     assert len(post_body["tags"]) == 5
 
 
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_canonical_url_omitted_if_empty(mock_post, mock_get):
     mock_get.return_value = make_mock_get()
     mock_post.return_value = make_mock_post()
@@ -224,8 +224,8 @@ def test_canonical_url_omitted_if_empty(mock_post, mock_get):
     assert "canonicalUrl" not in post_body
 
 
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_html_body_is_rendered_markdown(mock_post, mock_get):
     """The POST body must contain rendered HTML, not raw markdown."""
     mock_get.return_value = make_mock_get()
@@ -252,10 +252,10 @@ def _token_data_with_expiry(offset: float) -> dict:
     return {"access_token": "oauth-tok", "expires_at": _FIXED_NOW + offset}
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_preflight_no_error_when_expiry_600s_future(mock_post, mock_get, mock_load, _mock_time):
     mock_load.return_value = _token_data_with_expiry(600)
     mock_get.return_value = make_mock_get()
@@ -267,7 +267,7 @@ def test_preflight_no_error_when_expiry_600s_future(mock_post, mock_get, mock_lo
     mock_get.assert_called_once()  # publish proceeded to API call
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
 def test_preflight_raises_when_expiry_200s_future(mock_load, _mock_time):
     mock_load.return_value = _token_data_with_expiry(200)
@@ -277,7 +277,7 @@ def test_preflight_raises_when_expiry_200s_future(mock_load, _mock_time):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
 def test_preflight_raises_at_exactly_300s_boundary(mock_load, _mock_time):
     # now >= (now + 300) - 300 → True (inclusive boundary)
@@ -288,10 +288,10 @@ def test_preflight_raises_at_exactly_300s_boundary(mock_load, _mock_time):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_preflight_no_error_at_301s_boundary(mock_post, mock_get, mock_load, _mock_time):
     # now < (now + 301) - 300 → False (just outside window)
     mock_load.return_value = _token_data_with_expiry(301)
@@ -303,7 +303,7 @@ def test_preflight_no_error_at_301s_boundary(mock_post, mock_get, mock_load, _mo
     assert result.status == "drafted"
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
 def test_preflight_raises_when_already_expired(mock_load, _mock_time):
     mock_load.return_value = _token_data_with_expiry(-30)
@@ -313,10 +313,10 @@ def test_preflight_raises_when_already_expired(mock_load, _mock_time):
         adapter.publish(PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_preflight_skipped_for_zero_expires_at_sentinel(mock_post, mock_get, mock_load, _mock_time):
     # expires_at = 0 treated as absent (fail-open)
     mock_load.return_value = {"access_token": "oauth-tok", "expires_at": 0}
@@ -329,8 +329,8 @@ def test_preflight_skipped_for_zero_expires_at_sentinel(mock_post, mock_get, moc
 
 
 @patch("backlink_publisher.config.load_medium_token")
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_preflight_skipped_when_expires_at_absent(mock_post, mock_get, mock_load):
     # Token without expires_at → pre-flight skipped entirely
     mock_load.return_value = {"access_token": "oauth-tok"}
@@ -343,8 +343,8 @@ def test_preflight_skipped_when_expires_at_absent(mock_post, mock_get, mock_load
 
 
 @patch("backlink_publisher.config.load_medium_token", return_value=None)
-@patch("backlink_publisher.adapters.medium_api.requests.get")
-@patch("backlink_publisher.adapters.medium_api.requests.post")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.get")
+@patch("backlink_publisher.publishing.adapters.medium_api.requests.post")
 def test_preflight_skipped_for_integration_token(mock_post, mock_get, _mock_load):
     # medium_token_data is None → integration token path, no pre-flight check
     mock_get.return_value = make_mock_get()
@@ -355,7 +355,7 @@ def test_preflight_skipped_for_integration_token(mock_post, mock_get, _mock_load
     assert result.status == "drafted"
 
 
-@patch("backlink_publisher.adapters.medium_api.time.time", return_value=_FIXED_NOW)
+@patch("backlink_publisher.publishing.adapters.medium_api.time.time", return_value=_FIXED_NOW)
 @patch("backlink_publisher.config.load_medium_token")
 def test_preflight_raises_external_service_error_not_dependency_error(mock_load, _mock_time):
     # Near-expiry must raise ExternalServiceError (not DependencyError) so the
@@ -369,5 +369,5 @@ def test_preflight_raises_external_service_error_not_dependency_error(mock_load,
     except ExternalServiceError:
         pass  # correct
     except Exception as exc:
-        from backlink_publisher.errors import DependencyError as DE
+        from backlink_publisher._util.errors import DependencyError as DE
         assert not isinstance(exc, DE), f"Near-expiry raised DependencyError instead of ExternalServiceError: {exc}"

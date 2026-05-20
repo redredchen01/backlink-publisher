@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backlink_publisher.url_utils import (
+from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
     strip_fragment_query,

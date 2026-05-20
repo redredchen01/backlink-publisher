@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backlink_publisher.markdown_utils import (
+from backlink_publisher._util.markdown import (
     render_zh_short_article,
     validate_zh_short_payload,
 )

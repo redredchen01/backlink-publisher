@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from backlink_publisher.verify_publish import VerificationResult, verify_published
+from backlink_publisher.linkcheck.verify import VerificationResult, verify_published
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ from backlink_publisher.verify_publish import VerificationResult, verify_publish
 def _mock_get(status: int, body: str):
     """Patch _get_body to return a fixed status+body."""
     return patch(
-        "backlink_publisher.verify_publish._get_body",
+        "backlink_publisher.linkcheck.verify._get_body",
         return_value=(status, body),
     )
 
@@ -155,8 +155,8 @@ def test_verify_retries_until_success():
             return (404, "")
         return (200, good_body)
 
-    with patch("backlink_publisher.verify_publish._get_body", side_effect=side_effect):
-        with patch("backlink_publisher.verify_publish.time.sleep"):
+    with patch("backlink_publisher.linkcheck.verify._get_body", side_effect=side_effect):
+        with patch("backlink_publisher.linkcheck.verify.time.sleep"):
             result = verify_published(
                 "https://blog.example.com/post/1",
                 title="My Article",
@@ -170,8 +170,8 @@ def test_verify_retries_until_success():
 def test_verify_gives_up_after_max_wait():
     """All attempts fail; verify returns False after max_wait."""
     with _mock_get(404, ""):
-        with patch("backlink_publisher.verify_publish.time.sleep"):
-            with patch("backlink_publisher.verify_publish.time.monotonic") as mock_mono:
+        with patch("backlink_publisher.linkcheck.verify.time.sleep"):
+            with patch("backlink_publisher.linkcheck.verify.time.monotonic") as mock_mono:
                 # Simulate: first call is before deadline, second is after
                 mock_mono.side_effect = [0, 0, 100]  # start, check 1, check 2
                 result = verify_published(
@@ -187,8 +187,8 @@ def test_verify_gives_up_after_max_wait():
 def test_verify_reports_attempt_count_in_reason():
     """Failure reason mentions attempt count."""
     with _mock_get(404, ""):
-        with patch("backlink_publisher.verify_publish.time.sleep"):
-            with patch("backlink_publisher.verify_publish.time.monotonic") as mock_mono:
+        with patch("backlink_publisher.linkcheck.verify.time.sleep"):
+            with patch("backlink_publisher.linkcheck.verify.time.monotonic") as mock_mono:
                 mock_mono.side_effect = [0, 0, 0, 100]
                 result = verify_published(
                     "https://x.com/p/1",

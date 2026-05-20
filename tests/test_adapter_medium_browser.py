@@ -24,10 +24,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backlink_publisher.adapters.medium_browser import MediumBrowserAdapter
+from backlink_publisher.publishing.adapters.medium_browser import MediumBrowserAdapter
 from backlink_publisher.config import Config
 from backlink_publisher.config.loader import _config_dir
-from backlink_publisher.errors import (
+from backlink_publisher._util.errors import (
     AuthExpiredError,
     DependencyError,
     ExternalServiceError,
@@ -108,7 +108,7 @@ def make_mock_pw(page_url="https://medium.com/@user/test-draft-abc123"):
 # ─── Happy paths ───
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_draft_mode_returns_draft_url(mock_sync_pw):
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
     mock_sync_pw.return_value = mock_pw
@@ -121,7 +121,7 @@ def test_draft_mode_returns_draft_url(mock_sync_pw):
     assert result.adapter == "medium-browser"
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_publish_mode_clicks_publish_button(mock_sync_pw):
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw(
         "https://medium.com/@user/live-post-abc123"
@@ -135,7 +135,7 @@ def test_publish_mode_clicks_publish_button(mock_sync_pw):
     assert result.published_url == "https://medium.com/@user/live-post-abc123"
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_uses_add_cookies_not_storage_state(mock_sync_pw):
     """Plan 005 Unit 1 contract: adapter MUST load credentials via
     ``new_context() + add_cookies([...])``, NOT via
@@ -163,7 +163,7 @@ def test_uses_add_cookies_not_storage_state(mock_sync_pw):
     mock_pw.chromium.launch_persistent_context.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_success_refreshes_cookies_json(mock_sync_pw):
     """Plan 005 Unit 1: successful publish refreshes medium-cookies.json
     via context.cookies('https://medium.com') so rotated session cookies
@@ -184,7 +184,7 @@ def test_success_refreshes_cookies_json(mock_sync_pw):
     assert payload["cookies"][0]["value"] == "refreshed-sid"
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_refreshed_cookies_file_is_0600(mock_sync_pw):
     """Plan 005 Unit 1 R3: the refresh must preserve 0o600 mode."""
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
@@ -260,7 +260,7 @@ def test_cookies_wrong_shape_raises_dependency_error():
 # ─── Auth-expired during publish (unchanged from Plan 003) ───
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_login_redirect_raises_auth_expired_error(mock_sync_pw):
     """``/m/signin`` redirect during publish raises AuthExpiredError — this
     is genuinely auth-expired (cookies are stale, not missing)."""
@@ -276,7 +276,7 @@ def test_login_redirect_raises_auth_expired_error(mock_sync_pw):
     assert "medium-login" in (excinfo.value.reason or "")
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_login_redirect_marks_expired_in_store(mock_sync_pw):
     """``mark_expired('medium')`` is called when /m/signin redirect detected."""
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
@@ -294,7 +294,7 @@ def test_login_redirect_marks_expired_in_store(mock_sync_pw):
 # ─── Existing error paths preserved ───
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_captcha_raises_external_service_error(mock_sync_pw):
     """CAPTCHA still raises ExternalServiceError (NOT AuthExpiredError) —
     CAPTCHA isn't an auth-expiration; operator solves it manually."""
@@ -318,7 +318,7 @@ def test_captcha_raises_external_service_error(mock_sync_pw):
 
 def test_playwright_not_installed_raises_dependency_error():
     """When sync_playwright is None (import failed at module load), raise DependencyError."""
-    import backlink_publisher.adapters.medium_browser as mod
+    import backlink_publisher.publishing.adapters.medium_browser as mod
     original = mod.sync_playwright
     try:
         mod.sync_playwright = None
@@ -329,8 +329,8 @@ def test_playwright_not_installed_raises_dependency_error():
         mod.sync_playwright = original
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_playwright_timeout_retried_and_recovers(mock_sync_pw, mock_sleep):
     """PlaywrightTimeoutError on first attempt triggers retry; second succeeds."""
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
@@ -373,8 +373,8 @@ def test_playwright_timeout_retried_and_recovers(mock_sync_pw, mock_sleep):
     assert call_count[0] == 2  # two browser contexts opened
 
 
-@patch("backlink_publisher.adapters.retry.time.sleep")
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.retry.time.sleep")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_captcha_after_timeout_not_retried(mock_sync_pw, mock_sleep):
     """TimeoutError with CAPTCHA in DOM → non-retryable ExternalServiceError, no sleep."""
     from playwright.sync_api import TimeoutError as PlaywrightTimeout
@@ -408,10 +408,10 @@ def test_captcha_after_timeout_not_retried(mock_sync_pw, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.adapters.medium_browser.sync_playwright")
+@patch("backlink_publisher.publishing.adapters.medium_browser.sync_playwright")
 def test_html_clipboard_content_matches_render(mock_sync_pw):
     """Clipboard write must contain rendered HTML, not raw markdown."""
-    from backlink_publisher.markdown_utils import render_to_html
+    from backlink_publisher._util.markdown import render_to_html
     expected_html = render_to_html(PAYLOAD["content_markdown"])
 
     mock_pw, mock_br, mock_ctx, mock_page = make_mock_pw()
