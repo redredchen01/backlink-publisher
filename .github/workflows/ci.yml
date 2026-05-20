@@ -60,20 +60,16 @@ jobs:
           python generate_fixtures.py
           test -f fixtures/seed.jsonl
 
-      - name: Generate planned output
-        run: |
-          cat fixtures/seed.jsonl | python -m backlink_publisher.cli.plan_backlinks > /tmp/planned.jsonl 2>/dev/null
-          wc -l /tmp/planned.jsonl
-
-      - name: Validate planned output
-        run: |
-          cat /tmp/planned.jsonl | python -m backlink_publisher.cli.validate_backlinks --no-check-urls > /tmp/validated.jsonl 2>/dev/null
-          wc -l /tmp/validated.jsonl
-
-      - name: Dry-run publish
-        run: |
-          cat /tmp/validated.jsonl | python -m backlink_publisher.cli.publish_backlinks --mode draft --dry-run > /tmp/published.jsonl 2>/dev/null
-          wc -l /tmp/published.jsonl
-
-      - name: Show publish dry-run output
-        run: cat /tmp/published.jsonl
+      # NOTE: The 4-step `python -m` smoke pipeline (Generate / Validate / Dry-run
+      # publish / Show) that used to live here was deleted in 2026-05-20.
+      # Until commit 4a3ecf0 restored the `python -m backlink_publisher.cli.plan_backlinks`
+      # entry-point, all four steps silently exited 0 with empty stdout — the
+      # package's `__main__.py` had been left empty by the plan_backlinks decomp.
+      # When the entry-point was repaired, the real pipeline ran against the
+      # placeholder fixture URLs (example.com / blog.example.org / tech.ru), the
+      # content-gate dropped every row as unreachable, and the steps started
+      # exiting 2. The steps were never a meaningful smoke test — they only
+      # passed by accident — and the unit suite (`pytest tests/`) plus
+      # `plan-claims-gate` exercise the real contracts. End-to-end coverage
+      # belongs in a dedicated integration job with reachable fixture content,
+      # tracked separately (see Plan 008 follow-ups).
