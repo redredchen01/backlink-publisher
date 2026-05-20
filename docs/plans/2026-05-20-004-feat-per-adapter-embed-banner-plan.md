@@ -321,7 +321,7 @@ Unit 1 must land first (establishes contract + 3 of 5 dispatch branches via writ
 
 ---
 
-- [ ] **Unit 4: Hashnode `embed_banner` via `uploadMedia` GraphQL mutation**
+- [x] **Unit 4: Hashnode `embed_banner` — pivoted to writeas-style `None` return** (Hashnode's free GraphQL API was retired 2026-05-13 per their changelog; `uploadMedia` mutation paywalled and unverifiable). Shipped.
 
 **Goal:** Implement `HashnodeAPIAdapter.embed_banner` returning a Hashnode-hosted CDN URL.
 
