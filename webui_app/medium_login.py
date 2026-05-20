@@ -28,9 +28,11 @@ _thread_lock = threading.Lock()
 # ── Playwright import (None when not installed) ───────────────────────────────
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as _PWTimeout
+    from playwright.sync_api import Error as _PWError
 except ImportError:
     sync_playwright = None          # type: ignore[assignment]
     _PWTimeout = Exception          # type: ignore[misc]
+    _PWError = Exception            # type: ignore[misc]
 
 _LOCK_FILENAME = "medium-browser.lock"
 _COOLDOWN_FILENAME = "medium-probe-cooldown.json"
@@ -135,20 +137,27 @@ class _FileLock:
 
 
 def _playwright_context(config: Config):
-    """Return a Playwright persistent context (headed, anti-detect args)."""
+    """Return a Playwright persistent context (headed, anti-detect args).
+
+    Returns ``(pw_cm, ctx)``: ``pw_cm`` is the ``PlaywrightContextManager``
+    (the object that owns ``__exit__``); ``pw_cm.__enter__()`` returns the
+    ``Playwright`` *instance*, which itself has no ``__exit__``. Callers
+    must call ``pw_cm.__exit__(None, None, None)`` to tear Playwright down.
+    """
     if sync_playwright is None:
         raise DependencyError(
             "Playwright 未安装，请运行 playwright install chromium"
         )
     udd = _user_data_dir(config)
     udd.mkdir(parents=True, exist_ok=True, mode=0o700)
-    pw = sync_playwright().__enter__()
+    pw_cm = sync_playwright()
+    pw = pw_cm.__enter__()
     ctx = pw.chromium.launch_persistent_context(
         str(udd),
         headless=False,
         args=["--disable-blink-features=AutomationControlled"],
     )
-    return pw, ctx
+    return pw_cm, ctx
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -160,7 +169,7 @@ def launch_login_window(config: Config) -> dict:
     Acquires the shared lock so CLI publish cannot overlap.
     """
     with _FileLock(_lock_path(config), timeout=_UI_LOCK_TIMEOUT):
-        pw, ctx = _playwright_context(config)
+        pw_cm, ctx = _playwright_context(config)
         page = ctx.new_page()
         t0 = time.monotonic()
         try:
@@ -176,9 +185,23 @@ def launch_login_window(config: Config) -> dict:
                 "Medium 登录超时（180 s）；若启用了 email 验证码或 2FA 请尽快完成，"
                 "否则请重试。"
             )
+        except _PWError as e:
+            # User-closed window or browser crash mid-login throws
+            # ``Target page, context or browser has been closed``. Treat
+            # any non-timeout Playwright runtime error as a clean cancel
+            # rather than 500.
+            msg = str(e)
+            if "closed" in msg.lower():
+                raise ExternalServiceError(
+                    "登录窗口已关闭。如需重试请再次点击「打开浏览器登录」。"
+                )
+            raise ExternalServiceError(f"Medium 登录失败：{msg}")
         finally:
-            ctx.close()
-            pw.__exit__(None, None, None)
+            try:
+                ctx.close()
+            except _PWError:
+                pass  # context may already be closed (user-closed window)
+            pw_cm.__exit__(None, None, None)
 
 
 def probe_login_status(config: Config, timeout: int = 15) -> dict:
@@ -189,7 +212,7 @@ def probe_login_status(config: Config, timeout: int = 15) -> dict:
     """
     _check_cooldown(config)
     with _FileLock(_lock_path(config), timeout=_UI_LOCK_TIMEOUT):
-        pw, ctx = _playwright_context(config)
+        pw_cm, ctx = _playwright_context(config)
         page = ctx.new_page()
         try:
             page.goto("https://medium.com/me", timeout=timeout * 1_000)
@@ -205,9 +228,17 @@ def probe_login_status(config: Config, timeout: int = 15) -> dict:
             raise ExternalServiceError(
                 f"Medium probe 超时（{timeout}s）；请确认网络正常后重试。"
             )
+        except _PWError as e:
+            msg = str(e)
+            if "closed" in msg.lower():
+                raise ExternalServiceError("Medium probe 中断：浏览器窗口被关闭。")
+            raise ExternalServiceError(f"Medium probe 失败：{msg}")
         finally:
-            ctx.close()
-            pw.__exit__(None, None, None)
+            try:
+                ctx.close()
+            except _PWError:
+                pass
+            pw_cm.__exit__(None, None, None)
 
 
 def clear_browser_profile(config: Config) -> None:
