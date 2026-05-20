@@ -24,3 +24,6 @@ webui.log
 
 # spike scratch (raw API response bodies — may echo credentials)
 /.spike/
+
+# Phase B Medium GraphQL spike scratch notes (B.1) — never push
+docs/spikes/20[0-9][0-9]-*-medium-graphql-spike-notes.md
