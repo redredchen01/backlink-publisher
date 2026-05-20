@@ -136,23 +136,31 @@ class TestRejectedPlatform:
         assert "devto" not in _REJECTED_PLATFORMS
 
 
-class TestBackCompatNoneDefault:
-    def test_register_without_dofollow_kwarg_still_works(self) -> None:
-        # U2 → U5 back-compat: missing kwarg means dofollow=None.
-        # U5 will remove the default and make this raise TypeError.
-        register("foo_legacy", FakeAdapter)
-        assert "foo_legacy" in _REGISTRY
-        assert dofollow_status("foo_legacy") is None
-        assert dofollow_rationale("foo_legacy") is None
+class TestDofollowKwargRequired:
+    def test_register_without_dofollow_raises_type_error(self) -> None:
+        # R2: gate-active state — missing dofollow= is a TypeError at
+        # import time, no silent default. This is the value-validation
+        # gate that closes the PR #108 failure mode.
+        with pytest.raises(TypeError, match="dofollow"):
+            register("foo_no_kwarg", FakeAdapter)  # type: ignore[call-arg]
 
-    def test_register_with_explicit_none_clears_stale_parallel_dict(self) -> None:
-        # Defensive back-compat: if a name was previously registered
-        # with dofollow=True and then re-registered without a kwarg,
-        # the parallel dicts must not retain stale truth.
+    def test_register_with_last_call_wins_overwrites_parallel_dicts(self) -> None:
+        # "Last call wins" is preserved across all three dicts. A second
+        # register() call with a different dofollow value supersedes the
+        # first cleanly — no stale residue in the parallel dicts.
+        register(
+            "foo_recycle",
+            FakeAdapter,
+            dofollow=False,
+            rationale=RATIONALE_PAD,
+        )
+        assert dofollow_status("foo_recycle") is False
         register("foo_recycle", FakeAdapter, dofollow=True)
         assert dofollow_status("foo_recycle") is True
-        register("foo_recycle", FakeAdapter)  # no kwarg → None
-        assert dofollow_status("foo_recycle") is None
+        # The old False-state rationale must NOT leak into the new
+        # True-state registration (R4: True does not validate rationale,
+        # so a stale string would be confusing).
+        assert dofollow_rationale("foo_recycle") is None
 
 
 class TestAccessors:

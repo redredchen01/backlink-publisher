@@ -145,20 +145,21 @@ _RATIONALE_BY_PLATFORM: dict[str, str] = {}
 def register(
     platform: str,
     *publishers: type[Publisher],
-    dofollow: _DofollowStatus | None = None,
+    dofollow: _DofollowStatus,
     rationale: str | None = None,
 ) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
     Order matters: the first registered class is tried first.
 
-    Plan 2026-05-20-009 U2: gains required ``dofollow`` kw-arg (Literal
-    ``True`` / ``False`` / ``"uncertain"``) declaring whether the
-    platform produces a dofollow backlink, and a ``rationale`` kw-arg
-    required when ``dofollow`` is anything other than ``True``. During
-    the U2 → U5 migration window inside the implementation PR,
-    ``dofollow`` defaults to ``None`` for back-compat; U5 removes the
-    default so missing-kwarg becomes a ``TypeError`` at import time.
+    ``dofollow`` is a required keyword argument (Literal ``True`` /
+    ``False`` / ``"uncertain"``) declaring whether the platform produces
+    a dofollow backlink. Missing ``dofollow=`` raises ``TypeError`` at
+    import time — the structural gate that replaces the institutional
+    "grep _DOFOLLOW_BY_CHANNEL before shipping" rule (memory feedback
+    ``feedback_grep_dofollow_map_before_shipping_adapter``). ``rationale``
+    is required when ``dofollow`` is anything other than ``True`` (R3 /
+    Plan 2026-05-20-009).
 
     Raises:
         RegistryError: when ``platform`` is listed in
@@ -184,18 +185,11 @@ def register(
                 f"concern; see `monolith_budget.toml` for the precedent."
             )
     _REGISTRY[platform] = list(publishers)
-    if dofollow is None:
-        # Back-compat path during U2 → U5 window: clear any stale parallel-
-        # dict entries from a prior `register()` call. Defensive — no
-        # caller is expected to omit `dofollow=` after U3 backfill lands.
-        _DOFOLLOW_BY_PLATFORM.pop(platform, None)
-        _RATIONALE_BY_PLATFORM.pop(platform, None)
+    _DOFOLLOW_BY_PLATFORM[platform] = dofollow
+    if rationale is not None:
+        _RATIONALE_BY_PLATFORM[platform] = rationale
     else:
-        _DOFOLLOW_BY_PLATFORM[platform] = dofollow
-        if rationale is not None:
-            _RATIONALE_BY_PLATFORM[platform] = rationale
-        else:
-            _RATIONALE_BY_PLATFORM.pop(platform, None)
+        _RATIONALE_BY_PLATFORM.pop(platform, None)
 
 
 def registered_platforms() -> list[str]:

@@ -30,8 +30,6 @@ from backlink_publisher._util.errors import DependencyError
 from backlink_publisher.config import Config
 
 
-# Dofollow / nofollow knowledge per platform. Updated from External References
-# in Plan 2026-05-19-006. ``None`` = empirically uncertain.
 # Channels registered in `publishing.registry` but intentionally hidden from
 # the WebUI binding dashboard. Used by `_settings_context` to filter
 # `dashboard_channels`, and by the drift-check test in
@@ -40,25 +38,11 @@ from backlink_publisher.config import Config
 # surface is suppressed.
 HIDDEN_FROM_UI: frozenset[str] = frozenset({"writeas"})
 
-
-_DOFOLLOW_BY_CHANNEL: dict[str, bool | None] = {
-    "blogger": True,
-    "medium": True,  # historically dofollow on member-tier accounts
-    "telegraph": True,
-    "velog": True,  # confirmed via GraphQL post inspection (PR #75)
-    # Phase 3 ghpages-first wave (Plan 006 Q-A resolved):
-    "ghpages": True,   # Jekyll default — highest SEO value
-    "hashnode": None,  # empirically uncertain; 2026-05-20 verification
-                       # attempt blocked by Cloudflare anti-bot on every
-                       # *.hashnode.dev subdomain (curl returns the CF
-                       # challenge page, not the rendered article HTML).
-                       # GraphQL API moved behind paywall same day. Needs
-                       # Playwright-based fetch or operator-published post.
-    # Phase 4 conditional (deferred):
-    "devto": False,    # rel="nofollow ugc" since ~2022
-    "mastodon": False, # hardcoded nofollow noopener noreferrer
-    "wordpresscom": False,  # free tier; paid tier dofollow (see Unit 11)
-}
+# Dofollow / nofollow knowledge moved to publishing.registry (Plan 2026-05-20-009
+# U5): per-adapter declaration via register(..., dofollow=...) is the single
+# source of truth. Previously-rejected nofollow platforms (devto / mastodon /
+# wordpresscom) live in publishing.registry._REJECTED_PLATFORMS and re-attempts
+# at those names raise RegistryError at import time.
 
 
 def get_channel_status(name: str, config: Config) -> dict[str, Any]:
