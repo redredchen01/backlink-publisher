@@ -50,6 +50,19 @@ register("ghpages", GitHubPagesAPIAdapter)
 register("hashnode", HashnodeAPIAdapter)
 register("writeas", WriteAsAPIAdapter)
 
+# ── Phase 4 scaffolds (NOT YET ENABLED) ──────────────────────────────
+# Uncomment the three import + three register lines below once the
+# Phase 3 dofollow hand-check passes ≥ 2/3 (ghpages / hashnode / writeas).
+# See RUNBOOK-2026-05-20-operator-gated.md section #2 for the gate.
+# Each adapter follows the canonical pattern; no dispatcher changes needed.
+#
+# from .devto import DevToAPIAdapter
+# from .wpcom import WpcomAPIAdapter
+# from .mastodon import MastodonAPIAdapter
+# register("devto", DevToAPIAdapter)
+# register("wpcom", WpcomAPIAdapter)
+# register("mastodon", MastodonAPIAdapter)
+
 
 def publish(
     payload: dict[str, Any],
