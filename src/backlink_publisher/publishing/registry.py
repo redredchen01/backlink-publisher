@@ -90,6 +90,40 @@ class Publisher(ABC):
 _REGISTRY: dict[str, list[type[Publisher]]] = {}
 
 
+# Negative-knowledge registry: platforms empirically verified as nofollow
+# (or otherwise unsuitable as dofollow backlink sources) by prior PR
+# attempts. ``register("devto", ...)`` raises ``RegistryError`` at import
+# time — un-rejection path is to delete the entry from this map in the
+# same PR as the re-``register()`` call (see Plan 2026-05-20-009 R12).
+#
+# Each value is a free-form rationale string ≥80 chars stripped, mirroring
+# the ``monolith_budget.toml`` rationale convention. The value-shape stays
+# a plain ``dict[str, str]`` rather than a dataclass because only the
+# rationale string has a programmatic consumer (the failure message);
+# ``rejected_at`` is recoverable from ``git log`` and ``dofollow=False``
+# is implicit (this is a rejection map).
+_REJECTED_PLATFORMS: dict[str, str] = {
+    "devto": (
+        "Dev.to applies rel=\"nofollow ugc\" to outbound links since ~2022 "
+        "per platform policy; every external <a> is decorated server-side "
+        "regardless of account tier or post format — backlinks here carry "
+        "zero PageRank transfer. Reverted in PR #109 after PR #108 ship."
+    ),
+    "mastodon": (
+        "Mastodon hardcodes rel=\"nofollow noopener noreferrer\" on outbound "
+        "links across all instances; the attribute is federation-default and "
+        "cannot be disabled per-post or per-account. Outbound links provide "
+        "no SEO authority transfer. Reverted in PR #109."
+    ),
+    "wordpresscom": (
+        "WordPress.com free tier applies rel=\"nofollow\" to outbound links; "
+        "paid Business/Commerce tiers enable dofollow but require a paid "
+        "subscription not justified at solo-operator scale. Free-tier ship "
+        "would emit nofollow-only backlinks. Reverted in PR #109."
+    ),
+}
+
+
 def register(platform: str, *publishers: type[Publisher]) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
