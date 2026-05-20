@@ -83,6 +83,11 @@ if __name__ == '__main__':
 
     port = int(os.environ.get('PORT', 8888))
     bind_host = _resolve_bind_host()
+    # FLASK_DEBUG env gate: launcher exports FLASK_DEBUG=0 so route exceptions
+    # exit the process (observable by the bash restart loop) instead of being
+    # absorbed by Werkzeug's debug page. Direct `python webui.py` invocations
+    # keep debug=True (default '1'). Only the exact string '1' enables debug.
+    debug_mode = os.environ.get('FLASK_DEBUG', '1') == '1'
     print("Starting Backlink Publisher Web UI...")
-    print(f"Open: http://{bind_host}:{port}")
-    app.run(host=bind_host, port=port, debug=True, use_reloader=False)
+    print(f"Open: http://{bind_host}:{port}  (debug={debug_mode})")
+    app.run(host=bind_host, port=port, debug=debug_mode, use_reloader=False)
