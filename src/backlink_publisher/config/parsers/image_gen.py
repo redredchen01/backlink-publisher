@@ -61,10 +61,12 @@ def _parse_image_gen(section: Any) -> ImageGenConfig | None:
             "1024x1024 (DALL-E square), 1792x1024 (16:9 cover)."
         )
 
-    daily_cap = _coerce_positive_int(
+    # Caps may legitimately be 0 (operator kill-switch without
+    # rewriting use_image_gen); use_image_gen is the primary toggle.
+    daily_cap = _coerce_nonneg_int(
         section.get("daily_cap", 50), "[image_gen].daily_cap"
     )
-    per_run_cap = _coerce_positive_int(
+    per_run_cap = _coerce_nonneg_int(
         section.get("per_run_cap", 10), "[image_gen].per_run_cap"
     )
     timeout_s = section.get("timeout_s", 30.0)
