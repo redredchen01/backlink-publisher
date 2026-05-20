@@ -190,7 +190,7 @@ Unit 1 must land first (establishes contract + 3 of 5 dispatch branches via writ
 
 ---
 
-- [ ] **Unit 1: Dispatcher contract + writeas opt-in + Medium documentation + plan-backlinks source_url emission (R12)**
+- [x] **Unit 1: Dispatcher contract + writeas opt-in + Medium documentation + plan-backlinks source_url emission (R12)** — shipped via PR #117 (`5e2a010`).
 
 **Goal:** Wire `embed_banner` dispatch into `publish_backlinks`, define `BannerUploadError`, implement writeas's `None`-returning stub, document Medium's not-implementing decision in AGENTS.md, AND amend `plan-backlinks` to emit `source_url` in the JSONL banner dict (R12) so the source_url fallback branch is actually reachable.
 
