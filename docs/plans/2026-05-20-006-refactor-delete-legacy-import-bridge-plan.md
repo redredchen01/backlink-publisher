@@ -3,6 +3,7 @@ title: "refactor: Delete legacy import bridge"
 type: refactor
 status: completed
 date: 2026-05-20
+claims: {}
 ---
 
 # refactor: Delete legacy import bridge
