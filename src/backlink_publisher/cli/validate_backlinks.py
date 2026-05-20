@@ -526,3 +526,6 @@ def main(argv: list[str] | None = None) -> None:
         f"validated {len(outputs)} payloads "
         f"({len(outputs)} passed, {failed_count} failed)"
     )
+
+if __name__ == "__main__":
+    main()

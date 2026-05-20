@@ -1048,3 +1048,7 @@ def main(argv: list[str] | None = None) -> None:
             "skipped_unreachable": skipped_unreachable_count,
         },
     )
+
+
+if __name__ == "__main__":
+    main()

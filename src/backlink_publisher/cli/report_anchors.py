@@ -476,3 +476,7 @@ def main(argv: list[str] | None = None) -> None:
         print(_json_output(stats))
     else:
         print(_markdown_table(stats, top_n=args.top_anchors))
+
+
+if __name__ == "__main__":
+    main()
