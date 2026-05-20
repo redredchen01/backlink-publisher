@@ -897,6 +897,16 @@ class TestChannelBindingAPIRoutes:
         assert resp.status_code == 403
 
 
+class TestTokenPasteRoutes:
+    """Plan 006 follow-up (2026-05-20) — token-paste binding for ghpages /
+    writeas. Full lifecycle in tests/test_webui_token_paste.py; this smoke
+    test satisfies the route-coverage gate below."""
+
+    def test_post_save_channel_token_missing_csrf_returns_403(self, client):
+        resp = client.post("/settings/save-channel-token")
+        assert resp.status_code == 403
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Coverage assertion — make sure we exercised every @app.route declared.
 # This is the file's primary regression net for "did anyone add a route?".

@@ -875,11 +875,46 @@ def _get_medium_browser_status(cfg, *, session=None) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _token_paste_status(cfg, channel: str, load_fn) -> dict:
+    """Status dict consumed by _settings_channel_token_paste.html.
+
+    Reads the platform's token file via the load function injected by
+    the caller (so e.g. callers passing `load_ghpages_token` don't need
+    to know the file path). Returns {bound, masked, dofollow}.
+    Defensive against any load failure — broken token files surface as
+    "unbound" rather than crashing the settings page render.
+    """
+    from .binding_status import _DOFOLLOW_BY_CHANNEL
+    try:
+        token_path_attr = f"{channel}_token_path"
+        token_path = getattr(cfg, token_path_attr, None)
+        data = load_fn(token_path) if token_path else load_fn()
+    except Exception:
+        data = None
+    token = (data or {}).get("token", "") if isinstance(data, dict) else ""
+    bound = bool(token)
+    if bound and len(token) > 6:
+        masked = token[:3] + "*" * (len(token) - 6) + token[-3:]
+    elif bound:
+        masked = "*" * len(token)
+    else:
+        masked = ""
+    return {
+        "bound": bound,
+        "masked": masked,
+        "dofollow": _DOFOLLOW_BY_CHANNEL.get(channel),
+    }
+
+
 def _settings_context(flash=None):
     """Build template context for the settings page."""
     from flask import session as _flask_session
 
-    from backlink_publisher.config import load_medium_token
+    from backlink_publisher.config import (
+        load_ghpages_token,
+        load_medium_token,
+        load_writeas_token,
+    )
     from backlink_publisher.cli._bind.channels import CHANNELS
     from webui_store.channel_status import list_all as _channel_list_all
     from .services.bind_job import BIND_ERROR_MESSAGES
@@ -887,6 +922,21 @@ def _settings_context(flash=None):
     cfg = load_config()
     token_data = load_blogger_token(cfg.blogger_token_path)
     medium_token_data = load_medium_token()
+
+    # Phase 3 token-paste platforms (2026-05-20). hashnode excluded from
+    # the UI until dofollow status is empirically verified — see
+    # webui_app/binding_status.py:_DOFOLLOW_BY_CHANNEL comment.
+    ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
+    writeas_status = _token_paste_status(cfg, "writeas", load_writeas_token)
+    ghpages_config_summary = [
+        ("repo", cfg.ghpages.repo if cfg.ghpages else ""),
+        ("branch", cfg.ghpages.branch if cfg.ghpages else "gh-pages"),
+        ("path_template", cfg.ghpages.path_template if cfg.ghpages else "_posts/{date}-{slug}.md"),
+    ]
+    writeas_config_summary = [
+        ("collection_alias", cfg.writeas.collection_alias if cfg.writeas else ""),
+        ("api_base", cfg.writeas.api_base if cfg.writeas else "https://write.as/api"),
+    ]
 
     token = cfg.medium_integration_token or ""
     masked = ("*" * 8 + token[-4:]) if len(token) > 4 else ("*" * len(token))
@@ -963,6 +1013,10 @@ def _settings_context(flash=None):
         bind_error_messages=BIND_ERROR_MESSAGES,
         velog_status=velog_status,
         velog_cookies_path=velog_status.get('cookies_path', ''),
+        ghpages_status=ghpages_status,
+        writeas_status=writeas_status,
+        ghpages_config_summary=ghpages_config_summary,
+        writeas_config_summary=writeas_config_summary,
     )
 
 
