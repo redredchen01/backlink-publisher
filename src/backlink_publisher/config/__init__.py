@@ -66,6 +66,7 @@ from .tokens import (
     save_hashnode_token,
     save_medium_token,
     save_writeas_token,
+    snapshot_token_revs,
 )
 from .parsers.anchor import (
     _parse_anchor_proportions,
@@ -116,6 +117,7 @@ __all__ = [
     "save_hashnode_token",
     "save_medium_token",
     "save_writeas_token",
+    "snapshot_token_revs",
     "WriteAsConfig",
     "upgrade_target_to_threeurl",
 ]

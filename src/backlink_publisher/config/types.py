@@ -88,6 +88,8 @@ class LLMProviderConfig:
     system_prompt: str | None = None
     use_article_gen: bool = False
     article_system_prompt: str | None = None
+    use_image_gen: bool = False
+    image_gen_api_key: str | None = None
 
 
 @dataclass(frozen=True)
