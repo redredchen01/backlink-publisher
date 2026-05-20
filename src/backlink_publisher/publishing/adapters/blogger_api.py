@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_id, load_blogger_token, save_blogger_token
 from backlink_publisher._util.errors import (
     AuthExpiredError,
+    BannerUploadError,
     DependencyError,
     ExternalServiceError,
 )
@@ -98,6 +102,51 @@ def json_from_creds(creds) -> dict[str, Any]:
 
 class BloggerAPIAdapter(Publisher):
     """Publishes to Blogger via the official API v3."""
+
+    def embed_banner(self, artifact_path: Path, alt: str) -> str | None:
+        """Inline the banner as a base64 ``data:`` URI.
+
+        Plan 2026-05-20-004 Unit 3.  Blogger has no usable public
+        media-upload endpoint in 2026 — the Picasa Web Albums backdoor
+        used historically is fully retired, and the Google Photos
+        OAuth path requires a separate scope dance that's out of
+        scope for v1.0.  The remaining universal option is the
+        ``data:<mime>;base64,<...>`` URI inlined directly in the
+        post HTML.  Blogger renders these in published posts (verified
+        via operator smoke; behavior consistent with how Blogger has
+        treated inline data URIs for over a decade).
+
+        Tradeoff: ~33% size overhead from base64 encoding.  Acceptable
+        for the banner image regime (typical ~150-300 KB encoded → 200-
+        400 KB inlined).  No HTTP call, no auth, no retry surface —
+        pure local computation.
+
+        ``render_to_html`` (markdown-it-py via the dispatcher's
+        ``![alt](url)`` prepend → Blogger's ``content_html`` field)
+        preserves ``data:`` URIs verbatim without escape — verified by
+        ``test_blogger_banner.py::TestRoundtripDataUriThroughMarkdown``.
+
+        Raises ``BannerUploadError`` on local file-read failure; this
+        is the dispatcher's strict-gate contract.  No remote failure
+        modes exist on this path.
+        """
+        del alt  # signal to readers that alt is consumed by the dispatcher prepend
+
+        try:
+            data = artifact_path.read_bytes()
+        except OSError as exc:
+            raise BannerUploadError(
+                f"blogger banner read failed: {artifact_path}: {exc}"
+            ) from exc
+
+        filename = artifact_path.name or "banner.png"
+        guessed_mime, _ = mimetypes.guess_type(filename)
+        # Default to image/png for sha-only filenames; Blogger renders
+        # the data URI based on the declared mime, not content sniffing.
+        mime = guessed_mime or "image/png"
+
+        encoded = base64.b64encode(data).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
 
     def publish(
         self,

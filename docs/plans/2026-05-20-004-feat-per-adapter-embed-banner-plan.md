@@ -283,7 +283,7 @@ Unit 1 must land first (establishes contract + 3 of 5 dispatch branches via writ
 
 ---
 
-- [ ] **Unit 3: Blogger `embed_banner` (data-URI inline OR images.insert — defer-decide)**
+- [x] **Unit 3: Blogger `embed_banner` (data-URI inline — Path A chosen)** — shipped.
 
 **Goal:** Implement `BloggerAPIAdapter.embed_banner` returning a Blogger-renderable image URL (or data URI if no upload endpoint exists in 2026).
 
