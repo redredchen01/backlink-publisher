@@ -925,7 +925,7 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     Defensive against any load failure — broken token files surface as
     "unbound" rather than crashing the settings page render.
     """
-    from .binding_status import _DOFOLLOW_BY_CHANNEL
+    from backlink_publisher.publishing.registry import dofollow_status
     try:
         token_path_attr = f"{channel}_token_path"
         token_path = getattr(cfg, token_path_attr, None)
@@ -943,7 +943,7 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     return {
         "bound": bound,
         "masked": masked,
-        "dofollow": _DOFOLLOW_BY_CHANNEL.get(channel),
+        "dofollow": dofollow_status(channel),
     }
 
 

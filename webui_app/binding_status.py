@@ -69,6 +69,7 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
     """
     # Lazy import to avoid circular: webui_app → publishing → webui_app helpers
     from backlink_publisher.publishing.adapters import verify_adapter_setup
+    from backlink_publisher.publishing.registry import dofollow_status
 
     base: dict[str, Any] = {
         "channel": name,
@@ -76,7 +77,7 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
         "identity": _identity_for(name, config),
         "last_verified_at": None,
         "last_verify_result": "never",
-        "dofollow": _DOFOLLOW_BY_CHANNEL.get(name),
+        "dofollow": dofollow_status(name),
         "blockers": [],
     }
 
