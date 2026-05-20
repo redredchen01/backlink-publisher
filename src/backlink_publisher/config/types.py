@@ -154,6 +154,64 @@ class WriteAsConfig:
 
 
 @dataclass(frozen=True)
+class DevtoConfig:
+    """Dev.to adapter configuration (Phase 4 scaffold).
+
+    API key is stored in a separate 0600 JSON file (``devto-token.json``),
+    NOT in ``config.toml`` (same SEC-3 reasoning as ghpages/hashnode/writeas).
+    This dataclass holds no required fields — dev.to publishes to the
+    authenticated user's article feed, so no per-publish routing config is
+    needed. The dataclass exists so ``available()`` has a config-presence
+    signal consistent with the other adapters.
+
+    ``api_base`` — overridable for forge testing. Default
+                   ``https://dev.to/api``.
+    """
+
+    api_base: str = "https://dev.to/api"
+
+
+@dataclass(frozen=True)
+class WpcomConfig:
+    """WordPress.com adapter configuration (Phase 4 scaffold).
+
+    OAuth bearer token is stored in a separate 0600 JSON file
+    (``wpcom-token.json``), NOT in ``config.toml`` (same SEC-3 reasoning).
+
+    ``site_id`` — operator's WP.com site ID (numeric string) or domain
+                  (``example.wordpress.com``). Required by the
+                  ``/wp/v2/sites/{site}/posts`` endpoint.
+    ``api_base`` — overridable for self-hosted Jetpack-bridged sites.
+                   Default ``https://public-api.wordpress.com``.
+    """
+
+    site_id: str = ""
+    api_base: str = "https://public-api.wordpress.com"
+
+
+@dataclass(frozen=True)
+class MastodonConfig:
+    """Mastodon adapter configuration (Phase 4 scaffold).
+
+    Access token is stored in a separate 0600 JSON file
+    (``mastodon-token.json``), NOT in ``config.toml`` (same SEC-3 reasoning).
+    Each Mastodon instance issues its own tokens; the token is bound to
+    ``instance_url`` and useless on any other instance.
+
+    ``instance_url`` — operator's home instance (``https://mastodon.social``,
+                       ``https://hachyderm.io``, etc.). Required because
+                       Mastodon is federated — there's no single endpoint.
+    ``visibility`` — default post visibility. ``public`` / ``unlisted`` /
+                     ``private`` / ``direct``. Defaults to ``public`` for
+                     SEO surface; operators wanting follower-only should
+                     set ``unlisted``.
+    """
+
+    instance_url: str = ""
+    visibility: str = "public"
+
+
+@dataclass(frozen=True)
 class VelogConfig:
     """Velog adapter configuration.
 
@@ -317,6 +375,27 @@ class Config:
     absent. The login-issued token lives in a separate 0600 file at
     ``~/.config/backlink-publisher/writeas-token.json`` (per SEC-3)."""
 
+    devto: DevtoConfig | None = None
+    """Dev.to adapter config (Phase 4 scaffold — registry not enabled).
+
+    Populated from ``[devto]`` in config.toml. ``None`` when section is
+    absent. The API key lives in a separate 0600 file at
+    ``~/.config/backlink-publisher/devto-token.json`` (per SEC-3)."""
+
+    wpcom: WpcomConfig | None = None
+    """WordPress.com adapter config (Phase 4 scaffold — registry not enabled).
+
+    Populated from ``[wpcom]`` in config.toml. ``None`` when section is
+    absent. The OAuth bearer token lives in a separate 0600 file at
+    ``~/.config/backlink-publisher/wpcom-token.json`` (per SEC-3)."""
+
+    mastodon: MastodonConfig | None = None
+    """Mastodon adapter config (Phase 4 scaffold — registry not enabled).
+
+    Populated from ``[mastodon]`` in config.toml. ``None`` when section is
+    absent. The instance-bound access token lives in a separate 0600 file
+    at ``~/.config/backlink-publisher/mastodon-token.json`` (per SEC-3)."""
+
     @property
     def config_dir(self) -> Path:
         from backlink_publisher import config as _cfg
@@ -346,6 +425,21 @@ class Config:
     def writeas_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "writeas-token.json"
+
+    @property
+    def devto_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "devto-token.json"
+
+    @property
+    def wpcom_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "wpcom-token.json"
+
+    @property
+    def mastodon_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "mastodon-token.json"
 
     @property
     def screenshot_dir(self) -> Path:
