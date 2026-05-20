@@ -1077,3 +1077,35 @@ class TestVelogApiRoutes:
         data = resp.get_json()
         assert "state" in data
         assert data["state"] in ("err", "ok", "fresh", "warn", "cap_reached", "permission_denied")
+
+
+class TestSeoVizRoutes:
+    """Contract test for /api/seo/anchors — exposes report-anchors data
+    to the dashboard charting layer."""
+
+    def test_anchors_missing_domain_returns_400(self, client):
+        """GET /api/seo/anchors without ?domain= rejects with 400 + json."""
+        resp = client.get("/api/seo/anchors")
+        assert resp.status_code == 400
+        assert resp.is_json
+        body = resp.get_json()
+        assert "error" in body
+
+    def test_anchors_with_domain_invokes_report_anchors(self, client, monkeypatch):
+        """GET /api/seo/anchors?domain=<d> calls AnchorData.from_report
+        and returns the chart-data shape on success."""
+        from webui_app.services import seo_viz as svc
+
+        fake = svc.AnchorData(
+            main_domain="https://example.com",
+            total_entries=3,
+            type_stats={"brand": {"count": 1}, "natural": {"count": 2}},
+            alarm={},
+        )
+        monkeypatch.setattr(svc.AnchorData, "from_report", classmethod(lambda cls, d: fake))
+        resp = client.get("/api/seo/anchors?domain=https://example.com")
+        assert resp.status_code == 200
+        assert resp.is_json
+        body = resp.get_json()
+        assert "labels" in body
+        assert "datasets" in body
