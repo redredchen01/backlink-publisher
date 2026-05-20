@@ -451,8 +451,11 @@ def _maybe_fetch_origin_main(threshold_seconds: int = 300) -> FetchOutcome:
     """Refresh ``origin/main`` if ``FETCH_HEAD`` is older than *threshold_seconds*.
 
     Never raises on fetch failure (D16); classifies stderr into the skip-reason
-    taxonomy and returns a :class:`FetchOutcome` so the caller can dispatch
-    exit 9 (stale-pass) per the plan §D3/D16 contract.
+    taxonomy and returns a :class:`FetchOutcome` so the caller can decide how to
+    handle stale claims. Plan §D3/§D16 reserve exit 9 (stale-pass) and the
+    ``--strict-fetch`` flag for the skip path, but the v1 dispatch returns 0
+    instead and emits the RECON warn line only — exit 9 + ``--strict-fetch``
+    are deferred to v1.1 (Plan 2026-05-19-010 P1 #3).
 
     ``fetch_head_age_seconds`` is always populated (or explicitly ``None``) on
     every return path, including the happy "no fetch needed" branch.
