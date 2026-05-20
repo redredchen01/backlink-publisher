@@ -26,8 +26,8 @@ ceiling = 290
 rationale = "SSRF defence extracted to _util/net_safety.py in 2026-05-19 — SLOC dropped from 340 to 253. Ceiling 290 provides 30-SLOC headroom for minor accretion."
 
 [files."src/backlink_publisher/config/writer.py"]
-ceiling = 360
-rationale = "Extension of save_config preservation pass to depth-2 subsection granularity under managed roots (Plan 2026-05-19-010 — closes the symmetric subsection drop after Plan 2026-05-13-004 Unit 3 closed the root-level case). Adds _toml_heading_path + _canon_subsection_key helpers (~20 SLOC) and known_subsections threading + emit-set + clear-intent computation inside save_config (~10 SLOC) + parent-dir 0o700 chmod. New SLOC 350. R5 F3 safe_write carve will still lift atomic-write + snapshot into a shared persistence module and lower this ceiling."
+ceiling = 385
+rationale = "Plan 2026-05-20-003 A.2 promotes ghpages/hashnode/writeas from unmanaged to managed roots: adds 3 dataclass imports, 3 entries to _SAVE_CONFIG_KNOWN_ROOTS, 3 optional save_config kwargs (ghpages_config / hashnode_config / writeas_config) with merge-against-existing semantics, and 3 emission blocks (~5 SLOC each — routing fields only; PATs/tokens live in 0600 sidecar JSON files per SEC-3 of Plan 2026-05-19-006). Inherits the Plan 2026-05-19-010 baseline (subsection preservation pass) and brings SLOC from 350 to 375. Ceiling raised to 385 to keep 10-SLOC headroom; R5 F3 safe_write carve into a shared persistence module remains the planned drop-back."
 
 [files."src/backlink_publisher/_util/markdown.py"]
 ceiling = 240
