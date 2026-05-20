@@ -39,8 +39,16 @@ _DOFOLLOW_BY_CHANNEL: dict[str, bool | None] = {
     "velog": True,  # confirmed via GraphQL post inspection (PR #75)
     # Phase 3 ghpages-first wave (Plan 006 Q-A resolved):
     "ghpages": True,   # Jekyll default — highest SEO value
-    "hashnode": None,  # empirically uncertain; verify after first publish
-    "writeas": None,   # undocumented; assume nofollow until proven
+    "hashnode": None,  # empirically uncertain; 2026-05-20 verification
+                       # attempt blocked by Cloudflare anti-bot on every
+                       # *.hashnode.dev subdomain (curl returns the CF
+                       # challenge page, not the rendered article HTML).
+                       # GraphQL API moved behind paywall same day. Needs
+                       # Playwright-based fetch or operator-published post.
+    "writeas": True,   # CONFIRMED 2026-05-20 — sampled 2 real public posts
+                       # on write.as/disconnect-blog and write.as/misteraitch.
+                       # 10+ external <a> tags total, every one has NO rel
+                       # attribute (= default dofollow per Google's spec).
     # Phase 4 conditional (deferred):
     "devto": False,    # rel="nofollow ugc" since ~2022
     "mastodon": False, # hardcoded nofollow noopener noreferrer
