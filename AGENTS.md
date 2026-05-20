@@ -287,8 +287,12 @@ Add one line to `src/backlink_publisher/publishing/adapters/__init__.py`:
 
 ```python
 from .yourplatform import YourPlatformAdapter
-register("yourplatform", YourPlatformAdapter)
+register("yourplatform", YourPlatformAdapter, dofollow=True)
 ```
+
+`dofollow=` is a **required** keyword argument (Plan 2026-05-20-009). Legal values are `True`, `False`, or `"uncertain"`. Anything other than `True` additionally requires `rationale=` of ≥80 stripped chars explaining why a non-dofollow platform is shipping (mirrors `monolith_budget.toml` rationale discipline; length-only — content is reviewer concern). The gate is enforced at import time (missing `dofollow=` raises `TypeError`) and at CI time by `tests/test_adapter_dofollow_gate.py`.
+
+If the platform name appears in `publishing.registry._REJECTED_PLATFORMS` (the negative-knowledge map seeded from PR #108→#109's `devto` / `mastodon` / `wordpresscom` reverts), `register()` raises `RegistryError` at import time. Un-rejection path: delete the entry from `_REJECTED_PLATFORMS` in the same PR as the new `register()` call — the deletion diff makes the un-rejection visible to reviewers; no `accept_rejection_override` kwarg exists.
 
 Do NOT edit:
 - `cli/publish_backlinks.py` (reads `registered_platforms()` dynamically)
