@@ -34,6 +34,8 @@ from typing import Any
 
 import requests
 
+from pathlib import Path
+
 from backlink_publisher.config import Config, load_hashnode_token
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
@@ -181,6 +183,42 @@ def _graphql_post(
 
 class HashnodeAPIAdapter(Publisher):
     """Publishes Markdown to a Hashnode publication via GraphQL."""
+
+    def embed_banner(self, artifact_path: Path, alt: str) -> str | None:
+        """Return ``None`` — route to dispatcher's source_url fallback.
+
+        Plan 2026-05-20-004 Unit 4.  The plan originally proposed an
+        ``uploadMedia`` GraphQL mutation, but probe at implementation
+        time (2026-05-20) found Hashnode's free GraphQL API was retired
+        on **2026-05-13** — see Hashnode's own changelog at
+        ``hashnode.com/changelog/2026-05-13-graphql-api-paid-access``.
+        The ``gql.hashnode.com`` endpoint now 301s to the paywall
+        announcement; both publish and any media-upload mutation now
+        require a Pro plan.
+
+        Without a Pro subscription on the project's bench accounts, no
+        ``uploadMedia`` (or alternative) mutation can be schema-
+        introspected or contract-tested.  Shipping an unverified
+        mutation name would land dead code that emits
+        ``BannerUploadError`` on every row in non-strict mode — strictly
+        worse than the explicit ``None`` opt-in to the source_url
+        fallback the dispatcher already wires for writeas.
+
+        Returning ``None`` is the writeas-style "considered but can't"
+        signal (distinct from Medium's not-implementing).  Dispatcher
+        prepends ``![alt](source_url)`` from ``banner.source_url`` and
+        emits ``banner.source_url_fallback`` with ``reason=
+        adapter_returned_none``.  The banner still appears in the
+        published post — hosted on the upstream image-gen provider's
+        CDN — at the cost of link rot when that CDN expires.
+
+        When/if Hashnode documents a stable upload mutation (paid or
+        otherwise) AND the project's bench accounts can verify it via
+        introspection, swap this to a real upload implementation.
+        That is a separate plan; do NOT re-litigate here.
+        """
+        del alt
+        return None
 
     @classmethod
     def available(cls, config: Config) -> bool:
