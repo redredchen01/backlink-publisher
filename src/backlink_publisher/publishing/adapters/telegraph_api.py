@@ -35,6 +35,7 @@ from __future__ import annotations
 import fcntl
 import json
 import logging
+import mimetypes
 import os
 import random
 import time
@@ -46,7 +47,11 @@ from typing import Any, Iterator
 import requests
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import (
+    BannerUploadError,
+    DependencyError,
+    ExternalServiceError,
+)
 from backlink_publisher.publishing.adapters.telegraph_node import (
     markdown_to_telegraph_nodes,
 )
@@ -59,6 +64,12 @@ log = logging.getLogger(__name__)
 #: Telegraph public API root.  No auth needed for createAccount; access_token
 #: scoping is enforced server-side for createPage / editPage.
 TELEGRAPH_API = "https://api.telegra.ph"
+
+#: Telegraph upload endpoint host.  Distinct from ``TELEGRAPH_API`` —
+#: ``/upload`` lives on the bare ``telegra.ph`` host and is anonymous
+#: (no access_token), and Telegraph's CDN serves the resulting files
+#: under this same host as ``/file/<sha>.<ext>``.
+_TELEGRAPH_UPLOAD_HOST = "https://telegra.ph"
 
 #: HTTP timeout for every Telegraph API call (createAccount / createPage).
 #: Spike uses 15s; we keep parity.
@@ -352,6 +363,96 @@ def _create_page(
 
 class TelegraphAPIAdapter(Publisher):
     """Single-path Telegraph publisher with in-adapter 401 recovery."""
+
+    def embed_banner(self, artifact_path: Path, alt: str) -> str | None:
+        """Upload banner bytes to Telegraph's anonymous ``/upload``
+        endpoint, return ``https://telegra.ph/file/<sha>.<ext>`` URL.
+
+        Plan 2026-05-20-004 Unit 2.  Telegraph's ``/upload`` endpoint
+        is anonymous — no ``access_token`` parameter — so this is the
+        rare media endpoint that skips the credential-rotation dance
+        entirely (see ``[[reference-telegraph-adapter-credential-rotation-pattern]]``).
+        The returned URL lives on Telegraph's own CDN; embedding it
+        in the post body means the image survives the upstream
+        image-gen provider's CDN TTL.
+
+        Raises ``BannerUploadError`` (NOT ``ExternalServiceError``) on
+        4xx/5xx, network failure, malformed JSON, missing ``src``
+        field, or local file-read error.  ``BannerUploadError`` is the
+        contract the publish-time dispatcher (``banner_dispatcher.apply``)
+        recognizes for honoring ``config.image_gen.strict`` — wrapping
+        as ``ExternalServiceError`` would route this into the wrong
+        catch branch and skip the strict gate.
+
+        The ``alt`` argument is unused here (no API field for it; the
+        dispatcher prepends ``![alt](url)`` markdown into the body so
+        the alt text lands in the Telegraph Node tree downstream).
+        """
+        del alt  # signal to readers that the field is intentionally unused
+
+        try:
+            data = artifact_path.read_bytes()
+        except OSError as exc:
+            raise BannerUploadError(
+                f"telegraph banner read failed: {artifact_path}: {exc}"
+            ) from exc
+
+        filename = artifact_path.name or "banner.png"
+        guessed_mime, _ = mimetypes.guess_type(filename)
+        # Telegraph's /upload validates by file content too, not just the
+        # multipart mime — image/png is the safe default for cases where
+        # the file has no extension (rare but possible with sha-only names).
+        mime = guessed_mime or "image/png"
+
+        try:
+            resp = requests.post(
+                f"{_TELEGRAPH_UPLOAD_HOST}/upload",
+                files={"file": (filename, data, mime)},
+                timeout=_HTTP_TIMEOUT_S,
+            )
+        except requests.RequestException as exc:
+            raise BannerUploadError(
+                f"telegraph upload network: {exc}"
+            ) from exc
+
+        if resp.status_code >= 400:
+            raise BannerUploadError(
+                f"telegraph upload failed: {resp.status_code}"
+            )
+
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            # ``requests.Response.json`` raises ``ValueError`` (or
+            # ``simplejson.JSONDecodeError`` which inherits ValueError)
+            # on unparseable bodies — Telegraph occasionally returns
+            # HTML on edge errors, so this is a real failure mode.
+            raise BannerUploadError(
+                f"telegraph upload malformed body (not JSON): {exc}"
+            ) from exc
+
+        # Telegraph success shape: ``[{"src": "/file/<sha>.<ext>"}]``.
+        # Error shape: ``{"error": "<message>"}`` as a JSON object.
+        if isinstance(body, dict) and body.get("error"):
+            raise BannerUploadError(
+                f"telegraph upload rejected: {body['error']}"
+            )
+
+        if not isinstance(body, list) or not body or not isinstance(body[0], dict):
+            raise BannerUploadError(
+                f"telegraph upload malformed body shape: {body!r}"
+            )
+
+        src = body[0].get("src") or ""
+        if not src:
+            raise BannerUploadError(
+                f"telegraph upload returned empty src: {body!r}"
+            )
+
+        # Telegraph's ``src`` is path-relative (``/file/<sha>.<ext>``);
+        # prepend the host so the URL is directly usable in a
+        # ``![alt](url)`` body prepend.
+        return f"{_TELEGRAPH_UPLOAD_HOST}{src}"
 
     def publish(
         self,
