@@ -1,7 +1,7 @@
 ---
 title: "refactor: Delete legacy import bridge"
 type: refactor
-status: active
+status: completed
 date: 2026-05-20
 ---
 
