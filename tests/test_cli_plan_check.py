@@ -196,6 +196,30 @@ class TestValidateClaimsSchema:
         with pytest.raises(pc.PlanClaimsFrontmatterSchemaError, match="symbols"):
             pc._validate_claims_schema(fm)
 
+    @pytest.mark.parametrize(
+        "value", [0, False, None, "", "not-a-list"], ids=["zero", "false", "null", "empty-str", "string"]
+    )
+    def test_paths_non_list_value_raises(self, value: object) -> None:
+        """Falsy and non-list values in claims.paths must raise, not coerce to []."""
+        fm = {
+            "date": _dt.date(2026, 5, 21),
+            "claims": {"paths": value, "shas": []},
+        }
+        with pytest.raises(pc.PlanClaimsFrontmatterSchemaError, match="must be a list"):
+            pc._validate_claims_schema(fm)
+
+    @pytest.mark.parametrize(
+        "value", [0, False, None, "", {"a": 1}], ids=["zero", "false", "null", "empty-str", "dict"]
+    )
+    def test_shas_non_list_value_raises(self, value: object) -> None:
+        """Falsy and non-list values in claims.shas must raise, not coerce to []."""
+        fm = {
+            "date": _dt.date(2026, 5, 21),
+            "claims": {"paths": [], "shas": value},
+        }
+        with pytest.raises(pc.PlanClaimsFrontmatterSchemaError, match="must be a list"):
+            pc._validate_claims_schema(fm)
+
     @pytest.mark.parametrize("glob", ["src/*.py", "src/?oo.py", "src/[abc].py"])
     def test_glob_in_paths_raises(self, glob: str) -> None:
         fm = {

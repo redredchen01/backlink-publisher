@@ -245,8 +245,8 @@ def _validate_claims_schema(fm: dict[str, Any]) -> ClaimsBlock:
             f"plan-doc `claims:` has unknown key(s) {sorted(unknown)}; "
             f"allowed: {sorted(_ALLOWED_CLAIMS_KEYS)}"
         )
-    paths_raw = claims.get("paths", []) or []
-    shas_raw = claims.get("shas", []) or []
+    paths_raw = claims.get("paths", [])
+    shas_raw = claims.get("shas", [])
     if not isinstance(paths_raw, list):
         raise PlanClaimsFrontmatterSchemaError(
             f"plan-doc `claims.paths` must be a list, got {type(paths_raw).__name__}"

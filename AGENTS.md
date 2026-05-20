@@ -189,7 +189,7 @@ Exit codes:
 | 7 | drift — one or more paths missing or SHAs unreachable on `origin/main` |
 | 8 | post-cutoff plan with no `claims:` block |
 
-`plan-check` always emits a `RECON info fetch_head_age_seconds=<n>` line on stderr so freshness is visible. On offline fetch failure it emits `RECON warn fetch_skipped reason=<r> fetch_head_age_seconds=<n>` and still exits 0 — authoring should not be hostage to flaky networks (D16). CI never hits the skip path because its checkout step always succeeds.
+`plan-check` emits a `RECON info fetch_head_age_seconds=<n>` line on stderr whenever it resolves claims against `origin/main` (the happy/drift paths) so freshness is visible. Grandfathered (`date < 2026-05-20`) and explicit-empty-claims (`claims: {}` or bare `claims:`) paths return silently with no stderr — they exit 0 before reaching the resolution stage. On offline fetch failure during resolution it emits `RECON warn fetch_skipped reason=<r> fetch_head_age_seconds=<n>` and still exits 0 — authoring should not be hostage to flaky networks (D16). CI never hits the skip path because its checkout step always succeeds.
 
 ### CI surfaces
 
