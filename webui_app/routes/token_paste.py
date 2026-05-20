@@ -2,10 +2,11 @@
 
 Single POST endpoint that writes a `<channel>-token.json` (0600) for the
 PAT-based publishing platforms whose binding is "paste a token", not OAuth
-or browser-mediated. Currently allowlists ghpages + writeas (the two
-dofollow-confirmed token-paste platforms as of 2026-05-20). hashnode lives
-in the same code path but is excluded from the allowlist until its
-dofollow status can be empirically verified — once confirmed, add it here.
+or browser-mediated. Currently allowlists ghpages only — writeas was
+retired from the WebUI on 2026-05-20 because the channel is unusable in
+practice. hashnode lives in the same code path but is excluded from the
+allowlist until its dofollow status can be empirically verified — once
+confirmed, add it here.
 
 The route is deliberately narrow: it writes the token file only. Routing
 config fields (repo / collection_alias / api_base / etc) are operator-edited
@@ -22,7 +23,6 @@ from flask import Blueprint, redirect, request
 
 from backlink_publisher.config import (
     save_ghpages_token,
-    save_writeas_token,
 )
 
 from ..helpers import _check_csrf_or_abort
@@ -35,7 +35,6 @@ bp = Blueprint("token_paste", __name__)
 # When extending to hashnode, add another entry once dofollow is verified.
 _ALLOWED: dict[str, tuple] = {
     "ghpages": (save_ghpages_token, "ghpages-token.json"),
-    "writeas": (save_writeas_token, "writeas-token.json"),
 }
 
 

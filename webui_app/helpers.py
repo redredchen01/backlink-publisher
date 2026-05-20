@@ -955,7 +955,6 @@ def _settings_context(flash=None):
         load_ghpages_token,
         load_hashnode_token,
         load_medium_token,
-        load_writeas_token,
     )
     from backlink_publisher.cli._bind.channels import CHANNELS
     from webui_store.channel_status import list_all as _channel_list_all
@@ -967,16 +966,11 @@ def _settings_context(flash=None):
 
     # Phase 3 token-paste platforms (2026-05-20).
     ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
-    writeas_status = _token_paste_status(cfg, "writeas", load_writeas_token)
     hashnode_status = _token_paste_status(cfg, "hashnode", load_hashnode_token)
     ghpages_config_summary = [
         ("repo", cfg.ghpages.repo if cfg.ghpages else ""),
         ("branch", cfg.ghpages.branch if cfg.ghpages else "gh-pages"),
         ("path_template", cfg.ghpages.path_template if cfg.ghpages else "_posts/{date}-{slug}.md"),
-    ]
-    writeas_config_summary = [
-        ("collection_alias", cfg.writeas.collection_alias if cfg.writeas else ""),
-        ("api_base", cfg.writeas.api_base if cfg.writeas else "https://write.as/api"),
     ]
     hashnode_config_summary = [
         ("publication_id", cfg.hashnode.publication_id if cfg.hashnode else ""),
@@ -1017,10 +1011,11 @@ def _settings_context(flash=None):
 
     try:
         from backlink_publisher.publishing.registry import registered_platforms
-        from .binding_status import get_channel_status
+        from .binding_status import get_channel_status, HIDDEN_FROM_UI
         dashboard_channels = [
             (name, get_channel_status(name, cfg))
             for name in registered_platforms()
+            if name not in HIDDEN_FROM_UI
         ]
     except Exception:
         dashboard_channels = []
@@ -1059,9 +1054,7 @@ def _settings_context(flash=None):
         velog_status=velog_status,
         velog_cookies_path=velog_status.get('cookies_path', ''),
         ghpages_status=ghpages_status,
-        writeas_status=writeas_status,
         ghpages_config_summary=ghpages_config_summary,
-        writeas_config_summary=writeas_config_summary,
         hashnode_status=hashnode_status,
         hashnode_config_summary=hashnode_config_summary,
     )

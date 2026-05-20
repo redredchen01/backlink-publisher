@@ -32,6 +32,15 @@ from backlink_publisher.config import Config
 
 # Dofollow / nofollow knowledge per platform. Updated from External References
 # in Plan 2026-05-19-006. ``None`` = empirically uncertain.
+# Channels registered in `publishing.registry` but intentionally hidden from
+# the WebUI binding dashboard. Used by `_settings_context` to filter
+# `dashboard_channels`, and by the drift-check test in
+# `test_settings_dashboard_rendering.py`. Adapter source stays in the repo
+# so CLI / tests continue to exercise the registry pattern; only the UI
+# surface is suppressed.
+HIDDEN_FROM_UI: frozenset[str] = frozenset({"writeas"})
+
+
 _DOFOLLOW_BY_CHANNEL: dict[str, bool | None] = {
     "blogger": True,
     "medium": True,  # historically dofollow on member-tier accounts
@@ -45,10 +54,6 @@ _DOFOLLOW_BY_CHANNEL: dict[str, bool | None] = {
                        # challenge page, not the rendered article HTML).
                        # GraphQL API moved behind paywall same day. Needs
                        # Playwright-based fetch or operator-published post.
-    "writeas": True,   # CONFIRMED 2026-05-20 — sampled 2 real public posts
-                       # on write.as/disconnect-blog and write.as/misteraitch.
-                       # 10+ external <a> tags total, every one has NO rel
-                       # attribute (= default dofollow per Google's spec).
     # Phase 4 conditional (deferred):
     "devto": False,    # rel="nofollow ugc" since ~2022
     "mastodon": False, # hardcoded nofollow noopener noreferrer

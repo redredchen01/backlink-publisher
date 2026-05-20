@@ -109,24 +109,6 @@ class TestSaveGhpagesToken:
         assert json.loads(token_file.read_text()) == {"token": "ghp_original"}
 
 
-class TestSaveWriteasToken:
-    def test_save_writes_file_0600(self, client, tmp_path):
-        csrf = _csrf(client)
-        resp = client.post("/settings/save-channel-token", data={
-            "csrf_token": csrf,
-            "channel": "writeas",
-            "token": "wa_testtok_xyz",
-        })
-        assert resp.status_code == 302
-        assert b"flash_type=success" in resp.data
-        token_file = tmp_path / "writeas-token.json"
-        assert token_file.exists()
-        if os.name != "nt":
-            assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
-        data = json.loads(token_file.read_text())
-        assert data == {"token": "wa_testtok_xyz", "token_rev": 1}
-
-
 class TestClearToken:
     def test_clear_removes_file(self, client, tmp_path):
         token_file = tmp_path / "ghpages-token.json"
@@ -145,12 +127,12 @@ class TestClearToken:
         assert not token_file.exists()
 
     def test_clear_nonexistent_is_info(self, client, tmp_path):
-        token_file = tmp_path / "writeas-token.json"
+        token_file = tmp_path / "ghpages-token.json"
         assert not token_file.exists()
         csrf = _csrf(client)
         resp = client.post("/settings/save-channel-token", data={
             "csrf_token": csrf,
-            "channel": "writeas",
+            "channel": "ghpages",
             "clear": "1",
         })
         assert resp.status_code == 302
@@ -165,26 +147,19 @@ class TestSettingsRenderWithCards:
         assert b'GitHub Pages' in resp.data
         assert b'token-paste-ghpages' in resp.data
 
-    def test_settings_page_includes_writeas_card(self, client):
-        resp = client.get("/settings")
-        assert resp.status_code == 200
-        assert b'channel-writeas' in resp.data
-        assert b'Write.as' in resp.data
-        assert b'token-paste-writeas' in resp.data
-
     def test_settings_page_dofollow_chip_for_confirmed(self, client):
-        # ghpages + writeas are both dofollow=True per _DOFOLLOW_BY_CHANNEL,
-        # so the "dofollow" chip should appear; "dofollow 未确认" should not.
+        # ghpages is dofollow=True per _DOFOLLOW_BY_CHANNEL, so the
+        # "dofollow" chip should appear at least once.
         resp = client.get("/settings")
         assert b'dofollow' in resp.data
-        # Both cards have the green chip
-        count = resp.data.count(b'dofollow')
-        assert count >= 2, f"expected dofollow chip in 2+ places, got {count}"
 
     def test_settings_does_not_expose_devto_card(self, client):
         # Reverted Phase 4 platforms should NOT appear in the settings UI
         # — defensive check against accidentally re-exposing nofollow platforms.
+        # Write.as retired 2026-05-20 — also asserted absent.
         resp = client.get("/settings")
         assert b'channel-devto' not in resp.data
         assert b'channel-mastodon' not in resp.data
         assert b'channel-wpcom' not in resp.data
+        assert b'channel-writeas' not in resp.data
+        assert b'token-paste-writeas' not in resp.data
