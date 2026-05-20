@@ -41,14 +41,37 @@ from .writeas import WriteAsAPIAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
-# more ``register(...)`` call — no dispatcher changes.
-register("blogger", BloggerAPIAdapter)
-register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
-register("telegraph", TelegraphAPIAdapter)
-register("velog", VelogGraphQLAdapter)
-register("ghpages", GitHubPagesAPIAdapter)
-register("hashnode", HashnodeAPIAdapter)
-register("writeas", WriteAsAPIAdapter)
+# more ``register(...)`` call — no dispatcher changes. Each registration
+# declares ``dofollow=True|False|"uncertain"`` (R1 / Plan 2026-05-20-009);
+# ``False`` and ``"uncertain"`` additionally require ``rationale=`` of
+# ≥80 stripped chars (R3, mirrors ``monolith_budget.toml`` discipline).
+register("blogger", BloggerAPIAdapter, dofollow=True)
+register(
+    "medium",
+    MediumAPIAdapter,
+    MediumBraveAdapter,
+    MediumBrowserAdapter,
+    dofollow=True,
+)
+register("telegraph", TelegraphAPIAdapter, dofollow=True)
+register("velog", VelogGraphQLAdapter, dofollow=True)
+register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
+register(
+    "hashnode",
+    HashnodeAPIAdapter,
+    dofollow=False,
+    rationale=(
+        "Hashnode GraphQL API moved behind a paid subscription on "
+        "2026-05-13 and Cloudflare anti-bot blocks every *.hashnode.dev "
+        "direct fetch (curl returns the CF challenge page, not rendered "
+        "article HTML). Publish path is operationally dead today; "
+        "registered defensively so the adapter is reachable when an "
+        "operator re-verifies post-CF / post-paywall. Honestly degraded "
+        "to dofollow=False (not 'uncertain') because the platform is "
+        "not just verification-blocked but ship-blocked."
+    ),
+)
+register("writeas", WriteAsAPIAdapter, dofollow=True)
 
 
 def publish(

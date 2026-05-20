@@ -184,6 +184,8 @@ from backlink_publisher.publishing.registry import (  # noqa: E402
     Publisher as _Publisher,
     register as _register,
     _REGISTRY as __REGISTRY,
+    _DOFOLLOW_BY_PLATFORM as __DOFOLLOW_BY_PLATFORM,
+    _RATIONALE_BY_PLATFORM as __RATIONALE_BY_PLATFORM,
 )
 
 
@@ -209,9 +211,15 @@ def fake_platform_registered():
 
     Snapshots and restores the prior ``_REGISTRY["fake"]`` entry so
     parallel/repeat test runs cannot leak adapter state across cases.
+
+    Plan 2026-05-20-009 U3: also snapshot+restore the matching key in
+    the new parallel dofollow/rationale dicts so the per-key fixture
+    pattern stays internally consistent across all three registry maps.
     """
     previous = __REGISTRY.get("fake")
-    _register("fake", FakeAdapter)
+    previous_dofollow = __DOFOLLOW_BY_PLATFORM.get("fake")
+    previous_rationale = __RATIONALE_BY_PLATFORM.get("fake")
+    _register("fake", FakeAdapter, dofollow=True)
     try:
         yield
     finally:
@@ -219,3 +227,11 @@ def fake_platform_registered():
             __REGISTRY.pop("fake", None)
         else:
             __REGISTRY["fake"] = previous
+        if previous_dofollow is None:
+            __DOFOLLOW_BY_PLATFORM.pop("fake", None)
+        else:
+            __DOFOLLOW_BY_PLATFORM["fake"] = previous_dofollow
+        if previous_rationale is None:
+            __RATIONALE_BY_PLATFORM.pop("fake", None)
+        else:
+            __RATIONALE_BY_PLATFORM["fake"] = previous_rationale

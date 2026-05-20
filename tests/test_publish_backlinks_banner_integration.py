@@ -104,11 +104,29 @@ def _reset_adapter_state():
 
 @pytest.fixture
 def _register_test_platform():
-    """Temporarily register a test-only platform; restore on teardown."""
+    """Temporarily register a test-only platform; restore on teardown.
+
+    Plan 2026-05-20-009 U3: extended to symmetrically snapshot+restore
+    the new parallel dofollow/rationale dicts. The pattern is whole-
+    registry clear-and-update (asymmetric from conftest's per-key
+    `fake_platform_registered` fixture); each dict gets its own
+    snapshot tuple and a paired clear()+update() on teardown.
+    """
+    from backlink_publisher.publishing.registry import (
+        _DOFOLLOW_BY_PLATFORM,
+        _RATIONALE_BY_PLATFORM,
+    )
+
     snapshot = {k: list(v) for k, v in _REGISTRY.items()}
+    dofollow_snapshot = dict(_DOFOLLOW_BY_PLATFORM)
+    rationale_snapshot = dict(_RATIONALE_BY_PLATFORM)
     yield
     _REGISTRY.clear()
     _REGISTRY.update(snapshot)
+    _DOFOLLOW_BY_PLATFORM.clear()
+    _DOFOLLOW_BY_PLATFORM.update(dofollow_snapshot)
+    _RATIONALE_BY_PLATFORM.clear()
+    _RATIONALE_BY_PLATFORM.update(rationale_snapshot)
 
 
 @pytest.fixture
@@ -142,7 +160,7 @@ class TestDispatcherIntegration:
     def test_opt_in_adapter_body_modified_event_emitted(
         self, _register_test_platform, captured_events, banner_emit, fake_config
     ):
-        register("optin_test", _OptInAdapter)
+        register("optin_test", _OptInAdapter, dofollow=True)
 
         result = dispatch(
             {
@@ -173,7 +191,7 @@ class TestDispatcherIntegration:
     def test_not_opted_in_adapter_falls_back_to_source_url(
         self, _register_test_platform, captured_events, banner_emit, fake_config
     ):
-        register("noembed_test", _NotOptedInAdapter)
+        register("noembed_test", _NotOptedInAdapter, dofollow=True)
 
         dispatch(
             {
@@ -199,7 +217,7 @@ class TestDispatcherIntegration:
     def test_strict_true_propagates_banner_upload_error(
         self, _register_test_platform, captured_events, banner_emit, fake_config
     ):
-        register("strict_test", _RaiseStrictAdapter)
+        register("strict_test", _RaiseStrictAdapter, dofollow=True)
 
         with pytest.raises(BannerUploadError, match="simulated upload 4xx"):
             dispatch(
@@ -222,7 +240,7 @@ class TestDispatcherIntegration:
     def test_strict_false_swallows_emits_failed_publishes_with_unchanged_body(
         self, _register_test_platform, captured_events, banner_emit, fake_config
     ):
-        register("permissive_test", _RaiseStrictAdapter)
+        register("permissive_test", _RaiseStrictAdapter, dofollow=True)
 
         result = dispatch(
             {
@@ -253,7 +271,7 @@ class TestDispatcherIntegration:
         ``embed_banner`` even when the payload has a banner dict.
         Preserves byte-identical behavior for callers that don't
         configure image_gen at all."""
-        register("nobanner_test", _OptInAdapter)
+        register("nobanner_test", _OptInAdapter, dofollow=True)
 
         dispatch(
             {
@@ -277,7 +295,7 @@ class TestDispatcherIntegration:
         iteration, so banner work is silently skipped even when
         banner_emit IS supplied.  Caller doesn't have to track
         dry-run state."""
-        register("dryrun_test", _OptInAdapter)
+        register("dryrun_test", _OptInAdapter, dofollow=True)
 
         result = dispatch(
             {
