@@ -969,7 +969,19 @@ def _settings_context(flash=None):
     token_data = load_blogger_token(cfg.blogger_token_path)
     medium_token_data = load_medium_token()
 
-    # Phase 3 token-paste platforms (2026-05-20).
+    # Phase 3 token-paste platforms (2026-05-20). Hashnode UI deliberately
+    # NOT wired here. Two independent blockers:
+    #   1. Hashnode GraphQL `publishPost` paywalled since 2026-05-13 (Pro
+    #      subscription required) — see docs/refs/hashnode-paywall-2026-05-13
+    #      and memory reference_hashnode_graphql_paywall.md. Free-tier
+    #      bindings would publish 0 posts and emit DependencyError.
+    #   2. Dofollow status not empirically verified —
+    #      webui_app/binding_status.py:_DOFOLLOW_BY_CHANNEL["hashnode"] is
+    #      None. Same pattern that caused PR #108 → #109 revert (devto /
+    #      mastodon / wpcom shipped while nofollow).
+    # Before adding hashnode_status / hashnode_config_summary here AND the
+    # collapse card in settings.html, both blockers must clear AND a fresh
+    # `_DOFOLLOW_BY_CHANNEL` grep must confirm `True`.
     ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
     hashnode_status = _token_paste_status(cfg, "hashnode", load_hashnode_token)
     ghpages_config_summary = [
