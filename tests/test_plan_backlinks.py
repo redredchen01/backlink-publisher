@@ -291,47 +291,73 @@ class TestContentFetchGate:
         # The article remains valid (≥ 5 links).
         assert len(urls) >= 5
 
-    def test_main_domain_gate_failure_aborts_row(self, monkeypatch, capsys):
-        """main_domain fails the gate → row is dropped; tripwire records
-        the drop under the `content_gate` bucket; exit code is 2 because
-        the run ended with errors."""
-        def _fail_main(urls, max_workers=5):
-            return {
-                u: (
-                    (False, "http_404", None)
-                    if u == "https://example.com"
-                    else (True, None, "mock title")
-                )
-                for u in urls
-            }
+def test_target_url_unreachable_aborts_row(monkeypatch):
+    """target_url is unreachable -> row is dropped."""
+    def _fail_target(url, **kwargs):
+        return False, "http_404", None
 
-        monkeypatch.setattr(
-            "backlink_publisher.content.fetch.verify_urls_batch",
-            _fail_main,
-        )
+    monkeypatch.setattr(
+        "backlink_publisher.content.fetch.verify_url_has_content",
+        _fail_target,
+    )
 
-        seed = {
-            "target_url": "https://example.com/article",
-            "main_domain": "https://example.com",
-            "language": "en",
-            "platform": "medium",
-            "url_mode": "A",
-            "publish_mode": "draft",
+    seed = {
+        "target_url": "https://example.com/unreachable",
+        "main_domain": "https://example.com",
+        "language": "en",
+        "platform": "medium",
+        "url_mode": "A",
+        "publish_mode": "draft",
+    }
+    stdout, stderr, code = _run_plan(json.dumps(seed))
+    # Validation failure during generation
+    assert code == 2
+    # Verify the specific error is logged (reported via SystemExit(2) error loop)
+    assert "unreachable" in stderr.lower()
+    assert "http_404" in stderr.lower()
+    assert stdout.strip() == ""
+
+def test_main_domain_gate_failure_aborts_row(monkeypatch):
+    """main_domain fails the gate → row is dropped; tripwire records
+    the drop under the `content_gate` bucket; exit code is 2 because
+    the run ended with errors."""
+    def _fail_main(urls, max_workers=5):
+        return {
+            u: (
+                (False, "http_404", None)
+                if u == "https://example.com"
+                else (True, None, "mock title")
+            )
+            for u in urls
         }
-        stdout, stderr, code = _run_plan(json.dumps(seed))
-        # Row drop → exit 2 (any error during planning)
-        assert code == 2
-        assert stdout.strip() == "", "no payload should be emitted"
-        # Tripwire records the drop under content_gate
-        recon_lines = [
-            line for line in stderr.splitlines()
-            if '"msg": "plan_reconciliation"' in line
-        ]
-        assert recon_lines, "tripwire must fire even on full-row drop"
-        recon = json.loads(recon_lines[0])
-        assert recon["dropped"]["content_gate"] == 1
-        assert recon["dropped"]["validation"] == 0
-        assert recon["dropped"]["generation"] == 0
+
+    monkeypatch.setattr(
+        "backlink_publisher.content.fetch.verify_urls_batch",
+        _fail_main,
+    )
+
+    seed = {
+        "target_url": "https://example.com/article",
+        "main_domain": "https://example.com",
+        "language": "en",
+        "platform": "medium",
+        "url_mode": "A",
+        "publish_mode": "draft",
+    }
+    stdout, stderr, code = _run_plan(json.dumps(seed))
+    # Row drop → exit 2 (any error during planning)
+    assert code == 2
+    assert stdout.strip() == "", "no payload should be emitted"
+    # Tripwire records the drop under content_gate
+    recon_lines = [
+        line for line in stderr.splitlines()
+        if '"msg": "plan_reconciliation"' in line
+    ]
+    assert recon_lines, "tripwire must fire even on full-row drop"
+    recon = json.loads(recon_lines[0])
+    assert recon["dropped"]["content_gate"] == 1
+    assert recon["dropped"]["validation"] == 0
+    assert recon["dropped"]["generation"] == 0
 
     def test_target_gate_failure_aborts_row(self, monkeypatch):
         """target_url fails the gate → row dropped under content_gate.
