@@ -247,7 +247,7 @@ Unit 1 must land first (establishes contract + 3 of 5 dispatch branches via writ
 
 ---
 
-- [ ] **Unit 2: Telegraph `embed_banner` via `POST /upload`**
+- [x] **Unit 2: Telegraph `embed_banner` via `POST /upload`** — shipped.
 
 **Goal:** Implement `TelegraphAPIAdapter.embed_banner` returning `https://telegra.ph/file/<sha>.<ext>` URL.
 
