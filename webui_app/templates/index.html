@@ -769,11 +769,6 @@
                     <i class="bi bi-stack me-2"></i>批量发布
                 </button>
             </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="publish-tab" data-bs-toggle="tab" data-bs-target="#publishPanel" type="button">
-                    <i class="bi bi-broadcast me-2"></i>发布中心
-                </button>
-            </li>
         </ul>
         
         <div class="tab-content" id="mainTabsContent">
@@ -1608,54 +1603,6 @@
                 </div>
             </div>
 
-            <!-- Publish Panel -->
-            <div class="tab-pane fade" id="publishPanel" role="tabpanel">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-broadcast me-2"></i>发布中心
-                    </div>
-                    <div class="card-body">
-                        {% if ready_to_publish %}
-                        <div class="publish-status success">
-                            <h5><i class="bi bi-check-circle-fill me-2"></i>内容已验证，可以发布</h5>
-                            <p style="margin:8px 0 0;font-size:13px;">目标平台：<strong>{{ ready_to_publish.platform }}</strong></p>
-                        </div>
-                        <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
-                            <form method="POST" action="/ce:publish">
-                                <input type="hidden" name="plans" value="{{ ready_to_publish.data }}">
-                                <input type="hidden" name="platform" value="{{ ready_to_publish.platform }}">
-                                <div class="input-group" style="max-width:280px;">
-                                    <select name="publish_mode" class="form-select" style="border-radius:10px 0 0 10px;">
-                                        <option value="draft">存草稿</option>
-                                        <option value="publish">正式发布</option>
-                                    </select>
-                                    <button type="submit" class="btn btn-success" style="border-radius:0 10px 10px 0;">
-                                        <i class="bi bi-send me-2"></i>立即发布
-                                    </button>
-                                </div>
-                            </form>
-                            <form method="POST" action="/ce:draft/save">
-                                <input type="hidden" name="plans" value="{{ ready_to_publish.data }}">
-                                <input type="hidden" name="platform" value="{{ ready_to_publish.platform }}">
-                                <select name="publish_mode" class="form-select form-select-sm mb-1" style="max-width:120px;">
-                                    <option value="draft">存草稿</option>
-                                    <option value="publish">正式发布</option>
-                                </select>
-                                <button type="submit" class="btn btn-outline-primary btn-sm" style="width:100%;">
-                                    <i class="bi bi-calendar-plus me-1"></i>加入草稿栏
-                                </button>
-                            </form>
-                        </div>
-                        {% else %}
-                        <div class="publish-status pending">
-                            <h5><i class="bi bi-info-circle me-2"></i>尚无待发布内容</h5>
-                            <p style="margin:8px 0 0;font-size:13px;">请先在「新建任务」完成文章生成与验证，再来此处发布。</p>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-            
         </div><!-- End tab-content -->
     </div>
     

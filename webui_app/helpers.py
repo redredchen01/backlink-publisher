@@ -36,6 +36,7 @@ from webui_store import (
     drafts_store as _drafts_store,
     history_store as _history_store,
     profiles_store as _profiles_store,
+    queue_store as _queue_store,
     schedule_store as _schedule_store,
 )
 
@@ -952,6 +953,7 @@ def _settings_context(flash=None):
 
     from backlink_publisher.config import (
         load_ghpages_token,
+        load_hashnode_token,
         load_medium_token,
         load_writeas_token,
     )
@@ -963,11 +965,10 @@ def _settings_context(flash=None):
     token_data = load_blogger_token(cfg.blogger_token_path)
     medium_token_data = load_medium_token()
 
-    # Phase 3 token-paste platforms (2026-05-20). hashnode excluded from
-    # the UI until dofollow status is empirically verified — see
-    # webui_app/binding_status.py:_DOFOLLOW_BY_CHANNEL comment.
+    # Phase 3 token-paste platforms (2026-05-20).
     ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
     writeas_status = _token_paste_status(cfg, "writeas", load_writeas_token)
+    hashnode_status = _token_paste_status(cfg, "hashnode", load_hashnode_token)
     ghpages_config_summary = [
         ("repo", cfg.ghpages.repo if cfg.ghpages else ""),
         ("branch", cfg.ghpages.branch if cfg.ghpages else "gh-pages"),
@@ -976,6 +977,9 @@ def _settings_context(flash=None):
     writeas_config_summary = [
         ("collection_alias", cfg.writeas.collection_alias if cfg.writeas else ""),
         ("api_base", cfg.writeas.api_base if cfg.writeas else "https://write.as/api"),
+    ]
+    hashnode_config_summary = [
+        ("publication_id", cfg.hashnode.publication_id if cfg.hashnode else ""),
     ]
 
     token = cfg.medium_integration_token or ""
@@ -1058,6 +1062,8 @@ def _settings_context(flash=None):
         writeas_status=writeas_status,
         ghpages_config_summary=ghpages_config_summary,
         writeas_config_summary=writeas_config_summary,
+        hashnode_status=hashnode_status,
+        hashnode_config_summary=hashnode_config_summary,
     )
 
 
@@ -1153,7 +1159,7 @@ def _render(template_name: str, **kwargs):
     ``render_template`` finds it under ``webui_app/templates/``.
 
     Auto-injected context (when not provided by caller):
-      - history, blogger_token_status, profiles, draft_queue,
+      - history, blogger_token_status, profiles, draft_queue, tasks,
         now_iso, suggested_next, incomplete_run
     """
     if 'history' not in kwargs:
@@ -1164,6 +1170,11 @@ def _render(template_name: str, **kwargs):
         kwargs['profiles'] = _profiles_store.load()
     if 'draft_queue' not in kwargs:
         kwargs['draft_queue'] = _drafts_store.load()
+    if 'tasks' not in kwargs:
+        try:
+            kwargs['tasks'] = _queue_store.load()
+        except Exception:
+            kwargs['tasks'] = []
     if 'now_iso' not in kwargs:
         now = datetime.now()
         kwargs['now_iso'] = now.strftime('%Y-%m-%dT%H:%M')

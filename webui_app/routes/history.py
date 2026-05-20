@@ -1,10 +1,16 @@
-"""/ce:history* — Plan Unit 3 + Plan 2026-05-19-006 bulk operations."""
+"""/ce:history* — Plan Unit 3 + Plan 2026-05-19-006 bulk operations.
+
+Plan 012 Unit 2: owns the `/ce:retry-task` POST endpoint (moved from
+the `dashboard` blueprint along with `/ce:dashboard` becoming a 302
+redirect to `/ce:history?section=in-progress`).
+"""
 
 from __future__ import annotations
 
-from flask import Blueprint, redirect, request, session
+from flask import Blueprint, jsonify, redirect, request, session
 
 from webui_store import history_store as _history_store
+from webui_store import queue_store as _queue_store
 
 from ..helpers import _draft_tab_extra, _render
 
@@ -14,15 +20,9 @@ bp = Blueprint("history", __name__)
 @bp.route('/ce:history', methods=['GET', 'POST'])
 def ce_history():
     config = session.get('config', {})
-    validated = session.get('validated', '')
-    ready_to_publish = (
-        {'data': validated, 'platform': config.get('platform', 'blogger')}
-        if validated else None
-    )
     return _render('index.html',
         history=_history_store.load(),
         history_active=True,
-        ready_to_publish=ready_to_publish,
         config=config,
         **_draft_tab_extra())
 
@@ -109,6 +109,16 @@ def ce_history_recheck():
     status = mutation.get('status', '')
     msg = f'已重新核实：状态 → {status}'
     return redirect(f'/ce:history?flash_type=success&flash_msg={msg}')
+
+
+@bp.route('/ce:retry-task', methods=['POST'])
+def ce_retry_task():
+    """Plan 012 Unit 2: moved from dashboard blueprint. URL is unchanged."""
+    task_id = request.form.get('task_id')
+    if not task_id:
+        return jsonify({'status': 'error', 'message': 'Missing task_id'})
+    _queue_store.update_task(task_id, {'status': 'pending', 'error': None})
+    return jsonify({'status': 'success', 'message': '任务已重置为待发布状态'})
 
 
 @bp.route('/ce:history/bulk-recheck', methods=['POST'])

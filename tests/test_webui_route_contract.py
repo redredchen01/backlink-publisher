@@ -840,9 +840,26 @@ class TestSitesPostRoutes:
 
 
 class TestQueueDashboardRoutes:
-    def test_ce_dashboard_returns_200(self, client):
-        resp = client.get("/ce:dashboard")
+    def test_ce_dashboard_redirects_to_history_in_progress(self, client):
+        """Plan 012 Unit 2 — /ce:dashboard 302 → /ce:history?section=in-progress."""
+        resp = client.get("/ce:dashboard", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/ce:history?section=in-progress")
+
+    def test_dashboard_html_template_removed(self):
+        """Plan 012 Unit 2 — dashboard.html template file deleted."""
+        from pathlib import Path
+        tpl = Path(__file__).resolve().parents[1] / "webui_app" / "templates" / "dashboard.html"
+        assert not tpl.exists(), f"dashboard.html should be deleted but exists at {tpl}"
+
+    def test_publish_panel_dom_removed(self, client):
+        """Plan 012 Unit 1 — #publishPanel tab + pane removed from index.html."""
+        resp = client.get("/")
         assert resp.status_code == 200
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert 'id="publishPanel"' not in body
+        assert 'id="publish-tab"' not in body
+        assert "ready_to_publish" not in body
 
     def test_ce_queue_task_returns_json(self, client):
         resp = client.post(
