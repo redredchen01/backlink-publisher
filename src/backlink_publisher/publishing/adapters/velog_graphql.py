@@ -259,6 +259,53 @@ class VelogGraphQLAdapter(Publisher):
                                   exhaustion after retry.
     """
 
+    def embed_banner(self, artifact_path: Path, alt: str) -> str | None:
+        """Return ``None`` — route to dispatcher's source_url fallback.
+
+        Plan 2026-05-20-004 Unit 5.  The plan originally proposed a
+        two-step ``image_upload_url`` GraphQL mutation + PUT to the
+        returned presigned URL.  Probe at implementation time
+        (2026-05-20) found:
+
+        * Velog's GraphQL endpoint at ``v2.velog.io/graphql`` disables
+          schema introspection
+          (``GRAPHQL_VALIDATION_FAILED: introspection is not allowed``).
+        * Direct probes of likely mutation names — ``imageUploadUrl``,
+          ``createImageUploadUrl``, ``uploadImage``, ``imageUpload`` —
+          all return ``Cannot query field`` errors.  The
+          ``image_upload_url`` snake_case form in the plan is also
+          rejected (GraphQL uses camelCase by convention; the validator
+          checked).
+        * REST probes at ``v2.velog.io/upload``, ``/upload-image``,
+          ``/api/upload``, ``/images`` and the legacy
+          ``api.velog.io/upload-file`` / ``/files`` all return HTTP 404.
+
+        Velog's editor likely uploads via a path that's only reachable
+        from an authenticated browser session (a temp-signed S3 PUT
+        URL obtained through a non-introspectable GraphQL field, or a
+        cookie-gated REST endpoint not at any standard path).  Without
+        a Playwright-driven scrape of the editor's image-upload
+        network traffic to confirm the contract, shipping an
+        unverified upload path would land dead code raising
+        ``BannerUploadError`` on every row in non-strict mode.
+
+        Returning ``None`` is the writeas-style "considered but can't"
+        signal (distinct from Medium's not-implementing): dispatcher
+        prepends ``![alt](source_url)`` from ``banner.source_url`` and
+        emits ``banner.source_url_fallback`` with ``reason=
+        adapter_returned_none``.  The banner still appears in the
+        published post — hosted on the upstream image-gen provider's
+        CDN — at the cost of link rot when that CDN expires.
+
+        When/if a follow-up plan supplies a verified upload contract
+        (e.g., from inspecting velog's editor source or a
+        Playwright-recorded HAR of a real image paste), swap this
+        ``None`` for a real implementation.  Do NOT relitigate the
+        probe findings here.
+        """
+        del alt
+        return None
+
     def publish(
         self,
         payload: dict[str, Any],

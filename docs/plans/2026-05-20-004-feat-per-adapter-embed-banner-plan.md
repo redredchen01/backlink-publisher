@@ -358,7 +358,7 @@ Unit 1 must land first (establishes contract + 3 of 5 dispatch branches via writ
 
 ---
 
-- [ ] **Unit 5: Velog `embed_banner` via `image_upload_url` mutation + PUT**
+- [x] **Unit 5: Velog `embed_banner` — pivoted to writeas-style `None` return** (introspection disabled at v2.velog.io/graphql; probed mutation names + REST upload endpoints all 4xx/404; upload contract unverifiable without Playwright HAR scrape). Shipped.
 
 **Goal:** Implement `VelogGraphQLAdapter.embed_banner` returning a Velog-hosted image URL.
 
