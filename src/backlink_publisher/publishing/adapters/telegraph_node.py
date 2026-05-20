@@ -33,7 +33,7 @@ from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 
-from backlink_publisher import markdown_utils
+from backlink_publisher._util import markdown as markdown_utils
 
 Node = dict[str, Any] | str
 

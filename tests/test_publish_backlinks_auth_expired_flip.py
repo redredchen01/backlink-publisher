@@ -19,10 +19,10 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.cli.publish_backlinks import main
-from backlink_publisher.errors import AuthExpiredError
-from backlink_publisher.verify_publish import VerificationResult
+from backlink_publisher._util.errors import AuthExpiredError
+from backlink_publisher.linkcheck.verify import VerificationResult
 
 
 @pytest.fixture(autouse=True)
@@ -202,7 +202,7 @@ class TestAuthExpiredFlipMainPath:
         """Defense-in-depth: AuthExpiredError ctor itself validates channel
         against CHANNELS, so a buggy adapter that tries channel='../evil'
         can't even construct the exception."""
-        from backlink_publisher.errors import UsageError
+        from backlink_publisher._util.errors import UsageError
         with pytest.raises(UsageError):
             AuthExpiredError(channel="../evil")
 
@@ -212,7 +212,7 @@ class TestAuthExpiredIsCaughtAsDependencyError:
     in-tree code that hasn't migrated yet) keep catching AuthExpiredError."""
 
     def test_isinstance_dependency_error(self):
-        from backlink_publisher.errors import DependencyError
+        from backlink_publisher._util.errors import DependencyError
         exc = AuthExpiredError(channel="medium", reason="test")
         assert isinstance(exc, DependencyError)
         assert exc.exit_code == 3

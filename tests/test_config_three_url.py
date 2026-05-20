@@ -818,7 +818,7 @@ class TestMergeSiteUrlCategories:
         basic string quoting. The webui handler validates main_url
         upstream, but defensive rejection at this layer is cheap."""
         from backlink_publisher.config import merge_site_url_categories
-        from backlink_publisher.errors import InputValidationError
+        from backlink_publisher._util.errors import InputValidationError
 
         cfg_path = tmp_path / "config.toml"
         with pytest.raises(InputValidationError):

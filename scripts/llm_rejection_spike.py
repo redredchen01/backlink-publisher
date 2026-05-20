@@ -80,11 +80,11 @@ from typing import Any
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
-from backlink_publisher.adapters.llm_anchor_provider import (  # noqa: E402
+from backlink_publisher.publishing.adapters.llm_anchor_provider import (  # noqa: E402
     LLMAnchorRequest,
     OpenAICompatibleProvider,
 )
-from backlink_publisher.anchor_resolver import _passes_filters  # noqa: E402
+from backlink_publisher.anchor.resolver import _passes_filters  # noqa: E402
 from backlink_publisher.config import load_config  # noqa: E402
 
 # Default rejection threshold from the plan's risk acknowledgments — anything

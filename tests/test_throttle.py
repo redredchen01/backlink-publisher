@@ -10,9 +10,9 @@ from unittest.mock import patch, call
 
 import pytest
 
-from backlink_publisher.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.cli.publish_backlinks import main
-from backlink_publisher.verify_publish import VerificationResult
+from backlink_publisher.linkcheck.verify import VerificationResult
 
 
 @pytest.fixture(autouse=True)

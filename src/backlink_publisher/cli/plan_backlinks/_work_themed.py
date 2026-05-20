@@ -8,7 +8,8 @@ from typing import Any
 
 from backlink_publisher.anchor.profile import ProfileEntry
 from backlink_publisher.anchor import profile as anchor_profile
-from backlink_publisher import markdown_utils, work_scraper, work_themed_generator
+from backlink_publisher._util import markdown as markdown_utils
+from backlink_publisher.content import scraper as work_scraper, themed_gen as work_themed_generator
 from backlink_publisher.config import ThreeUrlConfig
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError, emit_error
 from backlink_publisher._util.logger import plan_logger

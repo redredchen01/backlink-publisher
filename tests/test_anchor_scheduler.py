@@ -6,18 +6,18 @@ from collections import Counter
 
 import pytest
 
-from backlink_publisher.anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileEntry,
     ProfileState,
     now_iso,
 )
-from backlink_publisher.anchor_scheduler import (
+from backlink_publisher.anchor.scheduler import (
     ScheduleDecision,
     SecondaryLink,
     _pick_anchor_type,
     schedule,
 )
-from backlink_publisher.errors import InputValidationError
+from backlink_publisher._util.errors import InputValidationError
 
 
 SAFE_SEO = {"branded": 0.55, "partial": 0.25, "exact": 0.10, "lsi": 0.10}

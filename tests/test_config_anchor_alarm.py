@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backlink_publisher.anchor_metrics import (
+from backlink_publisher.anchor.metrics import (
     TargetThresholds,
     resolve_thresholds,
 )
@@ -13,7 +13,7 @@ from backlink_publisher.config import (
     AnchorAlarmOverride,
     _parse_anchor_alarm,
 )
-from backlink_publisher.errors import InputValidationError
+from backlink_publisher._util.errors import InputValidationError
 
 
 # ── parsing ─────────────────────────────────────────────────────────────────

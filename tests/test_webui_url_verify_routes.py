@@ -127,7 +127,7 @@ def _patch_ok(monkeypatch, title="mock title"):
     def _ok(url, **kw):
         return (True, None, title)
     monkeypatch.setattr(
-        "backlink_publisher.content_fetch.verify_url_has_content",
+        "backlink_publisher.content.fetch.verify_url_has_content",
         _ok,
         raising=True,
     )
@@ -259,7 +259,7 @@ class TestUrlParsing:
             return (True, None, "stripped")
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _spy,
             raising=True,
         )
@@ -282,7 +282,7 @@ class TestUrlParsing:
             return (True, None, "ja")
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _spy,
             raising=True,
         )
@@ -407,7 +407,7 @@ class TestThrottle:
             raise RuntimeError("simulated network failure")
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _explode,
             raising=True,
         )
@@ -470,7 +470,7 @@ class TestReasonEnum:
         def _ok(url, **kw):
             return (True, None, "ok-title")
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _ok,
             raising=True,
         )
@@ -495,7 +495,7 @@ class TestReasonEnum:
                 return (False, r, None)
 
             monkeypatch.setattr(
-                "backlink_publisher.content_fetch.verify_url_has_content",
+                "backlink_publisher.content.fetch.verify_url_has_content",
                 _stub,
                 raising=True,
             )
@@ -521,7 +521,7 @@ class TestNoIpLeak:
             return (False, "ssrf_blocked", None)
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _ssrf,
             raising=True,
         )
@@ -551,7 +551,7 @@ class TestTitleTruncation:
             return (True, None, long_title)
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _ok_long,
             raising=True,
         )
@@ -567,7 +567,7 @@ class TestTitleTruncation:
             return (True, None, None)
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_url_has_content",
+            "backlink_publisher.content.fetch.verify_url_has_content",
             _ok_none,
             raising=True,
         )

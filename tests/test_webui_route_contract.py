@@ -810,7 +810,7 @@ class TestSitesPostRoutes:
             lambda url: {"title": "T", "description": "D"},
         )
         monkeypatch.setattr(
-            "backlink_publisher.work_scraper.fetch_work_urls_from_list",
+            "backlink_publisher.content.scraper.fetch_work_urls_from_list",
             lambda *a, **k: [],
         )
         token = _fetch_csrf(client)

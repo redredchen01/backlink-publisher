@@ -24,19 +24,19 @@ import random
 
 import pytest
 
-from backlink_publisher.anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileEntry,
     ProfileState,
     now_iso,
     recent_texts,
     recent_type_counts,
 )
-from backlink_publisher.anchor_resolver import (
+from backlink_publisher.anchor.resolver import (
     FORBIDDEN_ANCHOR_TEXTS,
     _passes_filters,
     resolve_anchor,
 )
-from backlink_publisher.anchor_scheduler import schedule
+from backlink_publisher.anchor.scheduler import schedule
 from backlink_publisher.config import Config
 
 

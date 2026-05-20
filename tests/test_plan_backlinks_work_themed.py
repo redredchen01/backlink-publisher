@@ -19,12 +19,12 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.anchor_profile import ProfileEntry, ProfileState
+from backlink_publisher.anchor.profile import ProfileEntry, ProfileState
 from backlink_publisher.cli import plan_backlinks
 from backlink_publisher.cli.plan_backlinks import _plan_work_themed_row
 from backlink_publisher.config import Config, ThreeUrlConfig
-from backlink_publisher.errors import ExternalServiceError
-from backlink_publisher.work_scraper import WorkMetadata
+from backlink_publisher._util.errors import ExternalServiceError
+from backlink_publisher.content.scraper import WorkMetadata
 
 
 # ── autouse isolation fixtures ──────────────────────────────────────────────
@@ -34,14 +34,14 @@ from backlink_publisher.work_scraper import WorkMetadata
 def _isolated_profile(tmp_path):
     """Redirect anchor_profile cache writes into tmp."""
     fake = tmp_path / "cache"
-    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=fake):
+    with patch("backlink_publisher.anchor.profile._cache_dir", return_value=fake):
         yield fake
 
 
 @pytest.fixture(autouse=True)
 def _no_real_sleep():
     """Mock retry sleep on the off-chance a path engages the retry helper."""
-    with patch("backlink_publisher.adapters.retry.time.sleep"):
+    with patch("backlink_publisher.publishing.adapters.retry.time.sleep"):
         yield
 
 
@@ -189,7 +189,7 @@ class TestWorkThemedRowHappy:
         # Reset profile cache (tmp_path autouse → fresh per test, so we patch
         # load_profile to always return empty for this idempotency check).
         with patch(
-            "backlink_publisher.anchor_profile.load_profile",
+            "backlink_publisher.anchor.profile.load_profile",
             return_value=ProfileState(main_domain="https://site.com"),
         ):
             with patch.object(

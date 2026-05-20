@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.logger import (
+from backlink_publisher._util.logger import (
     PipelineLogger,
     _redact_in_place,
     _SENSITIVE_KEYS,

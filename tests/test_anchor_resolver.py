@@ -7,14 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backlink_publisher.adapters.llm_anchor_provider import LLMAnchorRequest
-from backlink_publisher.anchor_resolver import (
+from backlink_publisher.publishing.adapters.llm_anchor_provider import LLMAnchorRequest
+from backlink_publisher.anchor.resolver import (
     FORBIDDEN_ANCHOR_TEXTS,
     _passes_filters,
     resolve_anchor,
 )
 from backlink_publisher.config import Config
-from backlink_publisher.errors import DependencyError
+from backlink_publisher._util.errors import DependencyError
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ def test_main_domain_with_trailing_slash_still_finds_pool():
 # ── Plan 2026-05-18-006 Unit 4: language-aware _passes_filters dispatch ─────
 
 
-from backlink_publisher.anchor_resolver import (  # noqa: E402
+from backlink_publisher.anchor.resolver import (  # noqa: E402
     _RATIO_RULES,
     _formal_denominator,
 )

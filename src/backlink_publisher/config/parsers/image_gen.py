@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ...errors import InputValidationError
+from ..._util.errors import InputValidationError
 from ..types import ImageGenConfig
 
 # ``WIDTHxHEIGHT`` — both integers, ``x`` separator (DALL-E-style).

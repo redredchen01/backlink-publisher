@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileEntry,
     ProfileState,
     load_profile,
@@ -31,7 +31,7 @@ from backlink_publisher.anchor_profile import (
 def profile_cache(tmp_path):
     """Redirect _cache_dir for anchor_profile + checkpoint imports."""
     fake = tmp_path / "cache"
-    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=fake):
+    with patch("backlink_publisher.anchor.profile._cache_dir", return_value=fake):
         yield fake
 
 
@@ -99,7 +99,7 @@ def test_load_version_mismatch_returns_empty(profile_cache, capsys):
     pdir = profile_cache / "anchor-profile"
     pdir.mkdir(parents=True, exist_ok=True)
     # Find what filename load_profile expects
-    from backlink_publisher.anchor_profile import _profile_path
+    from backlink_publisher.anchor.profile import _profile_path
     p = _profile_path("https://example.com")
     p.write_text(
         json.dumps({"version": 99, "main_domain": "https://example.com", "entries": []}),
@@ -115,7 +115,7 @@ def test_load_version_mismatch_returns_empty(profile_cache, capsys):
 def test_load_skips_malformed_individual_entries(profile_cache):
     main_domain = "https://example.com"
     record_article(main_domain, [_main("good")])
-    from backlink_publisher.anchor_profile import _profile_path
+    from backlink_publisher.anchor.profile import _profile_path
     p = _profile_path(main_domain)
     raw = json.loads(p.read_text(encoding="utf-8"))
     raw["entries"].append({"this": "is malformed"})  # missing required fields
@@ -204,7 +204,7 @@ def test_per_target_trim_isolates_buckets(profile_cache):
 
 def test_article_integrity_under_trim(profile_cache):
     """Trim never strands a secondary without its main."""
-    from backlink_publisher.anchor_profile import _group_into_articles
+    from backlink_publisher.anchor.profile import _group_into_articles
 
     main_domain = "https://integrity.example"
     target = "https://integrity.example/page"
@@ -410,7 +410,7 @@ def test_record_write_failure_does_not_raise(profile_cache, capsys):
     main_domain = "https://writefail.example"
 
     with patch(
-        "backlink_publisher.anchor_profile.atomic_write_json",
+        "backlink_publisher.anchor.profile.atomic_write_json",
         side_effect=OSError("disk full"),
     ):
         # Should not raise

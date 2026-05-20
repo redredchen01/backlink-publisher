@@ -15,7 +15,7 @@ from backlink_publisher.config import (
     get_anchor_pool_v2,
     load_config,
 )
-from backlink_publisher.errors import InputValidationError
+from backlink_publisher._util.errors import InputValidationError
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────

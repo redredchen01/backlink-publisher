@@ -5,8 +5,8 @@ import logging
 import re
 from typing import Any
 
-from ...logger import plan_logger
-from ...url_utils import validate_https_url, validate_main_domain_url
+from ..._util.logger import plan_logger
+from ..._util.url import validate_https_url, validate_main_domain_url
 from ..types import (
     DEFAULT_WORK_TEMPLATES,
     ThreeUrlConfig,

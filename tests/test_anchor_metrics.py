@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from backlink_publisher.anchor_metrics import (
+from backlink_publisher.anchor.metrics import (
     TargetThresholds,
     WindowMetrics,
     compute_window_metrics,
@@ -19,7 +19,7 @@ from backlink_publisher.anchor_metrics import (
     shannon_entropy,
     top_n_concentration,
 )
-from backlink_publisher.anchor_profile import ProfileEntry, ProfileState
+from backlink_publisher.anchor.profile import ProfileEntry, ProfileState
 
 
 # ── normalize ───────────────────────────────────────────────────────────────

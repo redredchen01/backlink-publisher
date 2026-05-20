@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from backlink_publisher.anchor_lang import check_anchor_language
+from backlink_publisher.anchor.lang import check_anchor_language
 
 
 # --- zh-CN: happy path & branded carve-out ---

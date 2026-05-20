@@ -10,7 +10,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before validation
-from .. import config_echo, errors
+from .. import config_echo
+from .._util import errors
 from backlink_publisher.anchor.lang import check_anchor_language
 from backlink_publisher.config import Config, get_anchor_pool_v2, load_config
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl

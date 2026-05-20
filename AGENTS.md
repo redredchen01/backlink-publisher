@@ -76,17 +76,17 @@ Note: operator-archival `[targets_meta.<domain>]` blocks are preserved-only — 
 
 ## Import Conventions
 
-Old flat imports (`from backlink_publisher.errors import ...`) still work via `_LegacyPathFinder`. **New code should import from refactored paths:**
+Plan 2026-05-20-006 deleted the legacy `sys.meta_path` bridge. The old flat names (`backlink_publisher.errors`, `backlink_publisher.adapters.*`, `backlink_publisher.content_fetch`, …) **no longer resolve** — `from backlink_publisher.errors import X` now raises `ModuleNotFoundError`. Use the canonical paths:
 
-| Legacy | New |
+| Subpackage | Contents |
 |---|---|
-| `anchor_lang`, `anchor_metrics`, `anchor_profile`, `anchor_resolver`, `anchor_scheduler` | `anchor.lang`, `.metrics`, `.profile`, `.resolver`, `.scheduler` |
-| `content_fetch`, `work_scraper`, `work_themed_generator` | `content.fetch`, `.scraper`, `.themed_gen` |
-| `language_check`, `verify_publish` | `linkcheck.language`, `.verify` |
-| `errors`, `io_utils`, `jsonl`, `logger`, `markdown_utils`, `url_utils` | `_util.errors`, `.io`, `.jsonl`, `.logger`, `.markdown`, `.url` |
-| `adapters.*` | `publishing.adapters.*` |
+| `backlink_publisher.anchor.*` | `lang`, `metrics`, `profile`, `resolver`, `scheduler`, `preflight` |
+| `backlink_publisher.content.*` | `fetch`, `scraper`, `themed_gen`, `body` |
+| `backlink_publisher.linkcheck.*` | `http`, `language`, `verify` |
+| `backlink_publisher._util.*` | `errors`, `io`, `jsonl`, `logger`, `markdown`, `url`, `net_safety`, `secrets`, `url_derive` |
+| `backlink_publisher.publishing.adapters.*` | All publisher adapters (blogger, medium, telegraph, ghpages, hashnode, writeas, …) |
 
-Full map: `src/backlink_publisher/__init__.py:_REEXPORT_MAP` (17 entries). Most tests, CLI code, and WebUI still use legacy paths — the finder makes it transparent, but don't add new legacy imports.
+Note: `from backlink_publisher.linkcheck import check_url` still works — `linkcheck` is a real package whose `__init__.py` does `from .http import *`, independent of the deleted bridge.
 
 ## Test Patterns
 

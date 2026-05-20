@@ -1,6 +1,6 @@
 """Tests for render_to_html + _format_anchor_html rel parameterisation."""
 
-from backlink_publisher.markdown_utils import (
+from backlink_publisher._util.markdown import (
     _format_anchor_html,
     render_to_html,
     select_anchor_keywords,

@@ -8,8 +8,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backlink_publisher.errors import InputValidationError
-from backlink_publisher.logger import plan_logger
+from backlink_publisher._util.errors import InputValidationError
+from backlink_publisher._util.logger import plan_logger
 from .types import (
     Config,
     DEFAULT_WORK_TEMPLATES,

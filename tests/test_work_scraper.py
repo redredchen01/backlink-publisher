@@ -16,9 +16,9 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from backlink_publisher import work_scraper
-from backlink_publisher.errors import ExternalServiceError, InputValidationError
-from backlink_publisher.work_scraper import (
+from backlink_publisher.content import scraper as work_scraper
+from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
+from backlink_publisher.content.scraper import (
     WorkMetadata,
     fetch_work_metadata,
     fetch_work_urls_from_list,
@@ -31,7 +31,7 @@ from backlink_publisher.work_scraper import (
 @pytest.fixture(autouse=True)
 def _mock_sleep():
     """Mock time.sleep on the retry path (macOS / CI isolation)."""
-    with patch("backlink_publisher.adapters.retry.time.sleep"):
+    with patch("backlink_publisher.publishing.adapters.retry.time.sleep"):
         yield
 
 

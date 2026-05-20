@@ -10,10 +10,10 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from backlink_publisher.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.cli.publish_backlinks import main
-from backlink_publisher.errors import ExternalServiceError
-from backlink_publisher.verify_publish import VerificationResult
+from backlink_publisher._util.errors import ExternalServiceError
+from backlink_publisher.linkcheck.verify import VerificationResult
 
 
 def _run_publish(

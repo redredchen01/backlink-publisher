@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from backlink_publisher.language_check import (
+from backlink_publisher.linkcheck.language import (
     SUPPORTED_LANGUAGES,
     language_matches,
 )

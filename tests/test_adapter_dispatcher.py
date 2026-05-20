@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backlink_publisher.adapters import publish, verify_adapter_setup
-from backlink_publisher.adapters.base import AdapterResult
+from backlink_publisher.publishing.adapters import publish, verify_adapter_setup
+from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.config import Config, BloggerOAuthConfig
-from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 
 BLOGGER_PAYLOAD = {
     "id": "id1",
@@ -47,23 +47,23 @@ MEDIUM_BROWSER_RESULT = AdapterResult(
 )
 
 
-@patch("backlink_publisher.adapters.BloggerAPIAdapter.publish", return_value=BLOGGER_RESULT)
+@patch("backlink_publisher.publishing.adapters.BloggerAPIAdapter.publish", return_value=BLOGGER_RESULT)
 def test_blogger_routes_to_blogger_adapter(mock_pub):
     result = publish(BLOGGER_PAYLOAD, mode="draft", config=CONFIG_BLOGGER)
     assert result.adapter == "blogger-api"
     mock_pub.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.MediumAPIAdapter.publish", return_value=MEDIUM_API_RESULT)
+@patch("backlink_publisher.publishing.adapters.MediumAPIAdapter.publish", return_value=MEDIUM_API_RESULT)
 def test_medium_with_token_uses_api_adapter(mock_pub):
     result = publish(MEDIUM_PAYLOAD, mode="draft", config=CONFIG_MEDIUM_TOKEN)
     assert result.adapter == "medium-api"
     mock_pub.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.MediumBrowserAdapter.publish", return_value=MEDIUM_BROWSER_RESULT)
-@patch("backlink_publisher.adapters.MediumBraveAdapter.publish", side_effect=DependencyError("brave not running"))
-@patch("backlink_publisher.adapters.MediumAPIAdapter.publish", side_effect=DependencyError("no token"))
+@patch("backlink_publisher.publishing.adapters.MediumBrowserAdapter.publish", return_value=MEDIUM_BROWSER_RESULT)
+@patch("backlink_publisher.publishing.adapters.MediumBraveAdapter.publish", side_effect=DependencyError("brave not running"))
+@patch("backlink_publisher.publishing.adapters.MediumAPIAdapter.publish", side_effect=DependencyError("no token"))
 def test_medium_fallthrough_to_browser_on_dependency_error(mock_api, mock_brave, mock_browser):
     result = publish(MEDIUM_PAYLOAD, mode="draft", config=CONFIG_NO_TOKEN)
     assert result.adapter == "medium-browser"
@@ -71,8 +71,8 @@ def test_medium_fallthrough_to_browser_on_dependency_error(mock_api, mock_brave,
     mock_browser.assert_called_once()
 
 
-@patch("backlink_publisher.adapters.MediumBrowserAdapter.publish")
-@patch("backlink_publisher.adapters.MediumAPIAdapter.publish", side_effect=ExternalServiceError("401"))
+@patch("backlink_publisher.publishing.adapters.MediumBrowserAdapter.publish")
+@patch("backlink_publisher.publishing.adapters.MediumAPIAdapter.publish", side_effect=ExternalServiceError("401"))
 def test_medium_no_fallthrough_on_external_service_error(mock_api, mock_browser):
     with pytest.raises(ExternalServiceError):
         publish(MEDIUM_PAYLOAD, mode="draft", config=CONFIG_MEDIUM_TOKEN)
@@ -105,7 +105,7 @@ def test_verify_blogger_ok_with_oauth():
 def test_verify_medium_requires_token_or_playwright():
     cfg = Config(medium_integration_token=None)
     # Playwright may or may not be installed in test env — mock it absent
-    import backlink_publisher.adapters.medium_browser as mb
+    import backlink_publisher.publishing.adapters.medium_browser as mb
     original = mb.sync_playwright
     mb.sync_playwright = None
     try:
@@ -139,7 +139,7 @@ TELEGRAPH_RESULT = AdapterResult(
 )
 
 
-@patch("backlink_publisher.adapters.TelegraphAPIAdapter.publish", return_value=TELEGRAPH_RESULT)
+@patch("backlink_publisher.publishing.adapters.TelegraphAPIAdapter.publish", return_value=TELEGRAPH_RESULT)
 def test_telegraph_routes_to_telegraph_adapter(mock_pub):
     result = publish(TELEGRAPH_PAYLOAD, mode="publish", config=Config())
     assert result.adapter == "telegraph-api"

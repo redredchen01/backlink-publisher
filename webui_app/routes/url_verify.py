@@ -175,7 +175,7 @@ def url_verify():
     # ``backlink_publisher.content_fetch.verify_url_has_content`` is honored
     # (the conftest autouse mock patches at the legacy alias module).
     try:
-        from backlink_publisher import content_fetch as _cf
+        from backlink_publisher.content import fetch as _cf
         ok, reason, title = _cf.verify_url_has_content(
             clean_url,
             max_age_seconds=0,

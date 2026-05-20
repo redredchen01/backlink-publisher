@@ -20,7 +20,7 @@ from flask import abort, render_template, request, session
 from google.oauth2.credentials import Credentials
 
 from backlink_publisher import checkpoint as _checkpoint_mod
-from backlink_publisher import content_fetch
+from backlink_publisher.content import fetch as content_fetch
 from backlink_publisher.config import (
     _domain_label,
     load_blogger_token,
@@ -30,7 +30,7 @@ from backlink_publisher.config import (
     save_config,
     upgrade_target_to_threeurl,
 )
-from backlink_publisher.logger import plan_logger
+from backlink_publisher._util.logger import plan_logger
 
 from webui_store import (
     drafts_store as _drafts_store,

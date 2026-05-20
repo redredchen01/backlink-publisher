@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.anchor_profile import (
+from backlink_publisher.anchor.profile import (
     ProfileEntry,
     ProfileState,
     now_iso,
@@ -193,7 +193,7 @@ SAFE_SEO = {"branded": 0.55, "partial": 0.25, "exact": 0.10, "lsi": 0.10}
 @pytest.fixture()
 def profile_cache(tmp_path):
     """Redirect anchor_profile to write under tmp_path."""
-    with patch("backlink_publisher.anchor_profile._cache_dir", return_value=tmp_path / "cache"):
+    with patch("backlink_publisher.anchor.profile._cache_dir", return_value=tmp_path / "cache"):
         yield tmp_path / "cache"
 
 

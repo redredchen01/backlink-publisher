@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.io_utils import atomic_write_json
+from backlink_publisher._util.io import atomic_write_json
 
 
 def test_atomic_write_creates_file_with_default_0600(tmp_path):
@@ -89,7 +89,7 @@ def test_atomic_write_silences_chmod_error(tmp_path):
     """chmod failures must not raise — the rename is the load-bearing step."""
     target = tmp_path / "out.json"
 
-    with patch("backlink_publisher.io_utils.os.chmod", side_effect=OSError("nope")):
+    with patch("backlink_publisher._util.io.os.chmod", side_effect=OSError("nope")):
         atomic_write_json(target, {"v": 1})
 
     assert target.exists()

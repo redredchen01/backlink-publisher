@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from backlink_publisher.cli.plan_backlinks import main
-from backlink_publisher.errors import InputValidationError
+from backlink_publisher._util.errors import InputValidationError
 
 
 def _stderr_without_warnings(stderr: str) -> str:
@@ -269,7 +269,7 @@ class TestContentFetchGate:
             return result
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch",
+            "backlink_publisher.content.fetch.verify_urls_batch",
             _selective_batch,
         )
 
@@ -306,7 +306,7 @@ class TestContentFetchGate:
             }
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch",
+            "backlink_publisher.content.fetch.verify_urls_batch",
             _fail_main,
         )
 
@@ -347,7 +347,7 @@ class TestContentFetchGate:
             }
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch",
+            "backlink_publisher.content.fetch.verify_urls_batch",
             _fail_target,
         )
 
@@ -373,7 +373,7 @@ class TestContentFetchGate:
             return {u: (False, "http_404", None) for u in urls}
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch",
+            "backlink_publisher.content.fetch.verify_urls_batch",
             _tracking_batch,
         )
 
@@ -438,7 +438,7 @@ class TestContentFetchGate:
             }
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch",
+            "backlink_publisher.content.fetch.verify_urls_batch",
             _fail_category,
         )
 
@@ -914,7 +914,7 @@ class TestContentFetchPrefetchAndStats:
             return {u: (True, None, "ok") for u in urls}
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch", _track_batch,
+            "backlink_publisher.content.fetch.verify_urls_batch", _track_batch,
         )
 
         rows = [
@@ -962,7 +962,7 @@ class TestContentFetchPrefetchAndStats:
             return {u: (True, None, "ok") for u in urls}
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch", _track,
+            "backlink_publisher.content.fetch.verify_urls_batch", _track,
         )
         seed = {
             "target_url": "https://example.com/article",
@@ -990,7 +990,7 @@ class TestContentFetchPrefetchAndStats:
             return {u: (True, None, "ok") for u in urls}
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch", _all_pass,
+            "backlink_publisher.content.fetch.verify_urls_batch", _all_pass,
         )
         seed = {
             "target_url": "https://example.com/article",
@@ -1026,7 +1026,7 @@ class TestContentFetchPrefetchAndStats:
             return {u: (True, None, "ok") for u in urls}
 
         monkeypatch.setattr(
-            "backlink_publisher.content_fetch.verify_urls_batch", _track,
+            "backlink_publisher.content.fetch.verify_urls_batch", _track,
         )
         # All rows missing required fields.
         bad_rows = [{"language": "en"}, {"platform": "medium"}]

@@ -23,7 +23,7 @@ import pytest
 
 from backlink_publisher.config import Config
 from backlink_publisher.config.types import VelogConfig
-from backlink_publisher.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher.publishing.adapters.velog_graphql import (
     UNLOCK_DATE_UTC,
     VelogGraphQLAdapter,
