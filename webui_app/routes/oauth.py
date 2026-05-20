@@ -79,7 +79,7 @@ def settings_blogger_oauth_start():
         return redirect(f'/settings?flash_type=danger&flash_msg=凭据保存失败: {e}#channel-blogger')
 
     from google_auth_oauthlib.flow import Flow
-    from backlink_publisher.adapters.blogger_api import _SCOPES
+    from backlink_publisher.publishing.adapters.blogger_api import _SCOPES
 
     cb_uri = _oauth_callback_uri()
     client_config = {
@@ -117,7 +117,7 @@ def settings_blogger_oauth_callback():
                         + '授权会话已过期，请重新点击登入按钮#channel-blogger')
 
     from google_auth_oauthlib.flow import Flow
-    from backlink_publisher.adapters.blogger_api import _SCOPES, json_from_creds
+    from backlink_publisher.publishing.adapters.blogger_api import _SCOPES, json_from_creds
     from backlink_publisher.config import save_blogger_token
 
     cb_uri = _oauth_callback_uri()

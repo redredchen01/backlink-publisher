@@ -21,7 +21,7 @@ from backlink_publisher._util.url import (
     validate_main_domain_url,
 )
 from backlink_publisher.content.scraper import fetch_work_metadata
-from backlink_publisher.logger import plan_logger
+from backlink_publisher._util.logger import plan_logger
 
 from ..helpers import (
     _WORK_THEMED_RUNS,

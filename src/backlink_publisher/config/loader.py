@@ -7,7 +7,7 @@ import stat
 import sys
 from pathlib import Path
 
-from backlink_publisher.errors import DependencyError
+from backlink_publisher._util.errors import DependencyError
 from .types import (
     BloggerOAuthConfig,
     Config,

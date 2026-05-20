@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from backlink_publisher._util.markdown import render_to_html
-from backlink_publisher.logger import plan_logger
+from backlink_publisher._util.logger import plan_logger
 
 from flask import Blueprint, request, session
 

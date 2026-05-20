@@ -1,4 +1,5 @@
-from backlink_publisher import anchor_profile, anchor_resolver, work_scraper
+from backlink_publisher.anchor import profile as anchor_profile, resolver as anchor_resolver
+from backlink_publisher.content import scraper as work_scraper
 from backlink_publisher._util.logger import plan_logger
 
 from .core import (

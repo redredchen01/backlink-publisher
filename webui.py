@@ -68,8 +68,8 @@ from webui_store import (  # noqa: E402
     schedule_store as _schedule_store,
 )
 from backlink_publisher import checkpoint as _checkpoint_mod  # noqa: E402
-from backlink_publisher import content_fetch  # noqa: E402, F401
-from backlink_publisher.work_scraper import fetch_work_metadata  # noqa: E402, F401
+from backlink_publisher.content import fetch as content_fetch  # noqa: E402, F401
+from backlink_publisher.content.scraper import fetch_work_metadata  # noqa: E402, F401
 
 
 
