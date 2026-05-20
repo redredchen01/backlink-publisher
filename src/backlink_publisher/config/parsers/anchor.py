@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ...errors import InputValidationError
+from ..._util.errors import InputValidationError
 from ..types import (
     ANCHOR_TYPES,
     _PROPORTIONS_SUM_TOLERANCE,

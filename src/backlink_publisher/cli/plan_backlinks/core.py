@@ -11,16 +11,18 @@ from urllib.parse import urlparse
 
 from typing import Iterator
 
-from ... import (
-    anchor_profile,
-    anchor_resolver,
-    anchor_scheduler,
-    config_echo,
-    content_fetch,
-    markdown_utils,
-    work_scraper,
-    work_themed_generator,
+from ... import config_echo
+from ...anchor import (
+    profile as anchor_profile,
+    resolver as anchor_resolver,
+    scheduler as anchor_scheduler,
 )
+from ...content import (
+    fetch as content_fetch,
+    scraper as work_scraper,
+    themed_gen as work_themed_generator,
+)
+from ..._util import markdown as markdown_utils
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before argparse
 from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider
 from backlink_publisher.publishing.registry import registered_platforms
