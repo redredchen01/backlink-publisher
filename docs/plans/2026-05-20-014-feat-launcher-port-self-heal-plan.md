@@ -3,6 +3,7 @@ title: "feat: Launcher Port Self-Heal & Crash Auto-Restart"
 type: feat
 status: completed
 date: 2026-05-20
+claims: {}
 origin: docs/brainstorms/2026-05-20-launcher-port-self-heal-requirements.md
 ---
 
