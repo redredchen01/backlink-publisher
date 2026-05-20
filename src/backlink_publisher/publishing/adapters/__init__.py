@@ -37,6 +37,7 @@ from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
+from .writeas import WriteAsAPIAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
@@ -47,6 +48,7 @@ register("telegraph", TelegraphAPIAdapter)
 register("velog", VelogGraphQLAdapter)
 register("ghpages", GitHubPagesAPIAdapter)
 register("hashnode", HashnodeAPIAdapter)
+register("writeas", WriteAsAPIAdapter)
 
 
 def publish(
@@ -173,6 +175,20 @@ def verify_adapter_setup(
             )
         return
 
+    if platform == "writeas":
+        if config.writeas is None:
+            raise DependencyError(
+                "Write.as config missing. Add [writeas] section to "
+                "~/.config/backlink-publisher/config.toml"
+            )
+        if not config.writeas_token_path.exists():
+            raise DependencyError(
+                "Write.as token not stored. Write "
+                f"{{\"token\": \"<access_token>\"}} to {config.writeas_token_path} "
+                "(chmod 600). Obtain via POST /api/auth/login or writeas-login CLI."
+            )
+        return
+
     raise DependencyError(f"No adapter configured for platform: {platform}")
 
 
@@ -215,6 +231,9 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
 
     if platform == "hashnode":
         return _verify_hashnode_live(config)
+
+    if platform == "writeas":
+        return _verify_writeas_live(config)
 
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
     # than fake-green. Per-adapter live impls (Medium /me) land in follow-up PRs.
@@ -737,6 +756,106 @@ def _verify_hashnode_live(config: Config) -> VerifyResult:
         )
 
     identity = me.get("username") or me.get("name")
+    return VerifyResult(
+        ok=True,
+        identity=identity,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=True,
+    )
+
+
+_WRITEAS_VERIFY_TIMEOUT_S = 5
+
+
+def _verify_writeas_live(config: Config) -> VerifyResult:
+    """GET ``/api/me`` to confirm the stored token still works.
+
+    Plan 2026-05-19-006 Unit 9 — replaces the stub for writeas. Reads
+    the token via the adapter's standard ``_load_token`` helper.
+
+    Strict read-only: ``writeas-token.json`` is never mutated. Write.as
+    tokens are revoked on operator logout (or on server policy) — verify
+    never rotates the token, that's a re-login concern.
+
+    Status mapping:
+      - 200 + ``data`` non-null → ``ok``, identity = username, dofollow=True
+        (Write.as collection-bound posts confirmed dofollow per Phase 3 roster)
+      - 401 → ``token_expired`` (signals operator must re-login)
+      - ``requests.Timeout`` → ``timeout``
+      - other (4xx/5xx/connection/parse) → ``never``
+    """
+    import requests
+    from .writeas import _load_token, _required_headers, DEFAULT_API_BASE
+
+    try:
+        token = _load_token(config)
+    except DependencyError as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[str(e)],
+        )
+
+    wa_cfg = config.writeas
+    api_base = (wa_cfg.api_base if wa_cfg else DEFAULT_API_BASE) or DEFAULT_API_BASE
+
+    try:
+        resp = requests.get(
+            f"{api_base.rstrip('/')}/me",
+            headers=_required_headers(token),
+            timeout=_WRITEAS_VERIFY_TIMEOUT_S,
+        )
+    except requests.Timeout:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="timeout",
+            blockers=[
+                f"write.as /me timed out after {_WRITEAS_VERIFY_TIMEOUT_S}s"
+            ],
+        )
+    except requests.RequestException as e:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"write.as network failure: {e}"],
+        )
+
+    if resp.status_code == 401:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="token_expired",
+            blockers=[
+                "Write.as token rejected (HTTP 401) — re-login at write.as "
+                "and re-save to writeas-token.json"
+            ],
+        )
+
+    if resp.status_code != 200:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=[f"Write.as /me returned HTTP {resp.status_code}"],
+        )
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["Write.as returned non-JSON response"],
+        )
+
+    data = (body or {}).get("data")
+    if not data:
+        return VerifyResult(
+            ok=False,
+            last_verify_result="never",
+            blockers=["Write.as /me returned empty data"],
+        )
+
+    identity = data.get("username") or data.get("email")
     return VerifyResult(
         ok=True,
         identity=identity,

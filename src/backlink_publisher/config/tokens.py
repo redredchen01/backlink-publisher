@@ -131,3 +131,32 @@ def save_hashnode_token(data: dict[str, Any], path: Path | None = None) -> None:
         os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)
     except OSError:
         pass
+
+
+def load_writeas_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Write.as login-issued token JSON ({token: "..."}).
+
+    Same SEC-3 contract as hashnode/ghpages. Operator obtains the token
+    by POST-ing ``/api/auth/login`` once (or via a ``writeas-login`` CLI
+    helper) and writes the result to this file.
+    """
+    token_path = path or (_resolve_config_dir() / "writeas-token.json")
+    if not token_path.exists():
+        return None
+    try:
+        with open(token_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_writeas_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Write.as token dict to JSON file with mode 0600."""
+    token_path = path or (_resolve_config_dir() / "writeas-token.json")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(token_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    try:
+        os.chmod(token_path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
