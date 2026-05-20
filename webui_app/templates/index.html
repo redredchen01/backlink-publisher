@@ -395,7 +395,36 @@
         .nav-tabs-custom .nav-link:hover {
             color: var(--primary);
         }
-        
+
+        /* Plan 012 Unit 5 mode toggle (single/batch) */
+        .mode-toggle-bar {
+            display: inline-flex;
+            gap: 4px;
+            padding: 4px;
+            background: #f3f4f6;
+            border-radius: 12px;
+            margin-bottom: 12px;
+        }
+        .mode-toggle-btn {
+            border: none;
+            background: transparent;
+            color: var(--secondary);
+            padding: 8px 18px;
+            border-radius: 9px;
+            font-weight: 500;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-toggle-btn:hover {
+            color: var(--primary);
+        }
+        .mode-toggle-btn.active {
+            background: #fff;
+            color: var(--primary);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
         .history-item {
             padding: 16px;
             border-radius: 12px;
@@ -752,6 +781,20 @@
         </div>
         {% endif %}
 
+        <!-- Plan 012 Unit 5/6 — Mode toggle (replaces 批量发布 nav tab). -->
+        <div class="mode-toggle-bar" id="modeToggleBar" role="tablist" aria-label="发布模式">
+            <button class="mode-toggle-btn active" id="mode-single-btn"
+                    data-bs-toggle="tab" data-bs-target="#newPanel"
+                    type="button" role="tab" data-mode="single">
+                <i class="bi bi-1-circle me-1"></i>单笔
+            </button>
+            <button class="mode-toggle-btn" id="mode-batch-btn"
+                    data-bs-toggle="tab" data-bs-target="#batchPanel"
+                    type="button" role="tab" data-mode="batch">
+                <i class="bi bi-stack me-1"></i>批量
+            </button>
+        </div>
+
         <!-- Tab Navigation -->
         <ul class="nav nav-tabs-custom" id="mainTabs" role="tablist">
             <li class="nav-item" role="presentation">
@@ -762,11 +805,6 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link {% if history_active %}active{% endif %}" id="history-tab" data-bs-toggle="tab" data-bs-target="#historyPanel" type="button">
                     <i class="bi bi-calendar-check me-2"></i>草稿 &amp; 历史
-                </button>
-            </li>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link {% if batch_tab %}active{% endif %}" id="batch-tab" data-bs-toggle="tab" data-bs-target="#batchPanel" type="button">
-                    <i class="bi bi-stack me-2"></i>批量发布
                 </button>
             </li>
         </ul>
@@ -1927,6 +1965,8 @@
     <!-- Plan 2026-05-20-002 Unit 4/5 — URL auto-derive: paste a URL into
          #derive_source above to auto-fill main/category/work + verify. -->
     <script src="{{ url_for('static', filename='js/url_derive.js') }}"></script>
+    <script>window.__batchTabHint = {{ batch_tab|tojson if batch_tab is defined else 'false' }};</script>
+    <script src="{{ url_for('static', filename='js/mode_toggle.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function () {
             if (!window.urlDerive) return;

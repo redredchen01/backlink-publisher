@@ -146,6 +146,53 @@ class TestGetRoutes:
         resp = client.get("/")
         assert resp.status_code == 200
 
+    def test_homepage_has_mode_toggle(self, client):
+        """Plan 012 Unit 5 — single/batch toggle DOM present on home page."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert 'id="modeToggleBar"' in body
+        assert 'id="mode-single-btn"' in body
+        assert 'id="mode-batch-btn"' in body
+        assert 'data-bs-target="#newPanel"' in body
+        assert 'data-bs-target="#batchPanel"' in body
+
+    def test_homepage_loads_mode_toggle_script(self, client):
+        """Plan 012 Unit 5 — mode_toggle.js is wired up in the template."""
+        resp = client.get("/")
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert "js/mode_toggle.js" in body
+        # Server-side hint must be injected so the JS can read batch_tab flag
+        # without an extra round-trip.
+        assert "window.__batchTabHint" in body
+
+    def test_nav_tabs_reduced_to_two(self, client):
+        """Plan 012 Unit 6 — batch-tab nav button removed; nav now has 2 tabs."""
+        resp = client.get("/")
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert 'id="batch-tab"' not in body
+        assert 'id="new-tab"' in body
+        assert 'id="history-tab"' in body
+
+    def test_batch_panel_still_renders_for_toggle_access(self, client):
+        """Plan 012 Unit 6 — #batchPanel tab-pane DOM stays (toggle activates it)."""
+        resp = client.get("/")
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert 'id="batchPanel"' in body
+        assert 'action="/ce:batch"' in body
+
+    def test_mode_toggle_js_file_exists(self):
+        """Plan 012 Unit 5 — the new static JS asset is present on disk."""
+        from pathlib import Path
+        js = (
+            Path(__file__).resolve().parents[1]
+            / "webui_app" / "static" / "js" / "mode_toggle.js"
+        )
+        assert js.exists(), f"mode_toggle.js missing at {js}"
+        contents = js.read_text(encoding="utf-8")
+        assert "webui_mode_default" in contents
+        assert "__batchTabHint" in contents
+
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
         """Edge case: first-time startup, none of the JSON state files exist
         yet. The autouse fixture points stores at a fresh tmp_path so they're
