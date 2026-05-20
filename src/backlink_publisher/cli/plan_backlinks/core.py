@@ -23,7 +23,6 @@ from ... import (
 )
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before argparse
 from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider
-from backlink_publisher.publishing.adapters.frw_image_gen import generate_cover_image
 from backlink_publisher.publishing.registry import registered_platforms
 from backlink_publisher.anchor.profile import ProfileEntry
 from backlink_publisher.anchor.scheduler import ScheduleDecision, SecondaryLink
@@ -528,23 +527,14 @@ def _generate_payload(
             tdk_section += f"- 描述: {tdk_description[:150]}...\n"
         body = body + tdk_section
 
-    cover_image_url = None
-    if config and config.llm_anchor_provider and config.llm_anchor_provider.use_image_gen and config.llm_anchor_provider.image_gen_api_key:
-        try:
-            llm_p = OpenAICompatibleProvider(
-                base_url=config.llm_anchor_provider.base_url,
-                api_key=config.llm_anchor_provider.api_key,
-                model=config.llm_anchor_provider.model,
-                temperature=config.llm_anchor_provider.temperature,
-                system_prompt=config.llm_anchor_provider.system_prompt,
-            )
-            image_prompt = llm_p.generate_image_prompt(title, body)
-            cover_image_url = generate_cover_image(config.llm_anchor_provider.image_gen_api_key, image_prompt)
-            if cover_image_url:
-                body = f"![{title}]({cover_image_url})\n\n" + body
-                plan_logger.info(f"AI cover image generated for {main_domain}")
-        except Exception as e:
-            plan_logger.warn(f"AI cover image generation failed: {e}")
+    # Banner image generation moved to `image_gen` adapter + `Config.image_gen`
+    # in Plan 2026-05-20-001 Unit 4. The legacy
+    # `LLMProviderConfig.{use_image_gen, image_gen_api_key}` branch was
+    # retired alongside `frw_image_gen.py` in Unit 2 because the stub
+    # endpoint URL (`api.frw.ai`) was never live. The new wiring lands
+    # banner artifacts as a separate JSONL field, never as `![](url)` in
+    # the body, so older backlinks don't break when an upstream CDN
+    # expires the URL.
 
     if extra_urls:
         extra_intro = f"\n\n除了主要的{domain_label}资源外，我们还整理了以下相关页面供您参考：\n"
