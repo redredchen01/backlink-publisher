@@ -83,6 +83,16 @@ class IdentityMismatch(RuntimeError):
         self.new_account = new_account
 
 
+class ChromeLaunchError(RuntimeError):
+    """Raised by the Real Chrome backend when it cannot launch or connect to
+    an existing Chrome instance via CDP. The ``error_code`` string maps to
+    a ``BIND_ERROR_MESSAGES`` entry in the WebUI bind_job service."""
+
+    def __init__(self, error_code: str = "chrome_not_available") -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
+
+
 # ───────── public types ─────────
 
 
@@ -552,6 +562,7 @@ __all__ = [
     "BrowserRunner",
     "IdentityMismatch",
     "PersistIOError",
+    "ChromeLaunchError",
     "PlaywrightLaunchError",
     "_browser_profile_dir",
     "_emit",
