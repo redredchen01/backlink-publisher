@@ -22,9 +22,10 @@ def register_blueprints(app: Flask) -> None:
     from .dashboard import bp as dashboard_bp
     from .medium_login import bp as medium_login_bp
     from .bind import bp as bind_bp
+    from .token_paste import bp as token_paste_bp
 
     for bp in (main_bp, pipeline_bp, batch_bp, checkpoint_bp,
                history_bp, drafts_bp, settings_basic_bp, llm_bp, llm_diag_bp, oauth_bp,
                profiles_bp, sites_bp, queue_bp, dashboard_bp,
-               medium_login_bp, bind_bp):
+               medium_login_bp, bind_bp, token_paste_bp):
         app.register_blueprint(bp)

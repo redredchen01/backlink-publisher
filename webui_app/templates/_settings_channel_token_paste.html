@@ -1,0 +1,109 @@
+{# Channel token-paste subsection — Plan 006 follow-up (2026-05-20).
+
+   Required context vars:
+     channel              str — "ghpages" | "writeas" (any platform whose
+                                binding is paste-PAT, not OAuth/browser)
+     token_status         dict — {bound: bool, masked: str | None,
+                                  dofollow: bool | None}
+     token_label          str — display name for the credential
+     token_hint_url       str — provider URL where operator generates the token
+     token_hint_text      str — short instruction for the operator
+     config_summary       list[(label, value)] — current routing config values
+                                                  (read-only display)
+     config_path          str — full path to config.toml so operator can
+                                edit routing fields manually
+
+   Token submit goes to POST /settings/save-channel-token. Routing config
+   (repo / collection_alias / etc) is operator-edited in config.toml — this
+   partial is token-only, MVP scope. Operator can edit other fields later.
+
+   Dofollow signal — when known True, show green DOFOLLOW chip; when None,
+   show neutral "未確認" chip; when False platform shouldn't be in the
+   binding list (caller's responsibility).
+#}
+{% set _channel = channel %}
+{% set _bound = token_status.get('bound', False) %}
+{% set _masked = token_status.get('masked', '') %}
+{% set _dofollow = token_status.get('dofollow') %}
+
+<hr style="margin:20px 0;">
+
+<div class="token-paste-section" id="token-paste-{{ _channel }}" data-channel="{{ _channel }}">
+    <p class="text-muted" style="font-size:13px; margin-bottom:8px;">
+        <strong>🔑 Token 绑定</strong>
+        — {{ token_hint_text }}
+        在 <a href="{{ token_hint_url }}" target="_blank" rel="noopener">{{ token_hint_url }}</a>
+        生成 {{ token_label }}，凭据写入
+        <code>~/.config/backlink-publisher/{{ _channel }}-token.json</code>（0600 权限）。
+    </p>
+
+    <div class="token-status-row" style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+        {% if _bound %}
+        <span class="badge-status ok"><i class="bi bi-check-circle-fill"></i> 已绑定 ✓</span>
+        {% if _masked %}
+        <code class="text-muted" style="font-size:12px;">{{ _masked }}</code>
+        {% endif %}
+        {% else %}
+        <span class="badge-status err"><i class="bi bi-x-circle-fill"></i> 未绑定</span>
+        {% endif %}
+
+        {% if _dofollow is sameas true %}
+        <span class="badge-status" style="background:#dcfce7;color:#166534;border:1px solid #86efac;">
+            <i class="bi bi-link-45deg"></i> dofollow
+        </span>
+        {% elif _dofollow is sameas none %}
+        <span class="badge-status warn" style="background:#fef9c3;color:#854d0e;border:1px solid #fde68a;">
+            <i class="bi bi-question-circle"></i> dofollow 未确认
+        </span>
+        {% endif %}
+    </div>
+
+    <form method="POST" action="/settings/save-channel-token" class="token-paste-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="channel" value="{{ _channel }}">
+
+        <div class="form-group" style="margin-bottom:12px;">
+            <label for="token-{{ _channel }}" style="font-weight:500;">
+                {{ token_label }}
+            </label>
+            <input type="password" id="token-{{ _channel }}" name="token"
+                   class="form-control" autocomplete="off" spellcheck="false"
+                   placeholder="{% if _bound %}重新绑定时填入新 token；保留空白则不更新{% else %}贴入 token{% endif %}"
+                   style="font-family:monospace;">
+            <small class="form-text text-muted">
+                Token 不会写入 config.toml；存到独立的 0600 JSON 文件。
+            </small>
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+            {% if _bound %}更新 Token{% else %}绑定{% endif %}
+        </button>
+        {% if _bound %}
+        <button type="submit" name="clear" value="1"
+                class="btn btn-outline-danger" style="margin-left:8px;"
+                onclick="return confirm('清除 {{ _channel }} token 文件？');">
+            清除
+        </button>
+        {% endif %}
+    </form>
+
+    {% if config_summary %}
+    <div style="margin-top:14px; padding:10px; background:#f9fafb; border-radius:6px; border:1px solid #e5e7eb;">
+        <div style="font-size:12px; font-weight:500; margin-bottom:6px; color:#374151;">
+            发布路由配置（当前值，需手动编辑 config.toml 修改）
+        </div>
+        <table style="width:100%; font-size:13px;">
+        {% for label, value in config_summary %}
+            <tr>
+                <td style="padding:2px 8px 2px 0; color:#6b7280; white-space:nowrap;">{{ label }}</td>
+                <td style="padding:2px 0;"><code>{{ value or '(未设置)' }}</code></td>
+            </tr>
+        {% endfor %}
+        </table>
+        <div style="font-size:11px; color:#6b7280; margin-top:8px;">
+            编辑文件：<code>{{ config_path }}</code>
+            → 添加或修改 <code>[{{ _channel }}]</code> 段
+        </div>
+    </div>
+    {% endif %}
+</div>
