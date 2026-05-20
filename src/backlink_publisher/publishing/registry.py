@@ -42,10 +42,14 @@ is ``publish`` (``verify_adapter_setup`` stays a module function).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import (
+    DependencyError,
+    ExternalServiceError,
+    RegistryError,
+)
 from .adapters.base import AdapterResult
 
 
@@ -124,17 +128,98 @@ _REJECTED_PLATFORMS: dict[str, str] = {
 }
 
 
-def register(platform: str, *publishers: type[Publisher]) -> None:
+_DofollowStatus = Literal[True, False, "uncertain"]
+
+
+# Parallel-dict storage for the dofollow capability (Plan 2026-05-20-009
+# U2). Kept alongside ``_REGISTRY`` rather than folded into its value
+# shape so the existing single-key conftest snapshot pattern survives
+# (``tests/conftest.py:206-221`` only saves/restores the ``"fake"`` key).
+# Future capability fields (banner_upload, oauth_dialect, daily_cap)
+# would justify migrating to a ``RegistryEntry`` dataclass — deferred
+# to capability field #2 per Plan 2026-05-20-009 §Scope Boundaries.
+_DOFOLLOW_BY_PLATFORM: dict[str, _DofollowStatus] = {}
+_RATIONALE_BY_PLATFORM: dict[str, str] = {}
+
+
+def register(
+    platform: str,
+    *publishers: type[Publisher],
+    dofollow: _DofollowStatus | None = None,
+    rationale: str | None = None,
+) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
     Order matters: the first registered class is tried first.
+
+    Plan 2026-05-20-009 U2: gains required ``dofollow`` kw-arg (Literal
+    ``True`` / ``False`` / ``"uncertain"``) declaring whether the
+    platform produces a dofollow backlink, and a ``rationale`` kw-arg
+    required when ``dofollow`` is anything other than ``True``. During
+    the U2 → U5 migration window inside the implementation PR,
+    ``dofollow`` defaults to ``None`` for back-compat; U5 removes the
+    default so missing-kwarg becomes a ``TypeError`` at import time.
+
+    Raises:
+        RegistryError: when ``platform`` is listed in
+            ``_REJECTED_PLATFORMS`` (un-rejection path: delete the
+            entry in the same PR as the new ``register()`` call), OR
+            when ``dofollow ∈ {False, "uncertain"}`` and the rationale
+            is missing / shorter than 80 chars stripped.
     """
+    if platform in _REJECTED_PLATFORMS:
+        prior = _REJECTED_PLATFORMS[platform]
+        raise RegistryError(
+            f"previously rejected: {platform!r}; prior rationale: {prior!r}. "
+            f"To retry, delete this entry from `_REJECTED_PLATFORMS` in the "
+            f"same PR as the new `register()` call."
+        )
+    if dofollow in (False, "uncertain"):
+        if rationale is None or len(rationale.strip()) < 80:
+            actual = 0 if rationale is None else len(rationale.strip())
+            raise RegistryError(
+                f"`register({platform!r}, ..., dofollow={dofollow!r})` "
+                f"requires `rationale=` with len(rationale.strip()) >= 80 "
+                f"(got {actual}). Length-only gate — content is reviewer "
+                f"concern; see `monolith_budget.toml` for the precedent."
+            )
     _REGISTRY[platform] = list(publishers)
+    if dofollow is None:
+        # Back-compat path during U2 → U5 window: clear any stale parallel-
+        # dict entries from a prior `register()` call. Defensive — no
+        # caller is expected to omit `dofollow=` after U3 backfill lands.
+        _DOFOLLOW_BY_PLATFORM.pop(platform, None)
+        _RATIONALE_BY_PLATFORM.pop(platform, None)
+    else:
+        _DOFOLLOW_BY_PLATFORM[platform] = dofollow
+        if rationale is not None:
+            _RATIONALE_BY_PLATFORM[platform] = rationale
+        else:
+            _RATIONALE_BY_PLATFORM.pop(platform, None)
 
 
 def registered_platforms() -> list[str]:
     """Return the list of platforms with at least one adapter registered."""
     return sorted(_REGISTRY)
+
+
+def dofollow_status(name: str) -> _DofollowStatus | None:
+    """Return the declared dofollow status for ``name``, or ``None`` if
+    the platform is not registered with explicit dofollow declaration.
+
+    Plan 2026-05-20-009 R5.
+    """
+    return _DOFOLLOW_BY_PLATFORM.get(name)
+
+
+def dofollow_rationale(name: str) -> str | None:
+    """Return the registration rationale string for ``name``, or ``None``
+    if no rationale was supplied (the common case for ``dofollow=True``
+    registrations; mandatory for ``False`` / ``"uncertain"`` per R3).
+
+    Plan 2026-05-20-009 R5.
+    """
+    return _RATIONALE_BY_PLATFORM.get(name)
 
 
 def dispatch(
