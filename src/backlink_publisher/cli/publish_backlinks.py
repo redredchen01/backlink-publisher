@@ -20,6 +20,7 @@ from .. import checkpoint, config_echo
 from backlink_publisher.config import load_config
 from backlink_publisher._util.errors import (
     AuthExpiredError,
+    BannerUploadError,
     DependencyError,
     ExternalServiceError,
     emit_error,
@@ -134,6 +135,40 @@ def _check_row_reachability(row: dict[str, Any]) -> tuple[bool, str | None]:
     if first_failure is not None:
         return False, first_failure
     return True, None
+
+
+def _make_banner_emit() -> Any:
+    """Return a callable that records banner-embed events.
+
+    Plan 2026-05-20-004 Unit 1.  Lazily instantiates an ``EventStore``
+    on first call so module import stays side-effect-free (tests that
+    monkey-patch the config dir need the env var resolved at use time,
+    not import time).  Also logs each event at the INFO level via
+    ``publish_logger`` so operators tailing the WebUI log can see
+    banner activity without opening the SQLite store.
+
+    Returns a closure rather than a method so passing through to
+    ``adapter_publish(banner_emit=...)`` keeps the signature minimal.
+    """
+    store_holder: dict[str, Any] = {}
+
+    def _emit(kind: str, payload: dict[str, Any]) -> None:
+        publish_logger.info(
+            f"banner-embed: {kind} {payload}",
+            extra={"banner_event": kind, **payload},
+        )
+        if "store" not in store_holder:
+            from backlink_publisher.events.store import EventStore
+            store_holder["store"] = EventStore()
+        try:
+            store_holder["store"].append(kind, payload)
+        except Exception as exc:
+            # EventStore write failures must NOT break the publish path.
+            publish_logger.warning(
+                f"banner-event EventStore.append({kind!r}) failed: {exc}"
+            )
+
+    return _emit
 
 
 def _error_class(exc: Exception) -> str:
@@ -318,6 +353,7 @@ def _run_resume(args: Any) -> None:
         return
 
     config = load_config()
+    banner_emit = _make_banner_emit()  # Plan 2026-05-20-004 Unit 1
 
     # verify adapter setup for platforms in checkpoint
     platforms_in_ckpt = {item["platform"] for item in ckpt["items"] if item.get("platform")}
@@ -459,6 +495,7 @@ def _run_resume(args: Any) -> None:
                 mode=mode,
                 config=config,
                 dry_run=False,
+                banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
             # Plan 2026-05-19-001 Unit 6: flip channel status to expired so
@@ -486,6 +523,16 @@ def _run_resume(args: Any) -> None:
             )
             emit_error(str(exc), exit_code=3)
             return
+        except BannerUploadError as exc:
+            # Plan 2026-05-20-004 Unit 1: strict-mode banner upload
+            # failure → fail just this row, not the whole run.  Caught
+            # BEFORE the generic DependencyError handler because
+            # BannerUploadError IS a DependencyError subclass.
+            _record_resume_failure(
+                run_id, item, exc,
+                "banner_upload", f"banner upload failed: {exc}",
+            )
+            continue
         except DependencyError as exc:
             emit_error(str(exc), exit_code=3)
             return
@@ -765,6 +812,7 @@ def main(argv: list[str] | None = None) -> None:
     ts = datetime.now(timezone.utc).isoformat()
     success_count = 0
     fail_count = 0
+    banner_emit = _make_banner_emit()  # Plan 2026-05-20-004 Unit 1
     skipped_unreachable_count = 0
     last_medium_success_idx: int = -1
 
@@ -857,6 +905,7 @@ def main(argv: list[str] | None = None) -> None:
                 mode=mode,
                 config=config,
                 dry_run=False,
+                banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
             # Plan 2026-05-19-001 Unit 6: see resume-mode handler above for
@@ -883,6 +932,17 @@ def main(argv: list[str] | None = None) -> None:
             )
             emit_error(str(exc), exit_code=3)
             return  # unreachable but satisfies type checker
+        except BannerUploadError as exc:
+            # Plan 2026-05-20-004 Unit 1: strict-mode banner upload
+            # failure → fail just this row, not the whole run.
+            # Caught BEFORE the generic DependencyError handler
+            # because BannerUploadError IS a DependencyError subclass.
+            fail_count += 1
+            run_id = _record_publish_failure(
+                outputs, row, platform, ts, run_id, exc,
+                "banner_upload", f"banner upload failed: {exc}",
+            )
+            continue
         except DependencyError as exc:
             emit_error(str(exc), exit_code=3)
             return  # unreachable but satisfies type checker

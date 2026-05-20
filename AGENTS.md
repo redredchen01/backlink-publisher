@@ -330,21 +330,29 @@ Related: `docs/plans/2026-05-18-009-refactor-cli-extension-readiness-plan.md` (t
 
 ## Adding banner embedding to an adapter
 
-When `Config.image_gen` is set, `plan-backlinks` produces a `banner` dict per row containing a local file path. To get that banner onto the platform's own CDN at publish time (so the embedded URL survives the upstream image-gen CDN's TTL), an adapter opts in by defining `embed_banner(self, artifact_path: Path, alt: str) -> str | None`. The dispatcher in `publish-backlinks` (Unit 5) checks `hasattr(adapter, "embed_banner")` — no registration, no protocol class — and:
+When `Config.image_gen` is set, `plan-backlinks` produces a `banner` dict per row containing `{path, alt, mime, sha, source_url}` (the `source_url` field was added in Plan 2026-05-20-004 Unit 1 R12 so the fallback path documented below is actually reachable; rows produced before that amendment treat the missing key as `None`). To get that banner onto the platform's own CDN at publish time (so the embedded URL survives the upstream image-gen CDN's TTL), an adapter opts in by defining `embed_banner(self, artifact_path: Path, alt: str) -> str | None`. The dispatcher (`publishing.banner_dispatcher.apply`, called from `publishing.registry.dispatch` when the caller passes `banner_emit=...`) checks `hasattr(adapter, "embed_banner")` — no registration, no protocol class — and:
 
-- Returns the platform-hosted URL on success → dispatcher prepends `![alt](platform_url)\n\n` to the body.
-- Returns `None` → dispatcher falls back to the source URL (where available) with a warning that the link may rot.
-- Raises → handled by `config.image_gen.strict`: `false` (default) logs warn and publishes without the banner; `true` propagates and fails the row.
+- Returns the platform-hosted URL on success → dispatcher prepends `![alt](platform_url)\n\n` to `payload["content_markdown"]` before `adapter.publish()` runs. Emits `banner.embedded`.
+- Returns `None` → dispatcher falls back to `banner["source_url"]` (when truthy). Emits `banner.source_url_fallback` with `reason="adapter_returned_none"`. If `source_url` is also `None`/missing (b64-only provider OR pre-R12 row), the banner is silently omitted with `banner.skipped_no_artifact`.
+- Raises `BannerUploadError` → handled by `config.image_gen.strict`: `false` (default) logs warn and publishes without the banner (emits `banner.failed`); `true` propagates out of `dispatch()` and the publish loop records a row-level `error_class="banner_upload"` checkpoint (the run continues with the next row, NOT exit-3 like other DependencyError families).
+- Raises non-`BannerUploadError` (adapter bug) → propagates unconditionally, even when `strict=False`. Strict gating governs only banner-specific failures, never adapter implementation bugs.
 
-Per-platform upload contract (existing references):
+Adapters that don't define `embed_banner` are handled by the same dispatcher: `source_url` is prepended via the not-opted-in branch, emitting `banner.source_url_fallback` with `reason="adapter_no_method"`. If no `source_url` either, emits `banner.skipped_no_method` and the body is unchanged.
+
+Per-platform upload contract:
 - **telegraph**: `POST https://telegra.ph/upload` with raw bytes; returns `telegra.ph/file/<sha>.<ext>` URL.
 - **hashnode**: `uploadMedia` GraphQL mutation (the existing hashnode adapter already maintains a GraphQL client).
 - **velog**: `image_upload_url` GraphQL mutation returns a presigned URL → PUT bytes.
 - **ghpages**: commit the file to `<repo>/assets/banners/<sha>.<ext>` and return the `raw.githubusercontent.com` URL.
-- **writeas**: NO media-upload API → `embed_banner` returns `None`; dispatcher falls back to source URL (or omits entirely if `source_url` is also None from b64-only providers).
-- **blogger**: Blogger API `images.insert` returns a Blogger-hosted URL.
+- **writeas**: NO media-upload API → `embed_banner` returns `None` (explicit opt-in to the source-URL fallback branch; semantically distinct from Medium-style not-implementing).
+- **blogger**: data-URI base64 inline (probe-confirmed at Unit 3 time) or the legacy `images.insert` backdoor if still alive.
 
-Reference: Plan 2026-05-20-001 Unit 5 + `src/backlink_publisher/publishing/adapters/image_gen/` for the artifact contract.
+**Medium does NOT implement `embed_banner`.** All three Medium fallback adapters (`MediumAPIAdapter`, `MediumBraveAdapter`, `MediumBrowserAdapter`) omit the method so the dispatcher reaches the not-opted-in branch and prepends `![alt](source_url)`. Medium's publish-time auto-rehost then snapshots the upstream provider's CDN URL into Medium's own image hosting, yielding a Medium-hosted URL in the published post without us writing platform-specific upload logic for each Medium fallback. **Verification required at implementer time**: confirm Medium auto-rehost still works in the current year by publishing one row to a scratch Medium account and inspecting the rendered `<img src>`. If auto-rehost is dead, Medium needs its own upload path or banners must be explicitly disabled for Medium.
+
+Error classes related to banner embedding:
+- `BannerUploadError(DependencyError)` — raised by per-adapter `embed_banner` implementations on media-API failure (4xx/5xx, multipart serialization error, presign failure, etc.). NOT a credential failure; channel-status `mark_expired` must NOT fire on this exception. Strict-mode propagation lands a row-level checkpoint with `error_class="banner_upload"` — distinct from `AuthExpiredError`'s `error_class="auth_expired"`.
+
+Reference: Plan 2026-05-20-001 Units 1-6 + Plan 2026-05-20-004 Unit 1 (this dispatcher + R12) + `src/backlink_publisher/publishing/adapters/image_gen/` for the artifact contract.
 
 ## Binding a channel
 

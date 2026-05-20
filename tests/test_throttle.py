@@ -132,7 +132,8 @@ def test_no_throttle_on_dry_run(mock_pub, mock_verify, mock_sleep):
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_no_throttle_when_next_row_is_blogger(mock_pub, mock_verify, mock_sleep):
     """No sleep when next row after Medium is a Blogger row."""
-    def side_effect(payload, mode, config, dry_run=False):
+    def side_effect(payload, mode, config, dry_run=False, **_kwargs):
+        # **_kwargs accepts ``banner_emit`` (Plan 2026-05-20-004 Unit 1).
         platform = payload.get("platform", "")
         return AdapterResult(
             status="drafted", adapter=f"{platform}-api", platform=platform,

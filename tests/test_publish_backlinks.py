@@ -320,7 +320,8 @@ def test_publish_default_is_draft(mock_pub, mock_verify):
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_publish_blogger_and_medium_rows(mock_pub, mock_verify):
     """Full integration: one blogger + one medium row, both mocked, exit 0."""
-    def side_effect(payload, mode, config, dry_run=False):
+    def side_effect(payload, mode, config, dry_run=False, **_kwargs):
+        # **_kwargs accepts ``banner_emit`` (Plan 2026-05-20-004 Unit 1).
         platform = payload.get("platform", "")
         return AdapterResult(
             status="drafted",

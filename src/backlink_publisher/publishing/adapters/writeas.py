@@ -130,6 +130,23 @@ class WriteAsAPIAdapter(Publisher):
         # uncategorized posts (lower SEO value but valid).
         return config.writeas is not None
 
+    def embed_banner(self, artifact_path: Any, alt: str) -> str | None:
+        """Plan 2026-05-20-004 Unit 1.  Write.as has no media-upload API
+        in their public REST surface — posts accept Markdown including
+        external ``![](url)`` references but the adapter cannot push
+        bytes to Write.as's own CDN.
+
+        Returning ``None`` is the explicit "opted in, but can't"
+        signal: the publish-time dispatcher
+        (``publishing.banner_dispatcher.apply``) routes to the
+        ``source_url`` fallback branch which prepends the upstream
+        provider's URL with a warning that the link may rot when the
+        upstream CDN's TTL expires.  Distinct from Medium-style
+        not-implementing — see AGENTS.md "Adding banner embedding to
+        an adapter".
+        """
+        return None
+
     def publish(
         self,
         payload: dict[str, Any],

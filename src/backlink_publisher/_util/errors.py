@@ -86,6 +86,25 @@ class AuthExpiredError(DependencyError):
         super().__init__(msg)
 
 
+class BannerUploadError(DependencyError):
+    """Media upload to a publisher platform failed.
+
+    Plan 2026-05-20-004 Unit 1.  Sibling (NOT subclass) of
+    ``AuthExpiredError`` — a banner upload failure is a media-API
+    problem, not a credential failure.  Channel-status
+    ``mark_expired`` must NOT fire on this exception (publish-time
+    auth-flip is reserved for ``AuthExpiredError`` from
+    ``adapter.publish()``).
+
+    Honors ``config.image_gen.strict``: ``False`` (default) logs
+    warn + publishes without banner; ``True`` propagates and fails
+    the row.  Strict gating is implemented by
+    ``publishing.banner_dispatcher.apply``, not by this class.
+    """
+
+    exit_code = 3
+
+
 class InternalError(PipelineError):
     """Unexpected internal error."""
 

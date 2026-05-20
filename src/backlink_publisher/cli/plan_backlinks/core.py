@@ -777,6 +777,13 @@ def _generate_banner_for_payload(
         "alt": title,
         "mime": artifact.mime,
         "sha": artifact.prompt_sha,
+        # R12 (Plan 2026-05-20-004 Unit 1): expose the provider's
+        # source URL so the publish-time dispatcher can fall back
+        # to it when the per-platform embed_banner returns None
+        # (writeas-style) or the adapter doesn't opt in (Medium-
+        # style auto-rehost).  None for b64_json providers whose
+        # response had no url field.
+        "source_url": artifact.source_url,
     }
 
 

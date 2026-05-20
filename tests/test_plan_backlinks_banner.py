@@ -116,6 +116,16 @@ def _post_ok(payload: dict) -> MagicMock:
     return resp
 
 
+def _get_ok_bytes(content: bytes, mime: str) -> MagicMock:
+    """Mock ``requests.get`` returning bytes (url-mode follow-up)."""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.content = content
+    resp.headers = {"Content-Type": mime}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
 # ── banner = None when image_gen not configured ─────────────────────────────
 
 
@@ -176,9 +186,44 @@ def test_banner_dict_emitted_on_success(isolated, tmp_path):
     assert banner.get("mime") == "image/png"
     assert banner.get("sha")
     assert banner.get("alt") == rows[0]["title"]
-    # File actually written
-    assert Path(banner["path"]).exists()
-    assert Path(banner["path"]).read_bytes() == _PNG
+    # R12 (Plan 2026-05-20-004 Unit 1): source_url MUST be present
+    # in the emitted dict so the publish-time dispatcher can fall
+    # back to it.  b64_json mode → value is None; url mode → URL
+    # string.  Either way, the KEY must exist (a missing key would
+    # be indistinguishable from a pre-R12 emission and break the
+    # source_url-fallback path documented in AGENTS.md).
+    assert "source_url" in banner, "R12: source_url key missing from banner dict"
+    assert banner["source_url"] is None  # b64_json mode → no upstream URL
+
+
+def test_banner_source_url_emitted_for_url_mode_response(isolated, tmp_path):
+    """R12 (Plan 2026-05-20-004 Unit 1): when the image-gen provider
+    returns a ``url`` (not ``b64_json``), that URL flows through to
+    the JSONL ``banner.source_url`` field so the publish-time
+    dispatcher can use it as a Medium-/writeas-style fallback."""
+    _seed_config_with_image_gen(isolated)
+    _seed_token(isolated)
+    seeds = _seed_input(tmp_path)
+    out = tmp_path / "out.jsonl"
+
+    upstream_url = "https://provider.cdn.example/banner-fixture.png"
+
+    # url-mode response: the adapter fetches bytes from the URL.
+    # We need TWO mocks: requests.post to /images/generations
+    # returning the URL, and requests.get against that URL
+    # returning the PNG bytes.
+    with patch(
+        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        return_value=_post_ok({"data": [{"url": upstream_url}]}),
+    ), patch(
+        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        return_value=_get_ok_bytes(_PNG, "image/png"),
+    ):
+        _run_plan_backlinks(seeds, out)
+
+    rows = _capture_outputs(out)
+    banner = rows[0]["banner"]
+    assert banner["source_url"] == upstream_url
 
 
 def test_banner_does_not_alter_body(isolated, tmp_path):

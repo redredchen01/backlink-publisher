@@ -42,7 +42,7 @@ is ``publish`` (``verify_adapter_setup`` stays a module function).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Callable
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
@@ -108,12 +108,23 @@ def dispatch(
     mode: str,
     config: Config,
     dry_run: bool = False,
+    *,
+    banner_emit: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> AdapterResult:
     """Walk the registered fallback chain for ``payload["platform"]``.
 
     Mirrors the legacy ``publish()`` behaviour byte-for-byte: dry-run
     sentinel result, ``DependencyError`` falls through, ``ExternalServiceError``
     propagates, unknown platform raises ``ExternalServiceError``.
+
+    Banner embed (Plan 2026-05-20-004 Unit 1): when ``banner_emit`` is
+    supplied AND the payload carries a non-degraded ``banner`` field
+    (``banner["path"]`` not None), each available adapter in the chain
+    gets a chance to embed via ``adapter.embed_banner`` before its
+    ``publish()`` runs.  See ``banner_dispatcher.apply`` for the
+    branch semantics.  ``banner_emit`` is the event sink (kind,
+    payload) and defaults to ``None`` which suppresses banner work
+    entirely (back-compat for callers that don't set up banners).
     """
     plat = payload.get("platform", "")
 
@@ -130,12 +141,34 @@ def dispatch(
     if not chain:
         raise ExternalServiceError(f"unsupported platform: {plat}")
 
+    banner_dict = payload.get("banner") if banner_emit is not None else None
+    do_banner = banner_dict is not None and banner_dict.get("path") is not None
+    strict = bool(do_banner and config.image_gen and config.image_gen.strict)
+
     last_dep_error: DependencyError | None = None
     for cls in chain:
         if not cls.available(config):
             continue
         try:
-            return cls().publish(payload, mode, config)
+            adapter = cls()
+            if do_banner:
+                # Lazy import avoids a top-level cycle (banner_dispatcher
+                # lives in the same publishing package and is leaf-level,
+                # but importing it during registry init is unnecessary
+                # for the >99% of dispatch calls that have no banner).
+                from . import banner_dispatcher
+
+                new_body = banner_dispatcher.apply(
+                    adapter,
+                    banner=banner_dict,
+                    body=payload.get("content_markdown", ""),
+                    platform=plat,
+                    strict=strict,
+                    emit=banner_emit,  # type: ignore[arg-type]  # do_banner gates non-None
+                )
+                if new_body != payload.get("content_markdown"):
+                    payload = {**payload, "content_markdown": new_body}
+            return adapter.publish(payload, mode, config)
         except DependencyError as e:
             # Adapter declared itself missing a prerequisite → try next.
             last_dep_error = e

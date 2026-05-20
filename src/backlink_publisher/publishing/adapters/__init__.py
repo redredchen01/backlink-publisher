@@ -56,10 +56,19 @@ def publish(
     mode: str,
     config: Config,
     dry_run: bool = False,
+    *,
+    banner_emit: Any = None,
 ) -> AdapterResult:
     """Public dispatch entry point — preserved as a function for backward
-    compatibility (CLI / tests / WebUI all call ``publish(...)``)."""
-    return dispatch(payload, mode, config, dry_run=dry_run)
+    compatibility (CLI / tests / WebUI all call ``publish(...)``).
+
+    ``banner_emit`` (Plan 2026-05-20-004 Unit 1): optional
+    ``Callable[[str, dict], None]`` event sink for banner embed
+    events.  ``None`` (default) suppresses banner work — preserves
+    byte-identical behavior for callers that don't configure
+    ``[image_gen]``.
+    """
+    return dispatch(payload, mode, config, dry_run=dry_run, banner_emit=banner_emit)
 
 
 def verify_adapter_setup(
