@@ -123,6 +123,13 @@ def test_medium_authexpired_from_api_does_not_fallthrough_to_brave_or_browser(
 # ─────────── regression guards: non-Auth semantics preserved ───────────────
 
 
+# Patch available() on Brave + Browser so dispatch reaches their .publish
+# regardless of host environment. Brave's natural available() returns False
+# on machines without the Brave binary (CI hosts don't have it), which
+# would cause dispatch to skip the adapter and these tests to fail with
+# spurious "publish was not called" assertions.
+
+@patch("backlink_publisher.publishing.adapters.MediumBrowserAdapter.available", return_value=True)
 @patch(
     "backlink_publisher.publishing.adapters.MediumBrowserAdapter.publish",
     return_value=AdapterResult(
@@ -132,6 +139,7 @@ def test_medium_authexpired_from_api_does_not_fallthrough_to_brave_or_browser(
         draft_url="https://medium.com/new-story?id=abc",
     ),
 )
+@patch("backlink_publisher.publishing.adapters.MediumBraveAdapter.available", return_value=True)
 @patch(
     "backlink_publisher.publishing.adapters.MediumBraveAdapter.publish",
     side_effect=DependencyError("brave not running"),
@@ -140,7 +148,9 @@ def test_medium_authexpired_from_api_does_not_fallthrough_to_brave_or_browser(
     "backlink_publisher.publishing.adapters.MediumAPIAdapter.publish",
     side_effect=DependencyError("no token"),
 )
-def test_plain_dependency_error_still_fallthroughs(mock_api, mock_brave, mock_browser):
+def test_plain_dependency_error_still_fallthroughs(
+    mock_api, mock_brave_pub, mock_brave_avail, mock_browser_pub, mock_browser_avail
+):
     """Regression guard — adding the AuthExpired short-circuit must NOT
     have broken the original DependencyError fallthrough semantics.
     With API + Brave both raising plain DependencyError, dispatch must
@@ -148,11 +158,13 @@ def test_plain_dependency_error_still_fallthroughs(mock_api, mock_brave, mock_br
     result = publish(_payload("medium"), mode="draft", config=CONFIG_MEDIUM)
     assert result.adapter == "medium-browser"
     mock_api.assert_called_once()
-    mock_brave.assert_called_once()
-    mock_browser.assert_called_once()
+    mock_brave_pub.assert_called_once()
+    mock_browser_pub.assert_called_once()
 
 
+@patch("backlink_publisher.publishing.adapters.MediumBrowserAdapter.available", return_value=True)
 @patch("backlink_publisher.publishing.adapters.MediumBrowserAdapter.publish")
+@patch("backlink_publisher.publishing.adapters.MediumBraveAdapter.available", return_value=True)
 @patch(
     "backlink_publisher.publishing.adapters.MediumBraveAdapter.publish",
     side_effect=AuthExpiredError(channel="medium", reason="cookies expired"),
@@ -162,7 +174,7 @@ def test_plain_dependency_error_still_fallthroughs(mock_api, mock_brave, mock_br
     side_effect=DependencyError("no token"),
 )
 def test_dependency_then_authexpired_composes_correctly(
-    mock_api, mock_brave, mock_browser
+    mock_api, mock_brave_pub, mock_brave_avail, mock_browser_pub, mock_browser_avail
 ):
     """Compose-correctness — first adapter raises plain DependencyError
     (legal fallthrough), second adapter then raises AuthExpiredError.
@@ -174,8 +186,8 @@ def test_dependency_then_authexpired_composes_correctly(
         publish(_payload("medium"), mode="draft", config=CONFIG_MEDIUM)
     assert exc_info.value.channel == "medium"
     mock_api.assert_called_once()
-    mock_brave.assert_called_once()
-    mock_browser.assert_not_called()
+    mock_brave_pub.assert_called_once()
+    mock_browser_pub.assert_not_called()
 
 
 # ─────────── independence: ExternalServiceError still propagates ───────────
