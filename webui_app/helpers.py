@@ -221,7 +221,7 @@ def _get_velog_status() -> dict:
             return {
                 'state': 'err',
                 'label': '未绑定',
-                'guide': f'运行: velog-login',
+                'guide': '运行: velog-login',
                 'cookies_path': str(cookies_path),
                 'count': 0,
                 'cap': cap,

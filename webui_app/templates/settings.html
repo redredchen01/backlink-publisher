@@ -261,28 +261,6 @@
 
         <h2 class="section-heading">AI 内容生成引擎 (PRO Mode)</h2>
 
-        <!-- AI Dashboard -->
-        <div class="row g-3 mb-4">
-            <div class="col-md-4">
-                <div class="card bg-primary text-white p-3">
-                    <h6 class="mb-0">今日生成次数</h6>
-                    <h3 class="mt-2" id="aiUsageCount">0</h3>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card bg-success text-white p-3">
-                    <h6 class="mb-0">生成成功率</h6>
-                    <h3 class="mt-2" id="aiSuccessRate">100%</h3>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card bg-warning text-dark p-3">
-                    <h6 class="mb-0">系统延迟 (Avg)</h6>
-                    <h3 class="mt-2" id="aiLatency">0ms</h3>
-                </div>
-            </div>
-        </div>
-
         <!-- ⑥ 进阶 LLM 整合 -->
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -512,17 +490,6 @@
             </div>
         </div>
 
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-terminal me-2"></i>实时运行日志 (Logs)
-            </div>
-            <div class="card-body">
-                <div id="llmLogConsole" class="bg-dark text-light p-3 rounded"
-                     style="font-family:monospace;font-size:12px;height:200px;overflow-y:scroll;white-space:pre-wrap;">
-                    正在加载日志...
-                </div>
-            </div>
-        </div>
             <div class="card-body">
                 <p class="text-muted mb-1" style="font-size:13px;">配置保存路径：</p>
                 <code style="font-size:13px;">{{ config_path }}</code>
@@ -715,33 +682,6 @@
             resEl.textContent = "请求失败: " + e;
         }
     }
-
-    async function refreshLogs() {
-        const consoleEl = document.getElementById('llmLogConsole');
-        try {
-            const resp = await fetch('/settings/llm-logs');
-            const data = await resp.json();
-            consoleEl.textContent = data.logs;
-            consoleEl.scrollTop = consoleEl.scrollHeight;
-        } catch (e) {
-            consoleEl.textContent = "获取日志失败: " + e;
-        }
-    }
-    setInterval(refreshLogs, 5000); // Auto-refresh every 5s
-    refreshLogs();
-
-    async function fetchMetrics() {
-        try {
-            const resp = await fetch('/settings/llm-stats');
-            const data = await resp.json();
-            document.getElementById('aiUsageCount').textContent = data.count;
-            document.getElementById('aiSuccessRate').textContent = data.success_rate;
-            document.getElementById('aiLatency').textContent = data.latency;
-        } catch (e) {
-            console.error("Failed to fetch AI metrics", e);
-        }
-    }
-    fetchMetrics();
 
     // ── Medium Token 显示切换 ────────────────────────────────────
     function toggleToken() {

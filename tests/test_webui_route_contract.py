@@ -1081,10 +1081,12 @@ def test_every_route_has_at_least_one_contract_test():
 
 
 class TestLlmRoutes:
-    def test_llm_logs_returns_200(self, client):
+    def test_llm_logs_route_is_removed(self, client):
+        # /settings/llm-logs (llm_diag blueprint) was a placeholder returning
+        # mocked metrics; removed in webui-006 Quick-Wins along with its
+        # settings.html consumer block. A 404 here is the contract.
         resp = client.get("/settings/llm-logs")
-        assert resp.status_code == 200
-        assert "logs" in resp.json
+        assert resp.status_code == 404
 
     def test_test_llm_connection_returns_json(self, client):
         resp = client.post("/settings/test-llm-connection", data={})

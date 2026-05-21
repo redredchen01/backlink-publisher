@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime, timedelta
 
 from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
@@ -7,6 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from backlink_publisher._util.logger import plan_logger
 
 from webui_store import drafts_store as _drafts_store
+from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
 from .helpers import (

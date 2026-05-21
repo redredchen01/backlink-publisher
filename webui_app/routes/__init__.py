@@ -14,7 +14,6 @@ def register_blueprints(app: Flask) -> None:
     from .drafts import bp as drafts_bp
     from .settings_basic import bp as settings_basic_bp
     from .llm import bp as llm_bp
-    from .llm_diag import bp as llm_diag_bp
     from .oauth import bp as oauth_bp
     from .profiles import bp as profiles_bp
     from .sites import bp as sites_bp
@@ -28,7 +27,7 @@ def register_blueprints(app: Flask) -> None:
     from .seo_viz import bp as seo_viz_bp
 
     for bp in (main_bp, pipeline_bp, batch_bp, checkpoint_bp,
-               history_bp, drafts_bp, settings_basic_bp, llm_bp, llm_diag_bp, oauth_bp,
+               history_bp, drafts_bp, settings_basic_bp, llm_bp, oauth_bp,
                profiles_bp, sites_bp, queue_bp, dashboard_bp,
                medium_login_bp, bind_bp, token_paste_bp, url_verify_bp, image_gen_bp, seo_viz_bp):
         app.register_blueprint(bp)
