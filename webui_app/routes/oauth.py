@@ -46,10 +46,15 @@ def settings_save_blogger_oauth():
     """Save Client ID / Secret only — no OAuth redirect."""
     client_id = request.form.get('client_id', '').strip()
     client_secret = request.form.get('client_secret', '').strip()
+    cfg_existing = load_config()
+    # P3: blank client_secret preserves the stored value (template no longer
+    # round-trips the secret in HTML — see _settings_channel_blogger.html).
+    if not client_secret and cfg_existing.blogger_oauth:
+        client_secret = cfg_existing.blogger_oauth.client_secret or ''
     if not client_id or not client_secret:
         return redirect('/settings?flash_type=warning&flash_msg=请填写 Client ID 和 Client Secret#channel-blogger')
     try:
-        save_config(load_config(),
+        save_config(cfg_existing,
                     blogger_client_id=client_id,
                     blogger_client_secret=client_secret,
                     target_three_url=None)
@@ -65,13 +70,17 @@ def settings_blogger_oauth_start():
 
     client_id = request.form.get('client_id', '').strip()
     client_secret = request.form.get('client_secret', '').strip()
+    cfg_existing = load_config()
+    # P3: blank client_secret preserves stored (see _settings_channel_blogger.html).
+    if not client_secret and cfg_existing.blogger_oauth:
+        client_secret = cfg_existing.blogger_oauth.client_secret or ''
 
     if not client_id or not client_secret:
         return redirect('/settings?flash_type=warning&flash_msg='
                         + '请填写 Client ID 和 Client Secret 后再登入#channel-blogger')
 
     try:
-        save_config(load_config(),
+        save_config(cfg_existing,
                     blogger_client_id=client_id,
                     blogger_client_secret=client_secret,
                     target_three_url=None)
