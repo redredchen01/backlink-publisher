@@ -7,8 +7,6 @@ import os
 import random
 import re
 import secrets
-import subprocess
-import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,7 +18,6 @@ from flask import abort, render_template, request, session
 from google.oauth2.credentials import Credentials
 
 from backlink_publisher import checkpoint as _checkpoint_mod
-from backlink_publisher.content import fetch as content_fetch
 from backlink_publisher.config import (
     _config_dir,
     _domain_label,
@@ -40,8 +37,7 @@ from webui_store import (
     schedule_store as _schedule_store,
 )
 
-# url_meta functions used by remaining __init__ code (moved in Unit 1).
-from .url_meta import _is_fetch_verify_disabled  # noqa: E402
+# _is_fetch_verify_disabled → helpers/cli_runner.py (Plan 2026-05-21-007 Unit 4)
 
 
 def _llm_settings_file() -> Path:
@@ -417,23 +413,8 @@ def _load_incomplete_run():
 # → moved to helpers/security.py (Plan 2026-05-21-007 Unit 3)
 
 
-def _parse_lines(raw: str) -> list[str]:
-    if not raw:
-        return []
-    return [line.strip() for line in raw.splitlines() if line.strip()]
-
-
-def _wire_content_fetch_ttl_from_env() -> None:
-    if _is_fetch_verify_disabled():
-        return
-    raw = os.environ.get("BACKLINK_GATE_CACHE_TTL_SECONDS", "900").strip()
-    try:
-        seconds = float(raw)
-    except ValueError:
-        seconds = 900.0
-    if seconds <= 0:
-        return
-    content_fetch.set_default_max_age(seconds)
+# _parse_lines, _wire_content_fetch_ttl_from_env
+# → helpers/cli_runner.py (Plan 2026-05-21-007 Unit 4)
 
 
 # _DERIVED_BRANDED_MAX, _DERIVED_PARTIAL_MAX, _DERIVED_PARTIAL_KEEP,
@@ -714,70 +695,8 @@ def _draft_tab_extra() -> dict:
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# run_pipe — subprocess wrapper for plan/validate/publish
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-_CLI_MODULES = {
-    'publish-backlinks': 'backlink_publisher.cli.publish_backlinks',
-    'plan-backlinks': 'backlink_publisher.cli.plan_backlinks',
-    'validate-backlinks': 'backlink_publisher.cli.validate_backlinks',
-    'footprint': 'backlink_publisher.cli.footprint',
-    'report-anchors': 'backlink_publisher.cli.report_anchors',
-}
-
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SRC_DIR = os.path.join(_REPO_ROOT, 'src')
-
-
-def _rewrite_cli_cmd(cmd):
-    """Rewrite bare CLI command (publish-backlinks, plan-backlinks, ...) to
-    ``sys.executable -m <module>`` and inject ``PYTHONPATH=./src``.
-
-    Why: the installed entry-point shims (pyenv shim, .venv/bin/*) can point
-    at a stale editable-install path that no longer exists. Running via the
-    current interpreter + repo src/ bypasses that and is hermetic.
-    """
-    if not cmd:
-        return cmd, None
-    module = _CLI_MODULES.get(cmd[0])
-    if module is None:
-        return cmd, None
-    new_cmd = [sys.executable, '-m', module, *cmd[1:]]
-    env = os.environ.copy()
-    env['PYTHONPATH'] = _SRC_DIR + (
-        os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else ''
-    )
-    return new_cmd, env
-
-
-def run_pipe(cmd, stdin):
-    """Run a pipeline command."""
-    new_cmd, env = _rewrite_cli_cmd(cmd)
-    result = subprocess.run(
-        new_cmd,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        cwd=_REPO_ROOT or os.getcwd(),
-        env=env,
-    )
-    if result.returncode != 0:
-        raise Exception(result.stderr or f"Exit code: {result.returncode}")
-    # Detect silent-failure: exit 0 with empty stdout AND empty stderr is
-    # almost always a broken entry-point (e.g. `python -m <package>` against
-    # an empty __main__.py, or a module that defines main() without a
-    # `if __name__ == "__main__":` guard). Surface a real diagnostic instead
-    # of letting callers fall back to misleading hardcoded error strings.
-    if stdin and not result.stdout.strip() and not result.stderr.strip():
-        invoked = ' '.join(cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
-        raise Exception(
-            f"CLI '{invoked}' produced no output (exit 0, stdout/stderr empty). "
-            f"Likely a missing __main__.py or `if __name__ == \"__main__\":` "
-            f"guard. Rewritten command: {new_cmd}"
-        )
-    return {'stdout': result.stdout, 'stderr': result.stderr}
+# _CLI_MODULES, _REPO_ROOT, _SRC_DIR, _rewrite_cli_cmd, run_pipe
+# → helpers/cli_runner.py (Plan 2026-05-21-007 Unit 4)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -827,43 +746,16 @@ def _render(template_name: str, **kwargs):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-_WORK_THEMED_RUNS: dict[str, dict] = {}
-_WORK_THEMED_RUNS_MAX = 50
-
-
-def _parse_run_result(stdout: str, entry) -> list[dict]:
-    """Parse plan-backlinks JSONL stdout into per-work-url status rows."""
-    rows = []
-    work_urls = list(entry.work_urls or [])
-    by_url: dict[str, dict] = {}
-    for line in (stdout or '').strip().split('\n'):
-        if not line.strip():
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        wurl = obj.get('work_url') or obj.get('target_url', '')
-        if wurl:
-            by_url[wurl] = obj
-    for wurl in work_urls:
-        obj = by_url.get(wurl)
-        if obj is None:
-            rows.append({'work_url': wurl, 'status': 'missing'})
-        elif obj.get('error'):
-            rows.append({'work_url': wurl, 'status': 'scrape_failed',
-                         'error': obj.get('error', '')})
-        else:
-            rows.append({'work_url': wurl, 'status': 'success'})
-    return rows
+# _WORK_THEMED_RUNS, _WORK_THEMED_RUNS_MAX, _parse_run_result
+# → helpers/cli_runner.py (Plan 2026-05-21-007 Unit 4)
 
 
 __all__ = [
-    # Constants
+    # Constants (security → helpers/security.py Unit 3)
     '_FLASK_PORT', '_RUN_ID_RE', '_LOOPBACK_HOSTS',
+    # Constants (url_meta → helpers/url_meta.py Unit 1)
     '_DERIVED_BRANDED_MAX', '_DERIVED_PARTIAL_MAX', '_DERIVED_PARTIAL_KEEP',
     '_DERIVED_PARTIAL_SPLIT_RE',
-    '_WORK_THEMED_RUNS', '_WORK_THEMED_RUNS_MAX',
     # Functions
     '_content_gate_enabled', '_verify_urls_or_error',
     '_get_blogger_token_status',
@@ -878,9 +770,10 @@ __all__ = [
     '_oauth_callback_uri', '_resolve_bind_host',
     '_ensure_csrf_token', '_check_csrf_or_abort',
     '_check_bind_origin_or_abort', '_refuse_when_allow_network',
-    '_parse_lines',
-    '_wire_content_fetch_ttl_from_env',
     '_derive_branded_pool', '_derive_partial_pool', '_derive_exact_pool',
-    '_settings_context', '_draft_tab_extra',
-    'run_pipe', '_render', '_parse_run_result',
+    '_settings_context', '_draft_tab_extra', '_render',
+    # cli_runner → helpers/cli_runner.py (Unit 4)
+    '_parse_lines', '_wire_content_fetch_ttl_from_env',
+    '_WORK_THEMED_RUNS', '_WORK_THEMED_RUNS_MAX',
+    'run_pipe', '_parse_run_result',
 ]

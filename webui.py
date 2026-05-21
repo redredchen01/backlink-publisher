@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 
 from webui_app import create_app
-from webui_app.helpers import _wire_content_fetch_ttl_from_env
+from webui_app.helpers.cli_runner import _wire_content_fetch_ttl_from_env
 from webui_app.helpers.security import _resolve_bind_host
 
 
@@ -30,16 +30,18 @@ app = create_app()
 # here keeps existing patch points working without forcing a tests/ sweep.
 # When patching has migrated (next major version), this block can shrink.
 from webui_app.helpers import (  # noqa: E402
-    _WORK_THEMED_RUNS,
     _calc_next_available,
     _draft_tab_extra,
     _get_blogger_token_status,
     _load_incomplete_run,
     _load_schedule_settings,
-    _parse_lines,
     _persist_three_tier_config,
     _render,
     _settings_context,
+)
+from webui_app.helpers.cli_runner import (  # noqa: E402
+    _WORK_THEMED_RUNS,
+    _parse_lines,
     run_pipe,
 )
 from webui_app.helpers.security import (  # noqa: E402
