@@ -25,9 +25,6 @@ from backlink_publisher.config import (
     save_ghpages_token,
 )
 
-from ..helpers import _check_csrf_or_abort
-
-
 bp = Blueprint("token_paste", __name__)
 
 
@@ -40,8 +37,6 @@ _ALLOWED: dict[str, tuple] = {
 
 @bp.route('/settings/save-channel-token', methods=['POST'])
 def save_channel_token():
-    _check_csrf_or_abort()
-
     channel = (request.form.get('channel', '') or '').strip()
     if channel not in _ALLOWED:
         return redirect(

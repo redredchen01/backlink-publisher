@@ -127,6 +127,28 @@ def client():
     return webui.app.test_client()
 
 
+@pytest.fixture
+def csrf_client():
+    """Like ``client`` but with the global CSRF guard enabled.
+
+    Use for tests that explicitly assert "missing/wrong CSRF returns 403".
+    After PR-after-#143 removed inline ``_check_csrf_or_abort`` calls from
+    blueprints that had them (now redundant with the global hook), the
+    only way to exercise CSRF rejection is to enable the global guard.
+    """
+    import webui
+
+    webui.app.config["TESTING"] = True
+    webui.app.config["SESSION_COOKIE_SECURE"] = False
+    webui.app.config["WTF_CSRF_ENABLED"] = True
+    webui.app.config["CSRF_ENABLED"] = True
+    try:
+        yield webui.app.test_client()
+    finally:
+        webui.app.config["WTF_CSRF_ENABLED"] = False
+        webui.app.config["CSRF_ENABLED"] = False
+
+
 def _fetch_csrf(client) -> str:
     """Grab the hidden csrf_token from GET /sites."""
     resp = client.get("/sites")
@@ -835,8 +857,8 @@ class TestCheckpointRoutes:
 
 
 class TestSitesPostRoutes:
-    def test_save_three_url_missing_csrf_returns_403(self, client):
-        resp = client.post(
+    def test_save_three_url_missing_csrf_returns_403(self, csrf_client):
+        resp = csrf_client.post(
             "/sites/save-three-url",
             data={"main_url": "https://x.com/"},
         )
@@ -868,8 +890,8 @@ class TestSitesPostRoutes:
         assert resp.status_code == 302
         assert resp.headers["Location"].startswith("/sites?")
 
-    def test_sites_run_missing_csrf_returns_403(self, client):
-        resp = client.post("/sites/run", data={"main_url": "https://x.com/"})
+    def test_sites_run_missing_csrf_returns_403(self, csrf_client):
+        resp = csrf_client.post("/sites/run", data={"main_url": "https://x.com/"})
         assert resp.status_code == 403
 
     def test_sites_run_unknown_domain_returns_400(self, client):
@@ -974,12 +996,12 @@ class TestChannelBindingAPIRoutes:
         resp = client.get("/api/blogger/status")
         assert resp.status_code == 200
 
-    def test_post_channel_verify_missing_csrf_returns_403(self, client):
-        resp = client.post("/api/blogger/verify")
+    def test_post_channel_verify_missing_csrf_returns_403(self, csrf_client):
+        resp = csrf_client.post("/api/blogger/verify")
         assert resp.status_code == 403
 
-    def test_post_channel_dry_run_missing_csrf_returns_403(self, client):
-        resp = client.post("/api/blogger/dry-run")
+    def test_post_channel_dry_run_missing_csrf_returns_403(self, csrf_client):
+        resp = csrf_client.post("/api/blogger/dry-run")
         assert resp.status_code == 403
 
 
@@ -989,8 +1011,8 @@ class TestTokenPasteRoutes:
     tests/test_webui_token_paste.py; this smoke test satisfies the
     route-coverage gate below."""
 
-    def test_post_save_channel_token_missing_csrf_returns_403(self, client):
-        resp = client.post("/settings/save-channel-token")
+    def test_post_save_channel_token_missing_csrf_returns_403(self, csrf_client):
+        resp = csrf_client.post("/settings/save-channel-token")
         assert resp.status_code == 403
 
 

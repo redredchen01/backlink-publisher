@@ -16,7 +16,7 @@ from backlink_publisher.publishing.adapters import verify_adapter_setup
 from backlink_publisher.publishing.registry import registered_platforms
 
 from ..binding_status import get_channel_status
-from ..helpers import _check_csrf_or_abort, _save_schedule_settings, _settings_context
+from ..helpers import _save_schedule_settings, _settings_context
 
 bp = Blueprint("settings_basic", __name__)
 
@@ -64,10 +64,9 @@ def api_channel_status(channel: str):
 def api_channel_verify(channel: str):
     """Live verify — calls platform's lightweight verify endpoint.
 
-    CSRF guarded. Per-channel live impl deferred to Unit 6 backfill — Unit 4
-    ships the dispatch + JSON contract.
+    CSRF guarded by app-level ``_global_csrf_guard``. Per-channel live impl
+    deferred to Unit 6 backfill — Unit 4 ships the dispatch + JSON contract.
     """
-    _check_csrf_or_abort()
     _require_known_channel(channel)
     config = load_config()
     result = verify_adapter_setup(channel, config, mode='live')
@@ -78,7 +77,6 @@ def api_channel_verify(channel: str):
 def api_channel_dry_run(channel: str):
     """Dry-run — builds payload but ZERO real HTTP (defense-in-depth via
     Session.send monkey-patch in publishing._verify.dry_run_intercept)."""
-    _check_csrf_or_abort()
     _require_known_channel(channel)
     config = load_config()
     payload = request.get_json(silent=True) or {}

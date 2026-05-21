@@ -7,7 +7,7 @@ POST /settings/channels/<channel>/identity-mismatch/replace  — replace + force
 
 All POST routes:
   - loopback-only (Blueprint-scoped ``before_request``)
-  - require a valid CSRF token (``_check_csrf_or_abort``)
+  - require a valid CSRF token (via app-level ``_global_csrf_guard``)
   - reject under ``BACKLINK_PUBLISHER_ALLOW_NETWORK=1`` (Plan 003 Unit 3)
   - validate channel against CHANNELS before any state change (defense
     in depth against ``channel=../traversal``)
@@ -38,7 +38,6 @@ from backlink_publisher.config.loader import _config_dir
 
 from ..helpers import (
     _check_bind_origin_or_abort,
-    _check_csrf_or_abort,
     _LOOPBACK_HOSTS,
     _refuse_when_allow_network,
 )
@@ -58,7 +57,6 @@ def _enforce_loopback() -> None:
 def start_bind(channel: str):
     _refuse_when_allow_network()
     _check_bind_origin_or_abort()
-    _check_csrf_or_abort()
     if channel not in CHANNELS:
         abort(400)
 
@@ -109,7 +107,6 @@ def identity_mismatch_keep(channel: str):
     mismatched session, so the old state on disk is still valid)."""
     _refuse_when_allow_network()
     _check_bind_origin_or_abort()
-    _check_csrf_or_abort()
     if channel not in CHANNELS:
         abort(400)
 
@@ -173,7 +170,6 @@ def identity_mismatch_replace(channel: str):
     cleanly (no half-bound state)."""
     _refuse_when_allow_network()
     _check_bind_origin_or_abort()
-    _check_csrf_or_abort()
     if channel not in CHANNELS:
         abort(400)
     _execute_replace(channel)
