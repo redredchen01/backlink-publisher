@@ -436,8 +436,10 @@ class TestMediumPostPersistHookWired:
     def test_medium_recipe_has_post_persist(self):
         assert RECIPES["medium"].post_persist is not None
 
-    def test_velog_recipe_has_no_post_persist(self):
-        assert RECIPES["velog"].post_persist is None
+    def test_velog_recipe_has_post_persist(self):
+        # Velog now has a post_persist hook (writes velog-cookies.json from
+        # storage_state, same pattern as medium).
+        assert RECIPES["velog"].post_persist is not None
 
     def test_blogger_recipe_has_no_post_persist(self):
         assert RECIPES["blogger"].post_persist is None

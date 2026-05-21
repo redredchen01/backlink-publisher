@@ -16,7 +16,11 @@ session cookie lives on the apex.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import tempfile
+from pathlib import Path
 
 from . import ChannelRecipe
 
@@ -57,8 +61,46 @@ def _velog_cookie_host_filter(host) -> bool:
     return host.lower().lstrip(".") == "velog.io"
 
 
+def _velog_post_persist(config_dir: Path, storage_state_path: Path) -> Path:
+    """Persist the full storage_state payload as velog's canonical credential.
+
+    Velog currently needs both cookie data and any browser-local storage the
+    login flow captured. We keep the full Playwright storage_state JSON so the
+    publish adapter can derive whichever credential shape Velog actually uses.
+    """
+    raw = storage_state_path.read_text(encoding="utf-8")
+    state = json.loads(raw)
+    target = config_dir / "velog-cookies.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".velog-cookies.",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        tmp_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, target)
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+    try:
+        storage_state_path.unlink()
+    except OSError:
+        pass
+    return target
+
+
 RECIPE = ChannelRecipe(
     login_url=_LOGIN_URL,
     bound_predicate=_velog_bound_predicate,
     cookie_host_filter=_velog_cookie_host_filter,
+    post_persist=_velog_post_persist,
 )
