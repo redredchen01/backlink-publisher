@@ -23,6 +23,8 @@ from typing import Sequence
 from urllib.request import Request, urlopen
 import ssl
 
+from backlink_publisher._util.url import normalize_url_for_fetch
+
 _VERIFY_TIMEOUT = 12  # seconds per individual request
 _RETRY_INTERVAL = 6   # seconds between poll attempts
 _USER_AGENT = "backlink-publisher/1.0 verify"
@@ -41,7 +43,9 @@ class VerificationResult:
 def _get_body(url: str) -> tuple[int, str]:
     """Fetch URL body. Returns (status_code, body_text). Never raises."""
     try:
-        req = Request(url)
+        # Velog Korean @username + CJK url_slug are legal upstream but crash
+        # urllib's ASCII request-line encoder. See Plan 2026-05-21-005.
+        req = Request(normalize_url_for_fetch(url))
         req.add_header("User-Agent", _USER_AGENT)
         with urlopen(req, timeout=_VERIFY_TIMEOUT, context=_SSL_CTX) as resp:
             code = resp.getcode()

@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 from backlink_publisher._util.errors import ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger
+from backlink_publisher._util.url import normalize_url_for_fetch
 
 REQUEST_TIMEOUT = 10  # seconds
 MAX_CONCURRENT = 10
@@ -32,9 +33,13 @@ def _check_url_once(url: str) -> tuple[bool, str | None]:
     if not parsed.scheme or not parsed.netloc:
         return False, f"invalid URL: {url}"
 
+    # Defend the request-line ASCII encoder against legitimately non-ASCII
+    # URLs (Velog Korean @username, CJK url_slug). See Plan 2026-05-21-005.
+    fetch_url = normalize_url_for_fetch(url)
+
     # Try HEAD first
     try:
-        req = Request(url, method="HEAD")
+        req = Request(fetch_url, method="HEAD")
         req.add_header("User-Agent", "backlink-publisher/0.1 linkcheck")
         resp = urlopen(req, timeout=REQUEST_TIMEOUT, context=_ssl_context())
         code = resp.getcode()
@@ -45,7 +50,7 @@ def _check_url_once(url: str) -> tuple[bool, str | None]:
 
     # Fallback to GET
     try:
-        req = Request(url, method="GET")
+        req = Request(fetch_url, method="GET")
         req.add_header("User-Agent", "backlink-publisher/0.1 linkcheck")
         resp = urlopen(req, timeout=REQUEST_TIMEOUT, context=_ssl_context())
         code = resp.getcode()

@@ -57,3 +57,64 @@ def test_check_url_succeeds_on_second_attempt() -> None:
         ok, err = linkcheck.check_url("https://example.com/slow")
     assert ok is True
     assert err is None
+
+
+# ── Plan 2026-05-21-005 ────────────────────────────────────────────────────
+
+
+class _FakeResp:
+    def __init__(self, code: int) -> None:
+        self._code = code
+    def getcode(self) -> int:
+        return self._code
+
+
+def test_check_url_once_normalizes_cjk_url_before_request() -> None:
+    """HEAD branch: CJK URL is percent-encoded before urlopen sees it."""
+    captured: list[str] = []
+
+    def fake_urlopen(req, **kw):
+        captured.append(req.full_url)
+        return _FakeResp(200)
+
+    with patch("backlink_publisher.linkcheck.http.urlopen", side_effect=fake_urlopen):
+        ok, err = linkcheck._check_url_once("https://velog.io/@한글/슬러그")
+
+    assert ok is True
+    assert err is None
+    assert len(captured) == 1
+    captured[0].encode("ascii")  # would raise if non-ASCII slipped through
+    assert "%" in captured[0]
+
+
+def test_check_url_once_get_fallback_also_normalizes() -> None:
+    """When HEAD fails, GET fallback must use the same normalized URL."""
+    captured: list[str] = []
+
+    def fake_urlopen(req, **kw):
+        captured.append(req.full_url)
+        if req.get_method() == "HEAD":
+            raise OSError("simulated head failure")
+        return _FakeResp(200)
+
+    with patch("backlink_publisher.linkcheck.http.urlopen", side_effect=fake_urlopen):
+        ok, err = linkcheck._check_url_once("https://velog.io/@한글/슬러그")
+
+    assert ok is True
+    assert len(captured) == 2
+    for u in captured:
+        u.encode("ascii")  # both HEAD and GET URLs must be ASCII-clean
+
+
+def test_check_url_once_ascii_url_passthrough() -> None:
+    """ASCII URLs are not silently rewritten."""
+    captured: list[str] = []
+
+    def fake_urlopen(req, **kw):
+        captured.append(req.full_url)
+        return _FakeResp(200)
+
+    with patch("backlink_publisher.linkcheck.http.urlopen", side_effect=fake_urlopen):
+        linkcheck._check_url_once("https://example.com/api/v1?q=1")
+
+    assert captured == ["https://example.com/api/v1?q=1"]

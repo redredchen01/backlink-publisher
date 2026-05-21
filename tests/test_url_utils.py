@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from urllib.request import Request
+
 from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
+    normalize_url_for_fetch,
     strip_fragment_query,
     validate_https_url,
     validate_main_domain_url,
@@ -170,3 +173,115 @@ class TestStripFragmentQuery:
 
     def test_empty_returns_empty(self):
         assert strip_fragment_query("") == ""
+
+
+# ── normalize_url_for_fetch ────────────────────────────────────────────────
+
+
+class TestNormalizeUrlForFetch:
+    """Regression coverage for Plan 2026-05-21-005.
+
+    The bug: ``urllib.request.urlopen`` crashes with
+    ``'ascii' codec can't encode characters`` whenever the URL handed to
+    ``Request(...)`` carries non-ASCII bytes (Velog Korean ``@username``,
+    CJK ``url_slug``). Verifier hits this at runtime and demotes legitimate
+    posts to ``published_unverified``.
+    """
+
+    def test_ascii_url_is_returned_byte_identical(self):
+        url = "https://example.com/api/v1?key=abc&id=1"
+        assert normalize_url_for_fetch(url) == url
+
+    def test_ascii_url_with_already_encoded_path_is_unchanged(self):
+        url = "https://example.com/path%20with%20space?q=hello%20world"
+        assert normalize_url_for_fetch(url) == url
+
+    def test_cjk_in_path_segment_after_at_sign(self):
+        # Real-world: Velog Korean @username
+        out = normalize_url_for_fetch("https://velog.io/@한글/foo-bar")
+        assert out == "https://velog.io/@%ED%95%9C%EA%B8%80/foo-bar"
+        # The whole point: stdlib will now accept it.
+        Request(out)
+
+    def test_cjk_in_slug(self):
+        out = normalize_url_for_fetch("https://velog.io/@user/한글-제목")
+        assert out == "https://velog.io/@user/%ED%95%9C%EA%B8%80-%EC%A0%9C%EB%AA%A9"
+        Request(out)
+
+    def test_chinese_slug(self):
+        out = normalize_url_for_fetch("https://velog.io/@user/英语口语训练")
+        assert out.startswith("https://velog.io/@user/")
+        # All non-ASCII bytes percent-encoded; hyphens / slashes preserved.
+        Request(out)
+
+    def test_idempotent_on_already_encoded(self):
+        already = "https://velog.io/@%ED%95%9C%EA%B8%80/foo"
+        assert normalize_url_for_fetch(already) == already
+
+    def test_idempotent_under_double_application(self):
+        once = normalize_url_for_fetch("https://velog.io/@한글/foo")
+        twice = normalize_url_for_fetch(once)
+        assert once == twice
+
+    def test_empty_returns_empty(self):
+        assert normalize_url_for_fetch("") == ""
+
+    def test_non_http_scheme_passthrough(self):
+        assert normalize_url_for_fetch("mailto:user@example.com") == "mailto:user@example.com"
+        assert normalize_url_for_fetch("ftp://files.example.com/x") == "ftp://files.example.com/x"
+
+    def test_query_with_non_ascii_value(self):
+        out = normalize_url_for_fetch("https://x.io/p?q=한")
+        assert out == "https://x.io/p?q=%ED%95%9C"
+        Request(out)
+
+    def test_query_delimiters_preserved(self):
+        out = normalize_url_for_fetch("https://x.io/p?a=1&b=2&c=한")
+        assert out == "https://x.io/p?a=1&b=2&c=%ED%95%9C"
+
+    def test_port_preserved_with_cjk_path(self):
+        out = normalize_url_for_fetch("https://velog.io:8443/@한/p")
+        assert out == "https://velog.io:8443/@%ED%95%9C/p"
+
+    def test_userinfo_preserved(self):
+        # userinfo is rare but should pass through unchanged when host is ASCII.
+        url = "https://user:pass@host.io/p"
+        assert normalize_url_for_fetch(url) == url
+
+    def test_idna_host(self):
+        # IDNA-encoded host appears as xn-- punycode form.
+        out = normalize_url_for_fetch("https://例え.テスト/path")
+        assert out.startswith("https://xn--")
+        assert out.endswith("/path")
+        Request(out)
+
+    def test_idna_failure_falls_back_to_original_host(self):
+        # Non-ASCII host that fails IDNA: a label with 64 CJK chars expands
+        # far beyond the 63-octet punycode limit, triggering UnicodeError in
+        # host.encode("idna"). The function must not raise — it falls back to
+        # the original host so callers get a structured network failure, not a
+        # local exception.
+        overlong_label = "あ" * 64  # each char → ~3 punycode bytes; 64×3 >> 63 limit
+        url = f"https://{overlong_label}.example.com/path"
+        result = normalize_url_for_fetch(url)
+        # Must not raise; path/query still get percent-encoded
+        assert "/path" in result
+
+    def test_fragment_dropped_when_transformation_runs(self):
+        # Fragment never reaches the wire; we drop it whenever we transform.
+        out = normalize_url_for_fetch("https://velog.io/@한/p#section")
+        assert "#" not in out
+
+    def test_unicode_url_no_longer_crashes_request(self):
+        """The exact production failure mode this plan fixes.
+
+        ``urllib.request`` ultimately routes the URL through ``http.client``,
+        which ASCII-encodes the request line. The non-ASCII URL therefore
+        fails ``str.encode('ascii')``; the normalized URL must pass it.
+        """
+        url = "https://velog.io/@한글유저/some-slug"
+        with pytest.raises(UnicodeEncodeError):
+            url.encode("ascii")
+        normalized = normalize_url_for_fetch(url)
+        normalized.encode("ascii")  # would raise if not clean
+        Request(normalized)

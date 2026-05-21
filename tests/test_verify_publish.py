@@ -184,6 +184,93 @@ def test_verify_gives_up_after_max_wait():
     assert "verification failed" in result.reason
 
 
+# ── Plan 2026-05-21-005: non-ASCII URLs must not crash request-line encoding ──
+
+
+class TestNonAsciiUrls:
+    """Regression: velog returns ``https://velog.io/@<korean>/<cjk-slug>``.
+
+    Before this fix, ``urlopen(Request(url))`` raised ``UnicodeEncodeError``
+    at the ASCII request-line encoder, surfacing as
+    ``fetch failed: 'ascii' codec can't encode characters in position 21-22``
+    and demoting legitimately-published posts to ``published_unverified``.
+    """
+
+    def test_verify_published_succeeds_with_cjk_url(self):
+        body = _good_body("제목", "https://example.com")
+        captured: list[str] = []
+
+        def fake_urlopen(req, **kw):
+            captured.append(req.full_url)
+
+            class _Resp:
+                def __enter__(self_inner):
+                    return self_inner
+                def __exit__(self_inner, *a):
+                    return False
+                def getcode(self_inner):
+                    return 200
+                def read(self_inner):
+                    return body.encode("utf-8")
+            return _Resp()
+
+        with patch("backlink_publisher.linkcheck.verify.urlopen", side_effect=fake_urlopen):
+            result = verify_published(
+                "https://velog.io/@한글유저/제목-슬러그",
+                title="제목",
+                required_link_urls=["https://example.com"],
+            )
+
+        assert result.ok is True, f"expected ok=True, got reason={result.reason!r}"
+        assert len(captured) == 1
+        captured[0].encode("ascii")  # would raise if non-ASCII slipped through
+        assert "%" in captured[0]
+
+    def test_verify_published_does_not_crash_when_url_carries_cjk(self):
+        """Even on a real fetch failure, no UnicodeEncodeError surfaces."""
+        def fake_urlopen(*a, **kw):
+            raise ConnectionRefusedError("connection refused")
+
+        with patch("backlink_publisher.linkcheck.verify.urlopen", side_effect=fake_urlopen):
+            with patch("backlink_publisher.linkcheck.verify.time.sleep"):
+                with patch("backlink_publisher.linkcheck.verify.time.monotonic") as mock_mono:
+                    mock_mono.side_effect = [0, 0, 0, 100]
+                    result = verify_published(
+                        "https://velog.io/@한글/some-slug",
+                        title="t",
+                        required_link_urls=[],
+                        max_wait=30,
+                    )
+        assert result.ok is False
+        assert "'ascii' codec" not in result.reason
+        assert "connection refused" in result.reason
+
+    def test_ascii_url_passes_through_unchanged_to_request(self):
+        captured: list[str] = []
+
+        def fake_urlopen(req, **kw):
+            captured.append(req.full_url)
+
+            class _Resp:
+                def __enter__(self_inner):
+                    return self_inner
+                def __exit__(self_inner, *a):
+                    return False
+                def getcode(self_inner):
+                    return 200
+                def read(self_inner):
+                    return _good_body("T", "https://example.com").encode("utf-8")
+            return _Resp()
+
+        with patch("backlink_publisher.linkcheck.verify.urlopen", side_effect=fake_urlopen):
+            verify_published(
+                "https://blog.example.com/post/1",
+                title="T",
+                required_link_urls=["https://example.com"],
+            )
+        assert captured == ["https://blog.example.com/post/1"]
+
+
 def test_verify_reports_attempt_count_in_reason():
     """Failure reason mentions attempt count."""
     with _mock_get(404, ""):

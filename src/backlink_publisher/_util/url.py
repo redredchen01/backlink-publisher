@@ -12,7 +12,7 @@ Conventions:
 
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
 
 
 def validate_main_domain_url(url: str | None) -> str | None:
@@ -192,3 +192,80 @@ def canonicalize_url(url: str) -> str:
         query = ""
 
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+# RFC 3986 safe-char sets for the two transport-time encoders below.
+# Path keeps the pchar-compatible reserved chars; both keep ``%`` so that
+# already-percent-encoded inputs survive a second pass unchanged (idempotency).
+_FETCH_PATH_SAFE = "/:@%"
+_FETCH_QUERY_SAFE = "=&?/:@,+%"
+
+
+def normalize_url_for_fetch(url: str) -> str:
+    """Return *url* in an ASCII-safe form ``urllib.request.urlopen`` will accept.
+
+    Defends ``linkcheck.verify`` and ``linkcheck.http`` against URLs that
+    legitimately carry non-ASCII characters — Velog Korean ``@username``
+    handles, CJK ``url_slug`` values from Hashnode / Velog — which crash the
+    stdlib HTTP client at request-line encoding time
+    (``'ascii' codec can't encode characters``).
+
+    Transformation:
+
+    - Hostname → IDNA (``xn--…``) when it contains non-ASCII labels.
+      Falls back to the original host if IDNA refuses (e.g. label too long,
+      reserved character) so callers still get a structured fetch failure
+      from the network layer rather than an exception here.
+    - Userinfo and port → preserved byte-for-byte.
+    - Path → percent-encoded with ``%`` in the safe set, so already-encoded
+      sequences like ``%E1%84%82`` are not double-encoded to ``%25E1%2584%2582``.
+    - Query → percent-encoded with reserved query delimiters
+      (``=``, ``&``, ``?``, ``,``, ``+``) in the safe set, plus ``%`` for the
+      same idempotency reason.
+    - Fragment → dropped. Fragments never travel over the wire and the two
+      affected fetch sites both ignore them today.
+
+    Non-``http(s)`` schemes and empty strings pass through unchanged, matching
+    the convention :func:`canonicalize_url` follows in this module.
+
+    The function is idempotent:
+    ``normalize_url_for_fetch(normalize_url_for_fetch(u)) == normalize_url_for_fetch(u)``
+    for any input that is itself a valid ASCII-safe URL produced by this
+    function.
+    """
+    if not url:
+        return url
+
+    # Fast path: already ASCII-clean URLs round-trip byte-for-byte. Avoids
+    # touching anything Velog/Hashnode/Medium did not actually break, and
+    # keeps the common case allocation-free past one encode attempt.
+    try:
+        url.encode("ascii")
+        return url
+    except UnicodeEncodeError:
+        pass
+
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return url
+
+    host = parts.hostname or ""
+    try:
+        ascii_host = host.encode("idna").decode("ascii") if host else ""
+    except UnicodeError:
+        ascii_host = host
+
+    userinfo_at = ""
+    if "@" in parts.netloc:
+        userinfo_at = parts.netloc.split("@", 1)[0] + "@"
+
+    netloc = f"{userinfo_at}{ascii_host}"
+    if parts.port is not None:
+        netloc = f"{netloc}:{parts.port}"
+
+    path = quote(parts.path, safe=_FETCH_PATH_SAFE)
+    query = quote(parts.query, safe=_FETCH_QUERY_SAFE)
+
+    # Fragment intentionally dropped — never reaches the wire and the two
+    # affected fetch sites do not depend on it.
+    return urlunsplit((parts.scheme, netloc, path, query, ""))

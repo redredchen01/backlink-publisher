@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `linkcheck.verify.verify_published` and `linkcheck.http.check_url` no longer
+  crash with `'ascii' codec can't encode characters` when the URL carries
+  legitimate non-ASCII bytes (Velog Korean `@username`, CJK `url_slug` from
+  Hashnode / Velog). A new `_util.url.normalize_url_for_fetch` helper
+  IDNA-encodes the host and percent-encodes the path/query at the fetch
+  boundary; ASCII URLs pass through byte-identical. Previously such URLs
+  demoted legitimately-published posts to `published_unverified`. Plan
+  2026-05-21-005.
+
 ### Added
 
 - `medium-login` CLI: thin alias for `bind-channel --channel medium`, matching
