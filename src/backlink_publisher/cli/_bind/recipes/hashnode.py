@@ -51,18 +51,11 @@ _BOUND_URL_PATTERN = re.compile(
 
 
 def _hashnode_bound_predicate(page) -> None:
-    """Wait until URL leaves the login family on hashnode.com / *.hashnode.dev.
-
-    Spike-grade — production version (Unit 2) adds cookie sanity gate
-    and identity-mismatch guard. This stub trusts URL alone, which is
-    sufficient for capturing the post-login state for offline inspection.
-
-    Note: explicit ``timeout=600_000`` (10 min) because Playwright's
-    ``wait_for_url`` uses NAVIGATION default timeout (30s), NOT the
-    ``set_default_timeout(BIND_TIMEOUT_MS)`` the driver sets — different
-    timeout buckets. Operator needs realistic SSO + 2FA budget.
-    """
-    page.wait_for_url(_BOUND_URL_PATTERN, timeout=600_000)
+    """SPIKE PATCH (2026-05-21): no-op — operator already completed login in
+    prior chrome-backend bind attempt (session cookies on disk). Telegraph-
+    style immediate persist. Production version (Unit 2) will reintroduce
+    URL pattern + cookie sanity gate + identity-mismatch guard."""
+    return None
 
 
 def _hashnode_cookie_host_filter(host) -> bool:

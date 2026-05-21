@@ -41,7 +41,7 @@ from backlink_publisher.config.loader import _config_dir
 
 # Default per-bind timeout. Playwright accepts ms; 5 minutes lets the operator
 # finish a social-OAuth flow including 2FA without artificial pressure.
-BIND_TIMEOUT_MS = 5 * 60 * 1000
+BIND_TIMEOUT_MS = 15 * 60 * 1000  # SPIKE PATCH plan-016 Unit 1 (was 5*60*1000)
 
 
 # ───────── exception sentinels (caught by run_bind and CLI) ─────────
