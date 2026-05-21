@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify, redirect, request, session
 from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
-from ..helpers import _draft_tab_extra, _render
+from ..helpers import _REQUIRES_URL_STATUSES, _draft_tab_extra, _render
 
 bp = Blueprint("history", __name__)
 
@@ -62,6 +62,18 @@ def ce_history_delete():
 def ce_history_update_status():
     item_id = request.form.get('id', '')
     new_status = request.form.get('status', '')
+
+    # Server-side invariant guard (F22): operator must not be able to set
+    # a "success" status on a row that has no article URLs, even by forging
+    # a POST directly. The <select> UI already disables these options client-
+    # side, but that's advisory only.
+    if new_status in _REQUIRES_URL_STATUSES:
+        current = _history_store.load()
+        matched = next((h for h in current if h.get('id') == item_id), None)
+        if matched is not None and not matched.get('article_urls'):
+            from flask import abort
+            abort(400, description="invariant_violation: cannot set status="
+                  f"{new_status!r} on a history row with no article URLs")
 
     def _apply(hist):
         for h in hist:
