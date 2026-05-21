@@ -96,8 +96,10 @@ def _build_publish_input(payload: dict[str, Any], publication_id: str) -> dict[s
 
     Hashnode's PublishPostInput accepts ``title``, ``contentMarkdown``,
     ``tags`` (array of ``{slug, name}`` — we send name only and let
-    Hashnode resolve), and ``publicationId`` (required). Body source
-    priority: ``content_markdown`` (passthrough) → rendered HTML.
+    Hashnode resolve), ``publicationId`` (required), and
+    ``originalArticleURL`` (optional canonical, Plan 2026-05-21-003
+    Unit 2 — per-row Mixed canonical strategy). Body source priority:
+    ``content_markdown`` (passthrough) → rendered HTML.
     """
     title = payload.get("title", "Untitled")
     body = (
@@ -107,12 +109,21 @@ def _build_publish_input(payload: dict[str, Any], publication_id: str) -> dict[s
     raw_tags = payload.get("tags", [])[:5]  # Hashnode caps at 5
     tags = [{"name": t, "slug": _tag_slug(t)} for t in raw_tags if t]
 
-    return {
+    publish_input: dict[str, Any] = {
         "title": title,
         "contentMarkdown": body,
         "publicationId": publication_id,
         "tags": tags,
     }
+
+    # Mixed canonical (Plan 003 R2): pass-through schema-validated URL via
+    # GraphQL variable. Empty string ``""`` and missing field both fall
+    # through ``or None`` → omit from input → pure-backlink mode.
+    canonical = payload.get("seo", {}).get("canonical_url") or None
+    if canonical:
+        publish_input["originalArticleURL"] = canonical
+
+    return publish_input
 
 
 def _tag_slug(name: str) -> str:

@@ -185,9 +185,24 @@ class BloggerAPIAdapter(Publisher):
             # to Google Blogger's server-side filter (locked by
             # tests/test_adapter_blogger_api_xss_contract.py). If
             # content_html is absent, falls back to rendering content_markdown.
+            content_html = extract_publish_html(payload, "blogger")
+            # Mixed canonical (Plan 003 R2): prepend ``<link rel=canonical>``
+            # to the post body when payload carries a non-empty schema-
+            # validated URL. NOTE: Blogger Posts v3 API has no post-level
+            # head-meta field; body-level canonical is a cosmetic marker
+            # — Google's canonical resolver requires the tag in <head>, so
+            # the SEO impact here is intentional best-effort, not guaranteed.
+            # Forwarder contract preserved: no adapter-side escaping of the
+            # URL (schema gate already rejected control chars / quotes /
+            # angle brackets / non-http schemes).
+            canonical = payload.get("seo", {}).get("canonical_url") or None
+            if canonical:
+                content_html = (
+                    f'<link rel="canonical" href="{canonical}">\n{content_html}'
+                )
             body = {
                 "title": payload.get("title", ""),
-                "content": extract_publish_html(payload, "blogger"),
+                "content": content_html,
                 "labels": payload.get("tags", [])[:20],
             }
             is_draft = mode == "draft"
