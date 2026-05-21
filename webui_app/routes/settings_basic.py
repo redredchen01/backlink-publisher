@@ -13,7 +13,7 @@ from backlink_publisher.publishing.adapters import verify_adapter_setup
 from backlink_publisher.publishing.registry import registered_platforms
 
 from ..binding_status import get_channel_status
-from ..helpers import _save_schedule_settings, _settings_context
+from ..helpers import _safe_flash_redirect, _save_schedule_settings, _settings_context
 
 bp = Blueprint("settings_basic", __name__)
 
@@ -119,9 +119,9 @@ def settings_save_target_keywords():
         msg = '关键词已保存'
         if dup_warnings:
             msg += f'（已自动去重 {len(set(dup_warnings))} 个域名）'
-        return redirect(f'/settings?flash_type=success&flash_msg={msg}')
+        return _safe_flash_redirect('/settings', flash_type='success', msg=msg)
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
+        return _safe_flash_redirect('/settings', flash_type='danger', msg=f'保存失败: {e}')
 
 
 @bp.route('/settings/schedule', methods=['POST'])
@@ -134,9 +134,9 @@ def settings_schedule_save():
             'min_interval_hours': max(0.5, min_hours),
             'jitter_minutes': max(0, jitter_mins),
         })
-        return redirect('/settings?flash_type=success&flash_msg=排程设定已保存')
+        return _safe_flash_redirect('/settings', flash_type='success', msg='排程设定已保存')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}')
+        return _safe_flash_redirect('/settings', flash_type='danger', msg=f'保存失败: {e}')
 
 
 @bp.route('/settings/save-blog-ids', methods=['POST'])
@@ -149,9 +149,13 @@ def settings_save_blog_ids():
         cfg = load_config()
         cfg.blogger_blog_ids = mapping
         save_config(cfg, extra_blogger_ids={}, target_three_url=None)
-        return redirect('/settings?flash_type=success&flash_msg=Blog ID 映射已保存#channel-blogger')
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='Blog ID 映射已保存', fragment='channel-blogger')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}#channel-blogger')
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'保存失败: {e}', fragment='channel-blogger')
 
 
 @bp.route('/settings/save-medium-token', methods=['POST'])
@@ -160,18 +164,25 @@ def settings_save_medium_token():
     try:
         save_config(load_config(), medium_token=token, target_three_url=None)
         msg = 'Medium Token 已保存' if token else 'Medium Token 已清除'
-        return redirect(f'/settings?flash_type=success&flash_msg={msg}#channel-medium')
+        return _safe_flash_redirect(
+            '/settings', flash_type='success', msg=msg, fragment='channel-medium')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}#channel-medium')
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'保存失败: {e}', fragment='channel-medium')
 
 
 @bp.route('/settings/clear-medium-token', methods=['POST'])
 def settings_clear_medium_token():
     try:
         save_config(load_config(), medium_token="", target_three_url=None)
-        return redirect('/settings?flash_type=success&flash_msg=Medium Token 已清除#channel-medium')
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='Medium Token 已清除', fragment='channel-medium')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=清除失败: {e}#channel-medium')
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'清除失败: {e}', fragment='channel-medium')
 
 
 @bp.route('/settings/revoke-blogger', methods=['POST'])
@@ -179,9 +190,13 @@ def settings_revoke_blogger():
     cfg = load_config()
     try:
         cfg.blogger_token_path.unlink(missing_ok=True)
-        return redirect('/settings?flash_type=success&flash_msg=Blogger 授权已撤销#channel-blogger')
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='Blogger 授权已撤销', fragment='channel-blogger')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=撤销失败: {e}#channel-blogger')
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'撤销失败: {e}', fragment='channel-blogger')
 
 
 @bp.route('/api/velog/login', methods=['POST'])

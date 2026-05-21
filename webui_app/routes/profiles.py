@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, redirect, request
+from flask import Blueprint, jsonify, request
 
 from webui_store import profiles_store as _profiles_store
+
+from ..helpers import _safe_referrer_redirect
 
 bp = Blueprint("profiles", __name__)
 
@@ -42,4 +44,6 @@ def profiles_delete():
     _profiles_store.update(
         lambda profiles: [p for p in profiles if p.get('name') != name]
     )
-    return redirect(request.referrer or '/')
+    # Plan 2026-05-21-006 Unit 3.3 — same-origin referrer guard. Naive
+    # `redirect(request.referrer or '/')` was an open-redirect vector.
+    return _safe_referrer_redirect(default='/')
