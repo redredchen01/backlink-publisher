@@ -3,6 +3,7 @@ title: Hashnode Browser-Bind Adapter (Free-tier Replacement for Paywalled GraphQ
 type: feat
 status: active
 date: 2026-05-20
+claims: {}
 deepened: 2026-05-21
 spike: docs/spike-notes/2026-05-20-hashnode-bind-discovery.md
 spike_commit: d818662
