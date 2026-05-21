@@ -54,9 +54,7 @@ class TestRecipeFields:
 
 
 class TestVelogHostFilter:
-    """Velog cookie host filter — exact-apex match against velog.io.
-    Mirrors the spike's _velog_host_allowed primitive (plan-012 R16).
-    """
+    """Velog cookie host filter — velog.io plus real subdomains."""
 
     def setup_method(self):
         self.filter = RECIPES["velog"].cookie_host_filter
@@ -77,9 +75,8 @@ class TestVelogHostFilter:
     def test_rejects_suffix_confusion(self):
         assert self.filter("velog.io.attacker.tld") is False
 
-    def test_rejects_subdomain(self):
-        # Subdomains are not the apex — explicit deny per R16 ("精确匹配")
-        assert self.filter("api.velog.io") is False
+    def test_accepts_subdomain(self):
+        assert self.filter("api.velog.io") is True
 
     def test_rejects_empty(self):
         assert self.filter("") is False

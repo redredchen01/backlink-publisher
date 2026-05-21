@@ -4,14 +4,13 @@ Channel: ``velog`` (velog.io).
 
 Login flow: operator lands on ``https://velog.io/setting`` so the login
 button is visible immediately. The bound predicate waits until the page is no
-longer the login gate and no longer shows the login prompt. That signals the
-social provider redirected back to a logged-in session.
+longer the login gate and Velog's ``currentUser`` GraphQL probe confirms the
+browser session is authenticated.
 
-Cookie host filter: exact-apex match against ``velog.io``. Mirrors the
-spike's ``_velog_host_allowed`` primitive (plan-012 R16) to guard against
-prefix-confusion (``evilvelog.io``) and suffix-confusion
-(``velog.io.attacker.tld``). Subdomains are explicitly rejected — the
-session cookie lives on the apex.
+Cookie host filter: allow ``velog.io`` and real ``*.velog.io`` subdomains.
+This keeps ``v2.velog.io`` auth cookies needed by GraphQL publish while still
+rejecting prefix-confusion (``evilvelog.io``) and suffix-confusion
+(``velog.io.attacker.tld``).
 """
 
 from __future__ import annotations
@@ -34,6 +33,7 @@ _BOUND_URL_PATTERN = re.compile(r"https://velog\.io/setting(?:[/?#].*)?$")
 # as the bind signal because the site can keep the same URL while swapping the
 # page contents after authentication.
 _LOGIN_PROMPT_TEXT = "로그인 후 이용해주세요"
+_CURRENT_USER_QUERY = "query CurrentUser { currentUser { id username display_name } }"
 
 
 def _velog_bound_predicate(page) -> None:
@@ -52,13 +52,32 @@ def _velog_bound_predicate(page) -> None:
         }""",
         arg=_LOGIN_PROMPT_TEXT,
     )
+    page.wait_for_function(
+        """async (query) => {
+            try {
+                const resp = await fetch('https://v2.velog.io/graphql', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'content-type': 'application/json'},
+                    body: JSON.stringify({query})
+                });
+                if (!resp.ok) return false;
+                const body = await resp.json();
+                return !!(body && body.data && body.data.currentUser);
+            } catch (_) {
+                return false;
+            }
+        }""",
+        arg=_CURRENT_USER_QUERY,
+    )
 
 
 def _velog_cookie_host_filter(host) -> bool:
-    """Exact-apex match: ``host.lower().lstrip('.') == 'velog.io'``."""
+    """Allow only ``velog.io`` and real ``*.velog.io`` subdomains."""
     if not host or not isinstance(host, str):
         return False
-    return host.lower().lstrip(".") == "velog.io"
+    normalized = host.lower().lstrip(".")
+    return normalized == "velog.io" or normalized.endswith(".velog.io")
 
 
 def _velog_post_persist(config_dir: Path, storage_state_path: Path) -> Path:

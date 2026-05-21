@@ -198,6 +198,11 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
             "velog-cookies.json is empty or has no usable auth data.\n"
             "Run: velog-login"
         )
+    if not (cookies.get("access_token") or cookies.get("refresh_token")):
+        raise AuthExpiredError(
+            channel="velog",
+            reason="velog credential file has no access_token or refresh_token",
+        )
     return cookies
 
 
