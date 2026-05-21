@@ -50,16 +50,16 @@ class TestSaveTokenAllowlist:
         assert resp.status_code == 302
         assert b"unknown channel" in resp.data or b'wpcom' in resp.data
 
-    def test_devto_rejected(self, client):
+    def test_devto_accepted_via_generic_route(self, client, tmp_path):
+        # Dev.to is now in _ALLOWED and uses api_key field
         csrf = _csrf(client)
         resp = client.post("/settings/save-channel-token", data={
             "csrf_token": csrf,
             "channel": "devto",
-            "token": "x",
+            "token": "devto_test_key_12345",
         })
         assert resp.status_code == 302
-        # Should redirect with danger flash
-        assert b"flash_type=danger" in resp.data
+        assert b"flash_type=success" in resp.data
 
     def test_blogger_rejected(self, client):
         # Blogger is OAuth-bound, not token-paste — should not be exposed
@@ -163,3 +163,138 @@ class TestSettingsRenderWithCards:
         assert b'channel-wpcom' not in resp.data
         assert b'channel-writeas' not in resp.data
         assert b'token-paste-writeas' not in resp.data
+
+    def test_settings_page_includes_notion_card(self, client):
+        resp = client.get("/settings")
+        assert resp.status_code == 200
+        assert b'channel-notion' in resp.data
+        assert b'Notion' in resp.data
+        assert b'token-paste-notion' in resp.data
+
+    def test_settings_page_includes_devto_token_paste_card(self, client):
+        resp = client.get("/settings")
+        assert resp.status_code == 200
+        assert b'Dev.to' in resp.data
+        assert b'token-paste-devto' in resp.data
+
+
+class TestSaveDevtoToken:
+    def test_save_writes_api_key_to_file(self, client, tmp_path):
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-channel-token", data={
+            "csrf_token": csrf,
+            "channel": "devto",
+            "token": "devto_key_abc123",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=success" in resp.data
+        token_file = tmp_path / "devto-token.json"
+        assert token_file.exists()
+        data = json.loads(token_file.read_text())
+        assert data["api_key"] == "devto_key_abc123"
+
+    def test_empty_token_does_not_modify(self, client, tmp_path):
+        # Seed existing devto token
+        token_file = tmp_path / "devto-token.json"
+        token_file.write_text(json.dumps({"api_key": "original_key"}))
+        token_file.chmod(0o600)
+
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-channel-token", data={
+            "csrf_token": csrf,
+            "channel": "devto",
+            "token": "",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=info" in resp.data
+        assert json.loads(token_file.read_text())["api_key"] == "original_key"
+
+    def test_clear_devto_token(self, client, tmp_path):
+        token_file = tmp_path / "devto-token.json"
+        token_file.write_text(json.dumps({"api_key": "to_delete"}))
+        token_file.chmod(0o600)
+
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-channel-token", data={
+            "csrf_token": csrf,
+            "channel": "devto",
+            "clear": "1",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=success" in resp.data
+        assert not token_file.exists()
+
+
+class TestSaveNotionToken:
+    def test_save_notion_token_writes_both_fields(self, client, tmp_path):
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "integration_token": "secret_abc123",
+            "database_id": "db_xyz_456",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=success" in resp.data
+        token_file = tmp_path / "notion-token.json"
+        assert token_file.exists()
+        data = json.loads(token_file.read_text())
+        assert data["integration_token"] == "secret_abc123"
+        assert data["database_id"] == "db_xyz_456"
+
+    def test_missing_integration_token_rejected(self, client):
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "integration_token": "",
+            "database_id": "db_xyz_456",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=danger" in resp.data
+
+    def test_missing_database_id_rejected(self, client):
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "integration_token": "secret_abc",
+            "database_id": "",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=danger" in resp.data
+
+    def test_empty_form_returns_info(self, client):
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "integration_token": "",
+            "database_id": "",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=info" in resp.data
+
+    def test_clear_notion_token(self, client, tmp_path):
+        token_file = tmp_path / "notion-token.json"
+        token_file.write_text(json.dumps({
+            "integration_token": "secret_old",
+            "database_id": "db_old",
+        }))
+        token_file.chmod(0o600)
+
+        csrf = _csrf(client)
+        resp = client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "clear": "1",
+        })
+        assert resp.status_code == 302
+        assert b"flash_type=success" in resp.data
+        assert not token_file.exists()
+
+    def test_notion_file_has_0600_permissions(self, client, tmp_path):
+        csrf = _csrf(client)
+        client.post("/settings/save-notion-token", data={
+            "csrf_token": csrf,
+            "integration_token": "secret_perm_test",
+            "database_id": "db_perm",
+        })
+        token_file = tmp_path / "notion-token.json"
+        if os.name != "nt":
+            assert stat.S_IMODE(token_file.stat().st_mode) == 0o600

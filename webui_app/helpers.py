@@ -1031,7 +1031,7 @@ def _get_medium_browser_status(cfg, *, session=None) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _token_paste_status(cfg, channel: str, load_fn) -> dict:
+def _token_paste_status(cfg, channel: str, load_fn, *, token_field: str = "token") -> dict:
     """Status dict consumed by _settings_channel_token_paste.html.
 
     Reads the platform's token file via the load function injected by
@@ -1039,6 +1039,9 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     to know the file path). Returns {bound, masked, dofollow}.
     Defensive against any load failure — broken token files surface as
     "unbound" rather than crashing the settings page render.
+
+    ``token_field`` is the JSON key to read from the token file (default
+    "token"). Dev.to uses "api_key" instead.
     """
     from backlink_publisher.publishing.registry import dofollow_status
     try:
@@ -1047,7 +1050,7 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
         data = load_fn(token_path) if token_path else load_fn()
     except Exception:
         data = None
-    token = (data or {}).get("token", "") if isinstance(data, dict) else ""
+    token = (data or {}).get(token_field, "") if isinstance(data, dict) else ""
     bound = bool(token)
     if bound and len(token) > 6:
         masked = token[:3] + "*" * (len(token) - 6) + token[-3:]
@@ -1062,14 +1065,47 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     }
 
 
+def _token_paste_status_notion(cfg, load_fn) -> dict:
+    """Status dict for the Notion token-paste card.
+
+    Notion's token file has two fields (integration_token + database_id)
+    rather than the single 'token' field used by ghpages/hashnode/devto.
+    Mirrors ``_token_paste_status`` but reads integration_token for the
+    masked display and checks both fields for bound status.
+    """
+    from backlink_publisher.publishing.registry import dofollow_status
+    try:
+        token_path = getattr(cfg, "notion_token_path", None)
+        data = load_fn(token_path) if token_path else load_fn()
+    except Exception:
+        data = None
+    integration_token = (data or {}).get("integration_token", "") if isinstance(data, dict) else ""
+    database_id = (data or {}).get("database_id", "") if isinstance(data, dict) else ""
+    bound = bool(integration_token and database_id)
+    if bound and len(integration_token) > 6:
+        masked = integration_token[:3] + "*" * (len(integration_token) - 6) + integration_token[-3:]
+    elif bound:
+        masked = "*" * len(integration_token)
+    else:
+        masked = ""
+    return {
+        "bound": bound,
+        "masked": masked,
+        "dofollow": dofollow_status("notion"),
+        "database_id_set": bool(database_id),
+    }
+
+
 def _settings_context(flash=None):
     """Build template context for the settings page."""
     from flask import session as _flask_session
 
     from backlink_publisher.config import (
+        load_devto_token,
         load_ghpages_token,
         load_hashnode_token,
         load_medium_token,
+        load_notion_token,
     )
     from backlink_publisher.cli._bind.channels import CHANNELS
     from webui_store.channel_status import list_all as _channel_list_all
@@ -1090,6 +1126,12 @@ def _settings_context(flash=None):
     hashnode_config_summary = [
         ("publication_id", cfg.hashnode.publication_id if cfg.hashnode else ""),
     ]
+
+    # Phase 2 Plan 003 token-paste platforms (2026-05-21): Notion + Dev.to.
+    notion_status = _token_paste_status_notion(cfg, load_notion_token)
+    devto_status = _token_paste_status(cfg, "devto", load_devto_token, token_field="api_key")
+    notion_config_summary: list[tuple[str, str]] = []
+    devto_config_summary: list[tuple[str, str]] = []
 
     token = cfg.medium_integration_token or ""
     masked = ("*" * 8 + token[-4:]) if len(token) > 4 else ("*" * len(token))
@@ -1175,6 +1217,10 @@ def _settings_context(flash=None):
         ghpages_config_summary=ghpages_config_summary,
         hashnode_status=hashnode_status,
         hashnode_config_summary=hashnode_config_summary,
+        notion_status=notion_status,
+        notion_config_summary=notion_config_summary,
+        devto_status=devto_status,
+        devto_config_summary=devto_config_summary,
     )
 
 

@@ -103,17 +103,21 @@ class TestDevtoPublishFlow:
 
 
 class TestDevtoChain:
-    def test_devto_chain_uses_browser_only(self):
+    def test_devto_chain_has_api_primary_chrome_fallback(self):
+        # Plan 003 Phase 2 Unit 7 added DevtoAPIAdapter as primary;
+        # BrowserPublishDispatcher remains as fallback (DependencyError path).
         import backlink_publisher.publishing.adapters  # noqa: F401
         from backlink_publisher.publishing.registry import _REGISTRY
+        from backlink_publisher.publishing.adapters.devto_api import DevtoAPIAdapter
         from backlink_publisher.publishing.browser_publish import (
             BrowserPublishDispatcher,
         )
 
         chain = _REGISTRY["devto"]
-        assert len(chain) == 1
-        assert isinstance(chain[0], BrowserPublishDispatcher)
-        assert chain[0].channel == "devto"
+        assert len(chain) == 2
+        assert chain[0] is DevtoAPIAdapter
+        assert isinstance(chain[1], BrowserPublishDispatcher)
+        assert chain[1].channel == "devto"
 
     def test_devto_removed_from_rejection_map(self):
         from backlink_publisher.publishing.registry import _REJECTED_PLATFORMS
