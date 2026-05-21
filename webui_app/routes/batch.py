@@ -43,7 +43,12 @@ def ce_batch():
     """Batch publish: process multiple target URLs through the full pipeline."""
     urls_text = request.form.get('batch_urls', '').strip()
     platform = request.form.get('platform', 'blogger')
-    language = request.form.get('language', 'zh-CN')
+    # Plan 013 U2: converge field name to `target_language`; keep `language` as
+    # backwards-compat fallback for any caller still using the old field name.
+    language = (
+        request.form.get('target_language')
+        or request.form.get('language', 'zh-CN')
+    )
     url_mode = request.form.get('url_mode', 'C')
     publish_mode = request.form.get('publish_mode', 'publish')
 

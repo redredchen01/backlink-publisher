@@ -523,6 +523,70 @@ class TestPipelineRoutes:
         )
         assert resp.status_code == 200
 
+    def test_ce_batch_accepts_target_language(self, client):
+        """Plan 013 U2 — batch route must accept `target_language` field."""
+        resp = client.post(
+            "/ce:batch",
+            data={
+                "batch_urls": "https://example.com/",
+                "platform": "medium",
+                "target_language": "zh-CN",
+                "publish_mode": "draft",
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_ce_batch_language_fallback_still_works(self, client):
+        """Plan 013 U2 — legacy `language` field still accepted (backwards compat)."""
+        resp = client.post(
+            "/ce:batch",
+            data={
+                "batch_urls": "https://example.com/",
+                "platform": "medium",
+                "language": "en",
+                "publish_mode": "draft",
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_shared_config_selects_included_in_both_forms(self, client):
+        """Plan 013 U2 — shared select partial used in both configForm and batchForm.
+
+        The configForm is guarded by {% if config %} so it only renders when
+        pipeline state is present.  We verify:
+        - The batch form always renders target_language (always visible on GET /).
+        - The index.html template source contains the include in both locations.
+        - _shared_config_selects.html is present on disk.
+        """
+        from pathlib import Path
+
+        # 1. Batch form always renders target_language
+        resp = client.get("/")
+        body = resp.data.decode("utf-8", errors="ignore")
+        assert 'name="target_language"' in body, "batch form missing target_language"
+
+        # 2. Template source uses the shared include in both form contexts
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "webui_app" / "templates" / "index.html"
+        )
+        src = template_path.read_text(encoding="utf-8")
+        # count include statements — must appear exactly twice
+        assert src.count("_shared_config_selects.html") == 2, (
+            "expected 2 includes of _shared_config_selects.html, got "
+            + str(src.count("_shared_config_selects.html"))
+        )
+
+        # 3. The partial itself is on disk
+        partial_path = (
+            Path(__file__).resolve().parents[1]
+            / "webui_app" / "templates" / "_shared_config_selects.html"
+        )
+        assert partial_path.exists(), "_shared_config_selects.html missing"
+        partial_src = partial_path.read_text(encoding="utf-8")
+        assert 'name="target_language"' in partial_src
+        assert 'name="publish_mode"' in partial_src
+
     def test_ce_publish_real_with_no_data_returns_200(self, client):
         resp = client.post(
             "/ce:publish-real",

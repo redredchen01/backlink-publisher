@@ -934,43 +934,8 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="urls_json" value="{{ urls_json }}">
                     
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">目标平台</label>
-                            <select class="form-select" name="platform">
-                                {# Reverse-driven from publisher registry; Plan 2026-05-19-002 U2. #}
-                                {% for p in platforms %}
-                                <option value="{{ p.slug }}" {% if config.platform == p.slug %}selected{% endif %}>{{ p.display_name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">连结模式</label>
-                            <select class="form-select" name="url_mode">
-                                <option value="A" {% if config.url_mode == 'A' %}selected{% endif %}>A - 纯文字</option>
-                                <option value="B" {% if config.url_mode == 'B' %}selected{% endif %}>B - 锚文本</option>
-                                <option value="C" {% if config.url_mode == 'C' %}selected{% endif %}>C - 品牌+关键词</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">发布语言</label>
-                            <select class="form-select" name="target_language">
-                                <option value="zh-CN" {% if config.target_language == 'zh-CN' %}selected{% endif %}>简体中文</option>
-                                <option value="en" {% if config.target_language == 'en' %}selected{% endif %}>English</option>
-                                <option value="ru" {% if config.target_language == 'ru' %}selected{% endif %}>Русский (俄文)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">发布模式</label>
-                            <select class="form-select" name="publish_mode">
-                                <option value="draft" {% if config.publish_mode == 'draft' %}selected{% endif %}>草稿 (Draft)</option>
-                                <option value="publish" {% if config.publish_mode == 'publish' %}selected{% endif %}>直接发布 (Publish)</option>
-                            </select>
-                        </div>
-                    </div>
+                    {# Plan 013 U2 — shared 4-select partial (platform/language/url_mode/publish_mode). #}
+                    {% include '_shared_config_selects.html' %}
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -1597,40 +1562,9 @@
                                     placeholder="https://51acgs.com/category/acg&#10;https://51acgs.com/category/manga&#10;https://51acgs.com/page/about"
                                     style="font-family:monospace;font-size:13px;">{{ batch_urls or '' }}</textarea>
                             </div>
-                            <div class="row g-3 mb-3">
-                                <div class="col-md-3">
-                                    <label class="form-label">目标平台</label>
-                                    <select name="platform" class="form-select">
-                                        {# Reverse-driven from publisher registry; Plan 2026-05-19-002 U2. #}
-                                        {% for p in platforms %}
-                                        <option value="{{ p.slug }}">{{ p.display_name }}</option>
-                                        {% endfor %}
-                                    </select>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label">发布语言</label>
-                                    <select name="language" class="form-select">
-                                        <option value="zh-CN">简体中文</option>
-                                        <option value="en">English</option>
-                                        <option value="ru">Русский</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label">连结模式</label>
-                                    <select name="url_mode" class="form-select">
-                                        <option value="A">A — 纯文字</option>
-                                        <option value="B">B — 分类导航</option>
-                                        <option value="C">C — 深度解析</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-3">
-                                    <label class="form-label">发布模式</label>
-                                    <select name="publish_mode" class="form-select">
-                                        <option value="draft">存草稿</option>
-                                        <option value="publish">正式发布</option>
-                                    </select>
-                                </div>
-                            </div>
+                            {# Plan 013 U2 — shared 4-select partial; field name `target_language`
+                               (batch.py reads `target_language` with `language` as fallback). #}
+                            {% include '_shared_config_selects.html' %}
                             <button type="submit" class="btn btn-success">
                                 <i class="bi bi-play-circle me-2"></i>开始批量发布
                             </button>
