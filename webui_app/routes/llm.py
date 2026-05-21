@@ -18,10 +18,6 @@ bp = Blueprint("llm", __name__)
 # Cap upstream-response size at 64 KB streamed read: a malicious endpoint
 # could otherwise return a multi-GB body and exhaust memory.
 _LLM_TEST_MAX_BYTES = 64 * 1024
-# Loopback hosts that the SSRF gate would normally block. Operators
-# running Ollama/LM Studio on localhost opt-in via env to enable them.
-_LLM_ALLOW_LOOPBACK = os.environ.get(
-    "BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK", "0") == "1"
 
 
 def _guard_llm_endpoint(url: str) -> tuple[str | None, str | None]:
@@ -35,6 +31,9 @@ def _guard_llm_endpoint(url: str) -> tuple[str | None, str | None]:
          loopback exception is opted in via
          BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK=1, in which case loopback
          IPs and `localhost` are allowed.
+
+    Env vars are read inline (not cached at import) so tests can flip them
+    via monkeypatch without `importlib.reload` (ce:review maint-001).
     """
     from urllib.parse import urlparse
     parsed = urlparse(url)
@@ -49,21 +48,50 @@ def _guard_llm_endpoint(url: str) -> tuple[str | None, str | None]:
         )
 
     # SSRF check — but skip loopback rejection when operator opted in.
+    allow_loopback = os.environ.get(
+        "BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK", "0") == "1"
     ssrf_reason = _check_url_for_ssrf(url)
     if ssrf_reason is not None:
-        if _LLM_ALLOW_LOOPBACK and (
-                ssrf_reason.startswith("blocked_ip:127.")
-                or ssrf_reason.startswith("blocked_ip:::1")):
+        if allow_loopback and _is_loopback_host(parsed.hostname):
             return None, None
         return "url_rejected", ssrf_reason
 
     return None, None
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    """Hostname-level loopback check decoupled from net_safety's reason
+    string format (ce:review maint-002). Catches 127.0.0.1, ::1, IPv4
+    loopback aliases (0.0.0.0/8, 127.0.0.0/8), and the literal
+    'localhost'.
+    """
+    import ipaddress
+    if not host:
+        return False
+    h = host.strip("[]").lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
 def _safe_get_json(url: str, headers: dict, timeout: int = 10):
     """Bounded GET with content-type + size guards. Returns parsed JSON or
-    raises ValueError. Used by the LLM test-connection route only."""
-    resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
+    raises ValueError. Used by the LLM test-connection route only.
+
+    `allow_redirects=False` (ce:review C1 / sec-001): the SSRF gate is
+    one-shot at input. Following redirects would re-issue the request
+    (including the Bearer api_key header) against an attacker-chosen
+    target, defeating the gate.
+    """
+    resp = requests.get(url, headers=headers, timeout=timeout, stream=True,
+                        allow_redirects=False)
+    if 300 <= resp.status_code < 400:
+        raise ValueError(
+            f"redirect_not_allowed: upstream returned {resp.status_code}; "
+            f"refusing to follow Location header")
     ctype = resp.headers.get("Content-Type", "")
     if "json" not in ctype.lower():
         raise ValueError(f"bad_content_type: {ctype!r}")
@@ -79,7 +107,12 @@ def _safe_get_json(url: str, headers: dict, timeout: int = 10):
 def _safe_post_json(url: str, headers: dict, payload: dict, timeout: int = 10):
     """Bounded POST counterpart of _safe_get_json."""
     resp = requests.post(url, headers=headers, json=payload,
-                         timeout=timeout, stream=True)
+                         timeout=timeout, stream=True,
+                         allow_redirects=False)
+    if 300 <= resp.status_code < 400:
+        raise ValueError(
+            f"redirect_not_allowed: upstream returned {resp.status_code}; "
+            f"refusing to follow Location header")
     ctype = resp.headers.get("Content-Type", "")
     if "json" not in ctype.lower():
         raise ValueError(f"bad_content_type: {ctype!r}")

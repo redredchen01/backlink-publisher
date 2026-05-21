@@ -194,15 +194,16 @@ class TestLlmAllowlist:
 
 class TestLlmEndpointGuard:
     def test_rejects_scheme(self, client, monkeypatch):
-        monkeypatch.delenv("BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST", raising=False)
+        # ALLOW_ANY_HOST=1 lets us bypass the allowlist so the request
+        # reaches the scheme check (ce:review maint-006 tightening).
+        monkeypatch.setenv("BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST", "1")
         resp = client.post(
             "/settings/test-llm-connection",
             data={"endpoint": "file:///etc/passwd", "api_key": "sk-x"},
         )
-        # The route handles the validation BEFORE network — should be 400.
-        # If api_key fallback to stored grabbed nothing, hits the 200 'missing'
-        # gate first. Be lenient: 400 OR 200 with status=error and no SSRF.
-        assert resp.status_code in (200, 400)
+        assert resp.status_code == 400
+        body = resp.get_json()
+        assert body["reason"] == "scheme_rejected"
 
     def test_rejects_unallowlisted_host(self, client, monkeypatch):
         # Need both api_key and endpoint to bypass the "missing fields" 200 gate.
@@ -240,20 +241,11 @@ class TestLlmEndpointGuard:
         assert body["reason"] == "url_rejected"
 
     def test_rejects_loopback_without_opt_in(self, client, monkeypatch):
+        # Env is read inline in _guard_llm_endpoint (post ce:review maint-001),
+        # so monkeypatch is sufficient — no importlib.reload needed.
         monkeypatch.setenv("BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST", "1")
         monkeypatch.delenv("BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK", raising=False)
-        # Need to reload llm module so the env-driven _LLM_ALLOW_LOOPBACK
-        # constant picks up the unset value.
-        import importlib
-        from webui_app.routes import llm as llm_mod
-        importlib.reload(llm_mod)
-        from webui_app import create_app
-        app = create_app()
-        app.config["TESTING"] = True
-        app.config["CSRF_ENABLED"] = False
-        app.config["WTF_CSRF_ENABLED"] = False
-        c = app.test_client()
-        resp = c.post(
+        resp = client.post(
             "/settings/test-llm-connection",
             data={"endpoint": "http://127.0.0.1:11434",
                   "api_key": "sk-attacker"},
@@ -261,6 +253,83 @@ class TestLlmEndpointGuard:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body["reason"] == "url_rejected"
+
+    def test_accepts_loopback_with_opt_in(self, client, monkeypatch):
+        # Operator with Ollama on localhost sets both env vars; SSRF gate
+        # gets out of the way. The endpoint won't actually respond (no
+        # Ollama in test env), but the gate must NOT 400.
+        monkeypatch.setenv("BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST", "1")
+        monkeypatch.setenv("BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK", "1")
+        resp = client.post(
+            "/settings/test-llm-connection",
+            data={"endpoint": "http://127.0.0.1:11434",
+                  "api_key": "sk-x"},
+        )
+        # Gate passed; downstream connection error gets caught and returned
+        # as 200 with status=error/exception. The key invariant: NOT 400.
+        if resp.status_code == 400:
+            body = resp.get_json()
+            assert body.get("reason") != "url_rejected", (
+                f"loopback opt-in didn't take effect: {body}"
+            )
+
+
+class TestLlmSsrfRedirectGuard:
+    """Critical: requests.get(..., allow_redirects=False) prevents an
+    allowlisted upstream from redirecting the request to an internal IP
+    with the operator's Bearer token in tow (ce:review C1 / sec-001).
+    """
+
+    def test_safe_get_json_rejects_redirect(self, monkeypatch):
+        from webui_app.routes.llm import _safe_get_json
+
+        class _FakeResp:
+            def __init__(self):
+                self.status_code = 302
+                self.headers = {"Location": "http://169.254.169.254/iam/",
+                                "Content-Type": "text/html"}
+
+            def iter_content(self, chunk_size=8192):
+                yield b""
+
+        calls = []
+
+        def fake_get(url, headers=None, timeout=None, stream=None,
+                     allow_redirects=None):
+            calls.append({"url": url, "allow_redirects": allow_redirects})
+            return _FakeResp()
+
+        monkeypatch.setattr("webui_app.routes.llm.requests.get", fake_get)
+        with pytest.raises(ValueError, match="redirect_not_allowed"):
+            _safe_get_json("https://api.openai.com/models",
+                           {"Authorization": "Bearer sk-x"})
+        # The fix: requests.get MUST be called with allow_redirects=False.
+        assert calls[0]["allow_redirects"] is False
+
+    def test_safe_post_json_rejects_redirect(self, monkeypatch):
+        from webui_app.routes.llm import _safe_post_json
+
+        class _FakeResp:
+            def __init__(self):
+                self.status_code = 307
+                self.headers = {"Location": "http://10.0.0.1/admin",
+                                "Content-Type": "text/html"}
+
+            def iter_content(self, chunk_size=8192):
+                yield b""
+
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None, stream=None,
+                      allow_redirects=None):
+            calls.append({"url": url, "allow_redirects": allow_redirects})
+            return _FakeResp()
+
+        monkeypatch.setattr("webui_app.routes.llm.requests.post", fake_post)
+        with pytest.raises(ValueError, match="redirect_not_allowed"):
+            _safe_post_json("https://api.openai.com/chat/completions",
+                            {"Authorization": "Bearer sk-x"}, {})
+        assert calls[0]["allow_redirects"] is False
 
 
 # ── 3.5 SESSION_COOKIE_SECURE env-driven + ALLOW_NETWORK warning ────────────
