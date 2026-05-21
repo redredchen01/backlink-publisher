@@ -207,6 +207,13 @@ class WriteAsAPIAdapter(Publisher):
                     f"Write.as returned non-JSON response: {exc}"
                 )
             data = parsed.get("data") or {}
+            if data.get("id") == "contentisblocked":
+                raise ExternalServiceError(
+                    "Write.as rejected content as blocked by site policy "
+                    "(id=contentisblocked); review anchor URLs / payload body "
+                    "for terms triggering Write.as anti-spam, or drop the "
+                    "writeas target from this seed row"
+                )
             slug = data.get("slug")
             if not slug:
                 raise ExternalServiceError(

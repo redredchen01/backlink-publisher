@@ -339,6 +339,59 @@ class TestPublish:
             with pytest.raises(ExternalServiceError, match="no slug"):
                 adapter.publish({"content_markdown": "y"}, "publish", cfg)
 
+    def test_blocked_content_raises_site_policy_error(self, tmp_path, monkeypatch):
+        """Write.as anti-spam returns 201 + data.id=contentisblocked. The
+        adapter must surface that as a site-policy rejection, not the generic
+        'no slug — check collection_alias' misdiagnosis."""
+        config_dir = tmp_path / "config-dir"
+        config_dir.mkdir()
+        _seed_token(config_dir)
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
+        cfg = _config_with_writeas(tmp_path)
+
+        blocked = _http_status_response(
+            201,
+            {
+                "code": 201,
+                "data": {
+                    "id": "contentisblocked",
+                    "slug": None,
+                    "title": "",
+                    "body": "",
+                    "full_post_url": "",
+                },
+            },
+        )
+        adapter = WriteAsAPIAdapter()
+        with patch.object(requests, "post", return_value=blocked):
+            with pytest.raises(ExternalServiceError) as excinfo:
+                adapter.publish({"content_markdown": "y"}, "publish", cfg)
+        msg = str(excinfo.value)
+        assert "contentisblocked" in msg
+        assert "site policy" in msg
+        # Negative assertion: the misdiagnosis must be gone.
+        assert "no slug" not in msg
+        assert "collection_alias" not in msg
+
+    def test_unknown_id_sentinel_falls_back_to_no_slug(self, tmp_path, monkeypatch):
+        """If Write.as introduces a different sentinel (e.g. contentisflagged),
+        the new detection branch must NOT swallow it — the generic no-slug
+        branch should still catch it so existing operators see no surprise."""
+        config_dir = tmp_path / "config-dir"
+        config_dir.mkdir()
+        _seed_token(config_dir)
+        monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
+        cfg = _config_with_writeas(tmp_path)
+
+        other = _http_status_response(
+            201,
+            {"code": 201, "data": {"id": "contentisflagged", "slug": None}},
+        )
+        adapter = WriteAsAPIAdapter()
+        with patch.object(requests, "post", return_value=other):
+            with pytest.raises(ExternalServiceError, match="no slug"):
+                adapter.publish({"content_markdown": "y"}, "publish", cfg)
+
 
 # ───────────────────────────────────────────────────────────────────────────────
 # verify_adapter_setup (offline mode)
