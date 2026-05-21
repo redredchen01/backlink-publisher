@@ -27,7 +27,6 @@ Identity-mismatch resolution semantics:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, redirect, request

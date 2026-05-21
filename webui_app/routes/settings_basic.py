@@ -6,9 +6,6 @@ routes consumed by the dashboard JS in Unit 5.
 
 from __future__ import annotations
 
-import subprocess
-import sys
-
 from flask import Blueprint, abort, jsonify, redirect, render_template, request
 
 from backlink_publisher.config import load_config, save_config

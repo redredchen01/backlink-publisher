@@ -26,7 +26,6 @@ from backlink_publisher.config import (
     _domain_label,
     load_blogger_token,
     load_config,
-    load_medium_token,
     merge_site_url_categories,
     save_config,
     upgrade_target_to_threeurl,

@@ -129,8 +129,7 @@ def settings_preview_llm():
         )
         
         test_title = request.form.get('test_title', '测试文章')
-        test_content = request.form.get('test_content', '这是一个测试内容。')
-        
+
         if settings.get('use_article_gen'):
             result = provider.generate_article_body(
                 domain_label='example.com',

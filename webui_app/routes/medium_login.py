@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import secrets
 
-from flask import Blueprint, make_response, redirect, request, session
+from flask import Blueprint, redirect, request, session
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher.config import load_config

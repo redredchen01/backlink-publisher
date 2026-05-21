@@ -21,7 +21,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
-import time
+import time  # noqa: F401 — referenced by tests via mock.patch
 from typing import Any
 
 import requests

@@ -7,7 +7,6 @@ paragraph string. Templates vary by ``url_mode`` (A/B/C) and language.
 from __future__ import annotations
 
 import random
-from typing import Any
 
 
 def _en_body_a(domain: str, main_domain: str, anchors: list[str]) -> str:

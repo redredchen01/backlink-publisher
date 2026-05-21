@@ -408,7 +408,7 @@ class VelogGraphQLAdapter(Publisher):
                     ),
                     adapter="velog-graphql",
                 )
-            except requests.RequestException as exc:
+            except requests.RequestException:
                 raise ExternalServiceError(
                     "velog GraphQL endpoint unreachable"
                 ) from None

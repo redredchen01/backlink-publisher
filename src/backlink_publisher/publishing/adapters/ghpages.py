@@ -486,7 +486,7 @@ class GitHubPagesAPIAdapter(Publisher):
                 return _attempt(sha=existing_sha)
 
         try:
-            result = retry_transient_call(
+            retry_transient_call(
                 execute,
                 is_retryable=lambda exc: (
                     isinstance(exc, ExternalServiceError)
