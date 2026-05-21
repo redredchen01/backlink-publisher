@@ -186,13 +186,18 @@ def verify_adapter_setup(
         return
 
     if platform == "writeas":
-        from .instant_web import WriteAsCdpAdapter
-        if WriteAsCdpAdapter.available(config):
-            return
+        # Offline verify mirrors the API-adapter contract (config + token);
+        # WriteAsCdpAdapter's `available()` only checks for a Chrome binary,
+        # so short-circuiting on it would let a machine with Chrome but no
+        # writeas-token pass verify and crash at publish-time when the
+        # dispatch chain falls through to WriteAsAPIAdapter without a
+        # token. The CDP adapter is still registered in the chain and
+        # remains tryable by the dispatcher; verify gates on the
+        # API-path prerequisites that the chain ultimately depends on.
         if config.writeas is None:
             raise DependencyError(
-                "Write.as direct web publish needs real Chrome/CDP, or add "
-                "[writeas] plus writeas-token.json for API publishing."
+                "Write.as config missing. Add [writeas] section to "
+                "~/.config/backlink-publisher/config.toml"
             )
         if not config.writeas_token_path.exists():
             raise DependencyError(

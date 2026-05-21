@@ -500,6 +500,22 @@ class TestOfflineVerify:
         cfg = Config(writeas=WriteAsConfig(collection_alias=""))
         assert verify_adapter_setup("writeas", cfg) is None
 
+    def test_cdp_availability_does_not_short_circuit_api_contract(
+        self, monkeypatch
+    ):
+        """Regression: a previous WIP attempted to skip the API verify gate
+        when ``WriteAsCdpAdapter.available()`` returned True (Chrome binary
+        present). That let machines with Chrome but no writeas-token pass
+        verify and crash at publish-time when the dispatch chain fell
+        through to the API adapter. Force-flag CDP availability and assert
+        verify still requires the API prerequisites.
+        """
+        from backlink_publisher.publishing.adapters import instant_web as iw
+
+        monkeypatch.setattr(iw.WriteAsCdpAdapter, "available", classmethod(lambda cls, cfg: True))
+        with pytest.raises(DependencyError, match="Write.as config missing"):
+            verify_adapter_setup("writeas", Config())
+
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Live verify (mode='live')
