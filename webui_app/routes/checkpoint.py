@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import Blueprint, redirect, request, session
 
 from backlink_publisher import checkpoint as _checkpoint_mod
-from ..helpers import _render
+from ..helpers.contexts import _render
 from ..helpers.cli_runner import _REPO_ROOT, _rewrite_cli_cmd
 from ..helpers.security import _check_localhost, _validate_webui_run_id
 from ..helpers.history import _parse_publish_results, _push_history_aggregate

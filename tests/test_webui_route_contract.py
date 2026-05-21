@@ -1284,7 +1284,7 @@ class TestSecretLeakRegression:
         on the tmp file before rename).
         """
         import stat as _stat
-        from webui_app.helpers import _llm_settings_file
+        from webui_app.helpers.contexts import _llm_settings_file
 
         resp = client.post("/settings/save-llm-config", data={
             "endpoint": "https://api.example.com/v1",

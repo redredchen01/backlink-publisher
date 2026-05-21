@@ -69,7 +69,7 @@ def _bind_origin_headers() -> dict[str, str]:
     """Headers carrying the allowlisted Origin for the bind blueprint —
     required after Plan 003 Unit 3's _check_bind_origin_or_abort guard
     became active on /settings/channels/<channel>/bind."""
-    from webui_app.helpers import _FLASK_PORT
+    from webui_app.helpers.security import _FLASK_PORT
     return {"Origin": f"http://127.0.0.1:{_FLASK_PORT}"}
 
 

@@ -238,7 +238,7 @@ def test_legacy_caller_without_publish_state_renders_green(app):
     Protects any unmigrated caller (or test fixture) that still passes only
     `published=...`."""
     with app.test_request_context("/"):
-        from webui_app.helpers import _render
+        from webui_app.helpers.contexts import _render
         resp = _render("index.html", published="legacy-output", config={},
                        history_active=True)
     body = resp if isinstance(resp, str) else resp.decode("utf-8") if isinstance(resp, bytes) else str(resp)

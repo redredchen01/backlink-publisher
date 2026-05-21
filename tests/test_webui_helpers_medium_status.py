@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backlink_publisher.config import Config
-from webui_app.helpers import _get_medium_browser_status
+from webui_app.helpers.contexts import _get_medium_browser_status
 
 
 @pytest.fixture()
