@@ -313,12 +313,40 @@ def validate_output_payload(row: dict[str, Any]) -> list[str]:
                     errors.append(f"links[{i}]: invalid kind '{link['kind']}'")
 
     # Validate SEO structure
+    #
+    # ``seo`` is an OUTPUT_REQUIRED_FIELDS member; when present it must carry
+    # ``title`` / ``description`` / ``canonical_url`` as strings. ``canonical_url``
+    # additionally goes through a URL-format validator (Plan 2026-05-21-003
+    # Unit 1): this is the SOLE defense layer for forwarder adapters that
+    # inject the value into HTML / YAML / GraphQL contexts without their own
+    # escaping (per ``tests/test_adapter_blogger_api_xss_contract.py``).
+    #
+    # The regex rejects control chars, whitespace, quotes, angle-brackets,
+    # and backticks — the union of HTML attribute / HTML element / YAML newline
+    # / GraphQL string-escape / template-literal injection vectors. It accepts
+    # both ``http://`` and ``https://`` but no other schemes (no ``javascript:``,
+    # ``data:``, ``file:``, ``vbscript:``).
+    #
+    # Empty string is intentionally accepted (Mixed canonical strategy: rows
+    # opt into syndication mode by populating canonical_url, or stay in
+    # pure-backlink mode by leaving it empty; adapters short-circuit ``""``
+    # via ``... or None`` at read time).
     if "seo" in row and isinstance(row["seo"], dict):
         for req in ("title", "description", "canonical_url"):
             if req not in row["seo"]:
                 errors.append(f"seo: missing field '{req}'")
             elif not isinstance(row["seo"][req], str):
                 errors.append(f"seo.{req} must be a string")
+
+        canonical = row["seo"].get("canonical_url")
+        if isinstance(canonical, str) and canonical != "":
+            if not re.match(r"^https?://[^\s\"'<>`\x00-\x1f\x7f]+$", canonical, re.IGNORECASE):
+                errors.append(
+                    f"seo.canonical_url is not a valid http(s) URL "
+                    f"(must match ^https?:// and contain no whitespace, "
+                    f"quotes, angle brackets, backticks, or control chars): "
+                    f"{canonical!r}"
+                )
 
     # Validate link count (6-8 for backlink articles)
     link_count = len(row.get("links", []))
