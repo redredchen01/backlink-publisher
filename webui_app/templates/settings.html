@@ -253,6 +253,126 @@
             </div>
         </div>
 
+        <!-- Dev.to 渠道折叠卡 (token-paste, Plan 003 Phase 2) -->
+        <div class="card channel-card">
+            <div class="card-header p-0">
+                <button type="button" class="channel-toggle"
+                        data-bs-toggle="collapse" data-bs-target="#channel-devto"
+                        aria-expanded="false" aria-controls="channel-devto">
+                    <i class="bi bi-code-slash" aria-hidden="true"></i>
+                    <span>Dev.to</span>
+                    <span class="badges">
+                        {% if devto_status.bound %}
+                        <span class="badge-status ok">已绑定 ✓</span>
+                        {% else %}
+                        <span class="badge-status err">未绑定</span>
+                        {% endif %}
+                        <span class="badge-status" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:10px;">nofollow</span>
+                    </span>
+                    <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="channel-devto" class="collapse">
+                <div class="card-body">
+                    <p class="text-muted" style="font-size:12px; margin-bottom:8px;">
+                        <strong>注意：</strong>Dev.to 对所有外链强制添加 <code>rel="nofollow ugc"</code>。
+                        本渠道的价值在于实体信号、收录速度和引荐流量，不作为 dofollow 主力渠道。
+                    </p>
+                    {% with channel='devto',
+                            token_status=devto_status,
+                            token_label='Dev.to API Key',
+                            token_hint_url='https://dev.to/settings/extensions',
+                            token_hint_text='在 Dev.to 设置页生成 API Key。',
+                            config_summary=devto_config_summary,
+                            config_path=config_path %}
+                        {% include '_settings_channel_token_paste.html' %}
+                    {% endwith %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Notion 渠道折叠卡 (token-paste, Plan 003 Phase 2) -->
+        <div class="card channel-card">
+            <div class="card-header p-0">
+                <button type="button" class="channel-toggle"
+                        data-bs-toggle="collapse" data-bs-target="#channel-notion"
+                        aria-expanded="false" aria-controls="channel-notion">
+                    <i class="bi bi-journal-text" aria-hidden="true"></i>
+                    <span>Notion</span>
+                    <span class="badges">
+                        {% if notion_status.bound %}
+                        <span class="badge-status ok">已绑定 ✓</span>
+                        {% else %}
+                        <span class="badge-status err">未绑定</span>
+                        {% endif %}
+                        <span class="badge-status" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-size:10px;">nofollow</span>
+                    </span>
+                    <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div id="channel-notion" class="collapse">
+                <div class="card-body">
+                    <p class="text-muted" style="font-size:12px; margin-bottom:8px;">
+                        Notion 对公开页面外链强制添加 nofollow。本渠道价值：实体信号 + 收录速度。<br>
+                        <strong>设置步骤：</strong>① 在 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">Notion Integrations</a> 创建集成，复制 <code>secret_...</code> Token；
+                        ② 打开目标数据库页面，Share → Invite，选择刚创建的集成；
+                        ③ 从数据库 URL 复制 Database ID（URL 中 <code>notion.so/<strong>xxxxxxxx...</strong>?v=</code> 部分）。
+                    </p>
+                    <p class="text-muted" style="font-size:11px;">
+                        注意：Dev.to 通道的 token 通过上方 <strong>通用 Token 绑定</strong> 表单保存；
+                        Notion 需要两个字段，使用下方专用表单。
+                    </p>
+
+                    <hr style="margin:16px 0 12px;">
+                    <div class="token-paste-section" id="token-paste-notion" data-channel="notion">
+                        <div class="token-status-row" style="display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap;">
+                            {% if notion_status.bound %}
+                            <span class="badge-status ok"><i class="bi bi-check-circle-fill"></i> 已绑定 ✓</span>
+                            {% if notion_status.masked %}
+                            <code class="text-muted" style="font-size:12px;">{{ notion_status.masked }}</code>
+                            {% endif %}
+                            {% else %}
+                            <span class="badge-status err"><i class="bi bi-x-circle-fill"></i> 未绑定</span>
+                            {% endif %}
+                            <span class="badge-status" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;">
+                                <i class="bi bi-link-slash"></i> nofollow
+                            </span>
+                        </div>
+
+                        <form method="POST" action="/settings/save-notion-token" class="token-paste-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <div class="form-group" style="margin-bottom:12px;">
+                                <label for="notion-integration-token" style="font-weight:500;">Integration Token</label>
+                                <input type="password" id="notion-integration-token" name="integration_token"
+                                       class="form-control" autocomplete="off" spellcheck="false"
+                                       placeholder="{% if notion_status.bound %}重新绑定时填入新 token；保留空白则不更新{% else %}secret_...{% endif %}"
+                                       style="font-family:monospace;">
+                                <small class="form-text text-muted">Notion Integration 的 Internal Integration Secret。</small>
+                            </div>
+                            <div class="form-group" style="margin-bottom:12px;">
+                                <label for="notion-database-id" style="font-weight:500;">Database ID</label>
+                                <input type="text" id="notion-database-id" name="database_id"
+                                       class="form-control" autocomplete="off" spellcheck="false"
+                                       placeholder="{% if notion_status.database_id_set %}已设置（重新绑定时填入）{% else %}xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx{% endif %}"
+                                       style="font-family:monospace;">
+                                <small class="form-text text-muted">数据库页面 URL 中的 ID 部分。</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                {% if notion_status.bound %}更新绑定{% else %}绑定{% endif %}
+                            </button>
+                            {% if notion_status.bound %}
+                            <button type="submit" name="clear" value="1"
+                                    class="btn btn-outline-danger" style="margin-left:8px;"
+                                    onclick="return confirm('清除 Notion token 文件？');">
+                                清除
+                            </button>
+                            {% endif %}
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <h2 class="section-heading">全局设置</h2>
 
         {% include '_settings_global_keywords.html' %}

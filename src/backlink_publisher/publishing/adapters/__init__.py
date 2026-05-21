@@ -31,11 +31,13 @@ from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
+from .devto_api import DevtoAPIAdapter
 from .hashnode import HashnodeAPIAdapter
 from .instant_web import TelegraphCdpAdapter, WriteAsCdpAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
+from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 from .writeas import WriteAsAPIAdapter
@@ -99,17 +101,32 @@ register(
 register("writeas", WriteAsAPIAdapter, dofollow=True)
 register(
     "devto",
+    DevtoAPIAdapter,
     BrowserPublishDispatcher.for_channel("devto"),
     dofollow=False,
     rationale=(
         "Dev.to applies rel=\"nofollow ugc\" to outbound links since "
         "~2022 per platform policy; every external <a> is decorated "
         "server-side regardless of account tier or post format. "
-        "Re-registered in Plan 2026-05-21-001 Unit 4b as a chrome "
-        "publish channel — backlinks here still drive referral traffic "
-        "and topical relevance signals even though they don't transfer "
-        "PageRank. Operator dashboard chip surfaces the nofollow "
-        "status (Unit 5)."
+        "DevtoAPIAdapter (Plan 2026-05-21-003 Phase 2 Unit 7) is the "
+        "preferred path for operators with an API key; "
+        "BrowserPublishDispatcher is the fallback for operators without "
+        "one (DependencyError → fall through per registry contract). "
+        "backlinks here still drive referral traffic and topical "
+        "relevance signals even though they don't transfer PageRank."
+    ),
+)
+register(
+    "notion",
+    NotionAPIAdapter,
+    dofollow=False,
+    rationale=(
+        "Notion applies rel=nofollow to outbound hyperlinks on public "
+        "pages — all <a> elements in Notion-rendered content carry "
+        "nofollow regardless of account type or database visibility. "
+        "This adapter's value is entity signal (DA ~75+), content "
+        "syndication speed, and indexation acceleration. "
+        "Plan 2026-05-21-003 Phase 2 Unit 6."
     ),
 )
 register(
@@ -281,6 +298,25 @@ def verify_adapter_setup(
                 "Write.as token not stored. Write "
                 f"{{\"token\": \"<access_token>\"}} to {config.writeas_token_path} "
                 "(chmod 600). Obtain via POST /api/auth/login or writeas-login CLI."
+            )
+        return
+
+    if platform == "notion":
+        if not NotionAPIAdapter.available(config):
+            raise DependencyError(
+                "Notion integration token or database_id not configured. "
+                f"Write {{\"integration_token\": \"secret_...\", \"database_id\": \"...\"}} "
+                f"to {config.notion_token_path} (chmod 600). "
+                "Create an Integration at https://www.notion.so/my-integrations."
+            )
+        return
+
+    if platform == "devto":
+        if not DevtoAPIAdapter.available(config):
+            raise DependencyError(
+                "Dev.to API key not configured. "
+                f"Write {{\"api_key\": \"<key>\"}} to {config.devto_token_path} "
+                "(chmod 600). Generate at https://dev.to/settings/extensions."
             )
         return
 

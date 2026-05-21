@@ -28,6 +28,7 @@ Design choices:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from typing import Any
@@ -47,10 +48,15 @@ from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
 HASHNODE_API = "https://gql.hashnode.com/"
 _HTTP_TIMEOUT_S = 30
+_PAYWALL_PROBE_TIMEOUT_S = 10
+_PAYWALL_CACHE_TTL_S = 300  # 5-minute TTL per plan Unit 8 spec
 
+# Module-level paywall probe cache: {token_hash: (result_str_or_None, timestamp)}
+_paywall_cache: dict[str, tuple[str | None, float]] = {}
 
 # GraphQL fragments kept module-level so tests can assert exact query shape.
 ME_QUERY = "query { me { id username name } }"
+_PUBLICATION_PROBE_QUERY = "{ me { publication { id name } } }"
 
 PUBLISH_POST_MUTATION = """
 mutation PublishPost($input: PublishPostInput!) {
@@ -192,6 +198,77 @@ def _graphql_post(
     return body
 
 
+def _probe_hashnode_paywall(token: str) -> str | None:
+    """Probe whether the Hashnode account is on the free-tier paywall.
+
+    Plan 2026-05-21-003 Phase 2 Unit 8. Called at ``publish()`` entry point
+    (NOT in ``available()``), preserving Publisher ABC contract.
+
+    Strategy:
+      - POST ``{ me { publication { id name } } }`` to gql.hashnode.com.
+      - Pro tier: ``data.me.publication`` is a non-null object with an ``id``.
+      - Free tier (paywalled): ``data.me.publication`` is null.
+      - Network errors / 4xx / 5xx: return None — let the publishPost
+        mutation decide (avoids false-positive paywall blocks).
+
+    Cache: results are cached for 5 minutes keyed by SHA-256(token) so
+    repeated ``publish()`` calls within the same process don't hammer the
+    introspection endpoint. WebUI status endpoint shares this cache.
+
+    Returns:
+        None — Pro tier or probe inconclusive (network error / auth ambiguity).
+        str  — Error message suitable for ExternalServiceError; indicates
+               free-tier paywall detected.
+    """
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    now = time.monotonic()
+    cached = _paywall_cache.get(token_hash)
+    if cached is not None:
+        result, ts = cached
+        if now - ts < _PAYWALL_CACHE_TTL_S:
+            return result
+
+    try:
+        resp = requests.post(
+            HASHNODE_API,
+            headers=_required_headers(token),
+            json={"query": _PUBLICATION_PROBE_QUERY},
+            timeout=_PAYWALL_PROBE_TIMEOUT_S,
+        )
+    except Exception:
+        # Network error / timeout — don't block publish, let mutation decide.
+        return None
+
+    if resp.status_code != 200:
+        # 4xx/5xx are network or auth issues — return None, don't misclassify.
+        return None
+
+    try:
+        body = resp.json()
+    except Exception:
+        return None
+
+    me = ((body or {}).get("data") or {}).get("me")
+    if me is None:
+        # GraphQL returned errors or missing data — inconclusive, don't block.
+        return None
+
+    publication = me.get("publication")
+    if publication is None:
+        # Free-tier: publication is explicitly null.
+        error_msg = (
+            "Hashnode GraphQL API requires Pro plan (2026-05-13). "
+            "The publishPost mutation is unavailable for free-tier accounts. "
+            "See https://hashnode.com/changelog/2026-05-13-graphql-api-paid-access"
+        )
+        _paywall_cache[token_hash] = (error_msg, now)
+        return error_msg
+
+    # Pro tier — publication object present.
+    _paywall_cache[token_hash] = (None, now)
+    return None
+
+
 class HashnodeAPIAdapter(Publisher):
     """Publishes Markdown to a Hashnode publication via GraphQL."""
 
@@ -276,6 +353,15 @@ class HashnodeAPIAdapter(Publisher):
                 platform="hashnode",
                 draft_url=f"hashnode://publication/{hn_cfg.publication_id}",
             )
+
+        # Unit 8 paywall probe: check BEFORE attempting the publishPost mutation.
+        # Probe is in publish() not available() to preserve Publisher ABC contract.
+        # Draft mode is handled above — probe only runs for live publish.
+        # On free-tier accounts, raise ExternalServiceError with a rich message
+        # so publish-history failure_reason carries the full context.
+        paywall_msg = _probe_hashnode_paywall(token)
+        if paywall_msg is not None:
+            raise ExternalServiceError(paywall_msg)
 
         def execute():
             body = _graphql_post(

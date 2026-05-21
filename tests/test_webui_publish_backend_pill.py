@@ -44,7 +44,7 @@ class TestPublishBackendClassification:
             ("medium", "api"),        # 3 API entries
             ("velog", "api+chrome"),  # API primary + chrome fallback
             ("hashnode", "api+chrome"),  # paywalled API + chrome bypass
-            ("devto", "chrome"),      # browser only (re-registered post un-reject)
+            ("devto", "api+chrome"),   # Plan 003 Phase 2 Unit 7: DevtoAPIAdapter primary + Chrome fallback
             ("mastodon", "chrome"),   # browser only
         ],
     )
@@ -60,9 +60,10 @@ class TestStatusExposesField:
         status = get_channel_status("velog", fake_config)
         assert status["publish_backend"] == "api+chrome"
 
-    def test_chrome_only_channel_status(self, fake_config):
+    def test_api_plus_chrome_channel_status(self, fake_config):
+        # devto is api+chrome since Plan 003 Phase 2 Unit 7 added DevtoAPIAdapter
         status = get_channel_status("devto", fake_config)
-        assert status["publish_backend"] == "chrome"
+        assert status["publish_backend"] == "api+chrome"
 
     def test_api_only_channel_status(self, fake_config):
         status = get_channel_status("blogger", fake_config)

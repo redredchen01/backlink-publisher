@@ -439,6 +439,16 @@ class Config:
         return _cfg._config_dir() / "writeas-token.json"
 
     @property
+    def notion_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "notion-token.json"
+
+    @property
+    def devto_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "devto-token.json"
+
+    @property
     def screenshot_dir(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._cache_dir() / "screenshots"

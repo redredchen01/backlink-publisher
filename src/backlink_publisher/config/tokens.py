@@ -28,6 +28,8 @@ def snapshot_token_revs() -> dict[str, int]:
         ("ghpages", "ghpages-token.json"),
         ("hashnode", "hashnode-token.json"),
         ("writeas", "writeas-token.json"),
+        ("notion", "notion-token.json"),
+        ("devto", "devto-token.json"),
     ]:
         token = _load_token(None, filename)
         if token:
@@ -48,7 +50,7 @@ def _load_token(path: Path | None, default_filename: str) -> dict[str, Any] | No
 def _save_token(data: dict[str, Any], path: Path | None, default_filename: str) -> None:
     token_path = path or (_resolve_config_dir() / default_filename)
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     existing = _load_token(token_path, default_filename)
     current_rev = existing.get("token_rev", 0) if existing else 0
     payload = {**data, "token_rev": current_rev + 1}
@@ -109,3 +111,35 @@ def load_writeas_token(path: Path | None = None) -> dict[str, Any] | None:
 def save_writeas_token(data: dict[str, Any], path: Path | None = None) -> None:
     """Save Write.as token dict to JSON file with mode 0600."""
     _save_token(data, path, "writeas-token.json")
+
+
+def load_notion_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Notion integration token JSON ({integration_token: "...", database_id: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "notion-token.json")
+
+
+def save_notion_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Notion integration token dict to JSON file with mode 0600.
+
+    Expected keys: integration_token (str), database_id (str).
+    """
+    _save_token(data, path, "notion-token.json")
+
+
+def load_devto_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Dev.to API key JSON ({api_key: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "devto-token.json")
+
+
+def save_devto_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Dev.to API key dict to JSON file with mode 0600.
+
+    Expected keys: api_key (str).
+    """
+    _save_token(data, path, "devto-token.json")

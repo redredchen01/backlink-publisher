@@ -1232,6 +1232,29 @@ class TestLlmRoutes:
         assert resp.headers["Location"].startswith("/settings?")
 
 
+class TestNotionTokenRoutes:
+    """Contract tests for Plan 003 Phase 2 Notion token routes."""
+
+    def test_save_notion_token_redirects_on_success(self, client):
+        resp = client.post(
+            "/settings/save-notion-token",
+            data={
+                "integration_token": "secret_test123",
+                "database_id": "db_abc456",
+            },
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
+    def test_save_notion_token_rejects_empty_token(self, client):
+        resp = client.post(
+            "/settings/save-notion-token",
+            data={"integration_token": "", "database_id": "db_abc456"},
+        )
+        assert resp.status_code == 302
+        assert b"flash_type=danger" in resp.data or b"flash_type=info" in resp.data
+
+
 class TestCsrfGuard:
     """Lock in that ``_global_csrf_guard`` rejects state-mutating verbs
     without a valid token. The class above's ``client`` fixture disables
