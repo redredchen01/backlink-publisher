@@ -1051,3 +1051,44 @@ class TestMakeSSRFOpener:
         a_caps = [h.max_redirections for h in a.handlers if hasattr(h, "max_redirections")]
         b_caps = [h.max_redirections for h in b.handlers if hasattr(h, "max_redirections")]
         assert 2 in a_caps and 5 in b_caps
+
+
+# ── Plan 2026-05-21-005: non-ASCII URLs must not crash content/fetch ──────────
+
+
+class TestNonAsciiUrlFetch:
+    """Regression: _check_once passes raw URLs to urllib.request.Request()
+    which crashes with 'ascii' codec can't encode characters when the URL
+    carries non-ASCII bytes (CJK list_url or work_url). Plan 2026-05-21-005.
+    """
+
+    def test_cjk_url_does_not_crash_check_once(self):
+        """CJK path in list_url/work_url goes through normalize_url_for_fetch
+        before reaching urllib; opener sees only ASCII bytes."""
+        body = b"<html><head><title>Content</title></head><body>x</body></html>"
+        captured: list[str] = []
+
+        def mock_open(req, **kw):
+            captured.append(req.full_url)
+            return _mock_response(200, body)
+
+        with patch("backlink_publisher.content.fetch._SSRF_OPENER.open", side_effect=mock_open):
+            ok, reason, _ = verify_url_has_content("https://example.com/한글-목록/")
+
+        assert ok is True
+        assert len(captured) == 1
+        captured[0].encode("ascii")  # would raise if non-ASCII slipped through
+        assert "%" in captured[0]
+
+    def test_ascii_url_passes_through_unchanged(self):
+        body = b"<html><head><title>T</title></head><body>x</body></html>"
+        captured: list[str] = []
+
+        def mock_open(req, **kw):
+            captured.append(req.full_url)
+            return _mock_response(200, body)
+
+        with patch("backlink_publisher.content.fetch._SSRF_OPENER.open", side_effect=mock_open):
+            verify_url_has_content("https://example.com/path?q=1")
+
+        assert captured == ["https://example.com/path?q=1"]

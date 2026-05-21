@@ -6,14 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- `linkcheck.verify.verify_published` and `linkcheck.http.check_url` no longer
-  crash with `'ascii' codec can't encode characters` when the URL carries
-  legitimate non-ASCII bytes (Velog Korean `@username`, CJK `url_slug` from
-  Hashnode / Velog). A new `_util.url.normalize_url_for_fetch` helper
-  IDNA-encodes the host and percent-encodes the path/query at the fetch
-  boundary; ASCII URLs pass through byte-identical. Previously such URLs
-  demoted legitimately-published posts to `published_unverified`. Plan
-  2026-05-21-005.
+- All three `urllib.request` fetch sites now normalize non-ASCII URLs before
+  opening a connection, preventing `'ascii' codec can't encode characters`
+  crashes across the full pipeline: `linkcheck.verify.verify_published`
+  (post-publish verifier — the original crash site), `linkcheck.http.check_url`
+  (pre-publish reachability), and `content.fetch.verify_url_has_content`
+  (planning-phase URL gate). A shared `_util.url.normalize_url_for_fetch`
+  helper IDNA-encodes the host and percent-encodes path/query; ASCII URLs
+  pass through byte-identical and idempotent. Previously Velog Korean
+  `@username` / CJK `url_slug` URLs demoted legitimately-published posts to
+  `published_unverified`. Plan 2026-05-21-005.
 
 ### Added
 

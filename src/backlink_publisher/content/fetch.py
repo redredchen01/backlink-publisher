@@ -42,6 +42,7 @@ from urllib.request import Request
 from bs4 import BeautifulSoup
 
 from backlink_publisher._util.logger import opencli_logger
+from backlink_publisher._util.url import normalize_url_for_fetch
 from backlink_publisher._util.net_safety import (
     _check_url_for_ssrf,
     _make_ssrf_opener,
@@ -334,7 +335,7 @@ def _check_once(
             return False, "network_error", None
         return False, "ssrf_blocked", None
 
-    req = Request(url, method="GET")
+    req = Request(normalize_url_for_fetch(url), method="GET")
     req.add_header("User-Agent", USER_AGENT)
     opener = _make_ssrf_opener(max_redirects) if max_redirects is not None else _SSRF_OPENER
     effective_timeout = timeout_seconds if timeout_seconds is not None else FETCH_TIMEOUT
