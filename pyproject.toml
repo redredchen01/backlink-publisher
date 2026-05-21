@@ -54,4 +54,5 @@ markers = [
     "real_ssrf_check: exercise the real _check_url_for_ssrf path instead of the default-bypass autouse fixture (tests/test_content_fetch.py)",
     "real_content_fetch: exercise the real content_fetch.verify_urls_batch / verify_url_has_content path instead of the default-pass autouse fixture (tests/test_content_fetch.py applies this module-wide)",
     "real_image_gen: exercise the real FRW image-gen endpoint instead of mocking; opt-in operator-only, never runs in CI (Plan 2026-05-20-001 Unit 2)",
+    "real_browser_publish_smoke: open live channel compose URL in attached Chrome and verify selectors against current DOM; opt-in operator-only (Plan 2026-05-21-001 Unit 4a+)",
 ]
