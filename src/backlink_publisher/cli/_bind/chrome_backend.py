@@ -178,10 +178,8 @@ class RealChromeBrowserRunner:
         args = [
             chrome_bin,
             f"--remote-debugging-port={port}",
-            # SPIKE PATCH (plan-016 Unit 1): Chrome 111+ rejects HTTP /json/*
-            # requests without this; symptom is chrome_cdp_unavailable.
-            # Per feedback_chrome_devtools_cdp_traps memory — same fix landed
-            # on dev branch fc41561 but not yet on origin/main.
+            # Chrome 111+ rejects HTTP /json/* requests from non-matching
+            # origins without this flag. Required for CDP attach to work.
             "--remote-allow-origins=*",
             f"--user-data-dir={profile}",
             "--no-first-run",
