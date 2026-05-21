@@ -4,6 +4,7 @@ type: feat
 status: active
 date: 2026-05-21
 deepened: 2026-05-21
+claims: {}
 ---
 
 # Chrome/CDP multi-channel publish via BrowserPublisher abstraction
