@@ -93,9 +93,13 @@ class Publisher(ABC):
         return True
 
 
-# platform → ordered list of adapter classes to try.
-# Populated by ``adapters/__init__.py`` at import time (see ``_install``).
-_REGISTRY: dict[str, list[type[Publisher]]] = {}
+# platform → ordered list of adapter entries to try. Each entry is either
+# a ``Publisher`` subclass (instantiated lazily at dispatch time, the
+# legacy pattern used by all API-based adapters) or a ``Publisher``
+# instance (the new pattern used by ``BrowserPublishDispatcher.for_channel(...)``
+# — see Plan 2026-05-21-001 Unit 2 §D6). Populated by ``adapters/__init__.py``
+# at import time (see ``_install``).
+_REGISTRY: dict[str, list[type[Publisher] | Publisher]] = {}
 
 
 # Negative-knowledge registry: platforms empirically verified as nofollow
@@ -148,13 +152,24 @@ _RATIONALE_BY_PLATFORM: dict[str, str] = {}
 
 def register(
     platform: str,
-    *publishers: type[Publisher],
+    *publishers: type[Publisher] | Publisher,
     dofollow: _DofollowStatus,
     rationale: str | None = None,
 ) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
-    Order matters: the first registered class is tried first.
+    Order matters: the first registered entry is tried first. Each
+    ``publishers`` entry may be:
+
+    - A ``Publisher`` subclass — the legacy pattern. ``dispatch()`` will
+      instantiate it lazily per call (e.g. ``BloggerAPIAdapter``,
+      ``MediumAPIAdapter``).
+    - A ``Publisher`` instance — the Plan 2026-05-21-001 Unit 2 pattern
+      for ``BrowserPublishDispatcher.for_channel("hashnode")`` and
+      siblings, where ctor-time recipe binding is needed (D6).
+
+    The mixing is supported per-platform too (a class entry can be followed
+    by an instance entry in the same chain).
 
     ``dofollow`` is a required keyword argument (Literal ``True`` /
     ``False`` / ``"uncertain"``) declaring whether the platform produces
@@ -266,11 +281,15 @@ def dispatch(
     strict = bool(do_banner and config.image_gen and config.image_gen.strict)
 
     last_dep_error: DependencyError | None = None
-    for cls in chain:
-        if not cls.available(config):
+    for entry in chain:
+        # Entry may be a Publisher subclass (legacy) or instance
+        # (BrowserPublishDispatcher.for_channel — Plan 2026-05-21-001 U2).
+        is_class = isinstance(entry, type)
+        publisher_cls = entry if is_class else type(entry)
+        if not publisher_cls.available(config):
             continue
         try:
-            adapter = cls()
+            adapter = entry() if is_class else entry
             if do_banner:
                 # Lazy import avoids a top-level cycle (banner_dispatcher
                 # lives in the same publishing package and is leaf-level,
