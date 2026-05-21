@@ -206,6 +206,7 @@ def _get_velog_status() -> dict:
         cfg = load_config()
         from backlink_publisher.publishing.adapters.velog_graphql import (
             _effective_cap,
+            _load_cookies,
             _read_count,
         )
         velog_cfg = cfg.velog
@@ -249,24 +250,14 @@ def _get_velog_status() -> dict:
                 'cap': cap,
             }
 
-        # parse cookies
+        # parse and validate credentials using the same loader as publish.
         try:
-            raw = json.loads(cookies_path.read_text())
-            cookie_list = raw.get('cookies', [])
-            if not cookie_list:
-                return {
-                    'state': 'warn',
-                    'label': 'Cookie 文件为空',
-                    'guide': 'velog-login',
-                    'cookies_path': str(cookies_path),
-                    'count': 0,
-                    'cap': cap,
-                }
-        except Exception:
+            _load_cookies(cookies_path)
+        except Exception as exc:
             return {
                 'state': 'warn',
-                'label': 'Cookie 文件解析失败',
-                'guide': 'velog-login',
+                'label': '凭证无效，需重新绑定',
+                'guide': str(exc),
                 'cookies_path': str(cookies_path),
                 'count': 0,
                 'cap': cap,

@@ -19,6 +19,7 @@ from ..helpers import (
     _parse_publish_results,
     _persist_three_tier_config,
     _render,
+    _get_velog_status,
     _verify_urls_or_error,
     detect_language,
     detect_platform,
@@ -244,6 +245,14 @@ def ce_publish():
     publish_mode = request.form.get('publish_mode', config.get('publish_mode', 'publish'))
 
     try:
+        if platform == 'velog':
+            velog_status = _get_velog_status()
+            if velog_status.get('state') not in ('ok', 'fresh'):
+                detail = velog_status.get('guide') or velog_status.get('label') or ''
+                return _render('index.html',
+                    error=f"Velog 凭证无效，请先在设置页重新绑定。{detail}",
+                    config=config, history_active=True)
+
         cmd = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
         result = run_pipe(cmd, plans)
         published = result['stdout']

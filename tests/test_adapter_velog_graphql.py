@@ -104,6 +104,17 @@ class TestLoadCookies:
         with pytest.raises(DependencyError, match="velog-login"):
             _load_cookies(p)
 
+    def test_tracking_only_cookies_are_rejected(self, tmp_path):
+        p = tmp_path / "velog-cookies.json"
+        self._write_cookie_file(p, 0o600, {
+            "cookies": [
+                {"name": "_ga", "value": "tracking"},
+                {"name": "theme", "value": "light"},
+            ]
+        })
+        with pytest.raises(AuthExpiredError, match="no access_token or refresh_token"):
+            _load_cookies(p)
+
     def test_corrupt_json(self, tmp_path):
         p = tmp_path / "velog-cookies.json"
         p.write_text("not-json{{{")
