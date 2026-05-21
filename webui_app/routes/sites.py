@@ -26,10 +26,10 @@ from backlink_publisher._util.logger import plan_logger
 from ..helpers import (
     _WORK_THEMED_RUNS,
     _WORK_THEMED_RUNS_MAX,
-    _ensure_csrf_token,
     _parse_lines,
     run_pipe,
 )
+from ..helpers.security import _ensure_csrf_token
 from ..helpers.url_meta import (
     _derive_branded_pool,
     _derive_exact_pool,

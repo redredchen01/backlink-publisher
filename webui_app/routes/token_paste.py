@@ -27,7 +27,7 @@ from backlink_publisher.config import (
     save_notion_token,
 )
 
-from ..helpers import _safe_flash_redirect
+from ..helpers.security import _safe_flash_redirect
 
 bp = Blueprint("token_paste", __name__)
 

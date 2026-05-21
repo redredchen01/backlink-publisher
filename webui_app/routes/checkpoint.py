@@ -11,11 +11,10 @@ from flask import Blueprint, redirect, request, session
 from backlink_publisher import checkpoint as _checkpoint_mod
 from ..helpers import (
     _REPO_ROOT,
-    _check_localhost,
     _render,
     _rewrite_cli_cmd,
-    _validate_webui_run_id,
 )
+from ..helpers.security import _check_localhost, _validate_webui_run_id
 from ..helpers.history import _parse_publish_results, _push_history_aggregate
 
 bp = Blueprint("checkpoint", __name__)

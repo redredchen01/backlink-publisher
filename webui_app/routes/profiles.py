@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 
 from webui_store import profiles_store as _profiles_store
 
-from ..helpers import _safe_referrer_redirect
+from ..helpers.security import _safe_referrer_redirect
 
 bp = Blueprint("profiles", __name__)
 

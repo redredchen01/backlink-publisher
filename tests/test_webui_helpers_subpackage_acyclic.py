@@ -13,13 +13,13 @@ from pathlib import Path
 
 HELPERS_DIR = Path(__file__).resolve().parents[1] / "webui_app" / "helpers"
 
-# Sub-modules present after Unit 2. Extend as Units 3-5 land.
-KNOWN_MODULES = {"url_meta", "history"}
+# Sub-modules present after Unit 3. Extend as Units 4-5 land.
+KNOWN_MODULES = {"url_meta", "history", "security"}
 
-# Documented inter-sibling edges (from → to). Unit 1 has none yet:
-# url_meta currently duplicates _TRUTHY_BYPASS rather than importing security.
-# Update this set when the duplication is cleaned up in Unit 3.
-ALLOWED_EDGES: set[tuple[str, str]] = set()
+# Documented inter-sibling edges (from → to).
+# url_meta → security: imports _TRUTHY_BYPASS (the one documented exception
+# in Plan 007 §High-Level Technical Design import-direction diagram).
+ALLOWED_EDGES: set[tuple[str, str]] = {("url_meta", "security")}
 
 
 def _sibling_imports(module_name: str) -> list[str]:

@@ -9,7 +9,8 @@ from backlink_publisher._util.llm_allowlist import is_allowlisted
 from backlink_publisher._util.net_safety import _check_url_for_ssrf
 from backlink_publisher.persistence.safe_write import atomic_write
 
-from ..helpers import _llm_settings_file, _load_llm_settings, _safe_flash_redirect
+from ..helpers import _llm_settings_file, _load_llm_settings
+from ..helpers.security import _safe_flash_redirect
 
 bp = Blueprint("llm", __name__)
 

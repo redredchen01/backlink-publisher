@@ -16,7 +16,7 @@ from flask import Blueprint, redirect, request, session
 
 from backlink_publisher.config import load_config, save_config
 
-from ..helpers import _oauth_callback_uri, _safe_flash_redirect
+from ..helpers.security import _oauth_callback_uri, _safe_flash_redirect
 
 bp = Blueprint("oauth", __name__)
 
