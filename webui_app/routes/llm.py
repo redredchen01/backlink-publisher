@@ -1,12 +1,95 @@
 """LLM settings route handlers."""
 import json
-from flask import Blueprint, jsonify, redirect, request
-from ..helpers import _llm_settings_file, _load_llm_settings
+import os
+
+from flask import Blueprint, jsonify, request
 import requests
 
+from backlink_publisher._util.llm_allowlist import is_allowlisted
+from backlink_publisher._util.net_safety import _check_url_for_ssrf
 from backlink_publisher.persistence.safe_write import atomic_write
 
+from ..helpers import _llm_settings_file, _load_llm_settings, _safe_flash_redirect
+
 bp = Blueprint("llm", __name__)
+
+
+# Plan 2026-05-21-006 Unit 3.1 — response-side caps for the test endpoint.
+# Cap upstream-response size at 64 KB streamed read: a malicious endpoint
+# could otherwise return a multi-GB body and exhaust memory.
+_LLM_TEST_MAX_BYTES = 64 * 1024
+# Loopback hosts that the SSRF gate would normally block. Operators
+# running Ollama/LM Studio on localhost opt-in via env to enable them.
+_LLM_ALLOW_LOOPBACK = os.environ.get(
+    "BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK", "0") == "1"
+
+
+def _guard_llm_endpoint(url: str) -> tuple[str | None, str | None]:
+    """Return (rejection_reason, detail) or (None, None) if URL is acceptable.
+
+    Layered gates:
+      1. Scheme must be http(s).
+      2. Host must be in the LLM allowlist (or operator opted out via
+         BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST=1).
+      3. SSRF gate (RFC1918, link-local, metadata IPs, etc.) unless the
+         loopback exception is opted in via
+         BACKLINK_PUBLISHER_LLM_ALLOW_LOOPBACK=1, in which case loopback
+         IPs and `localhost` are allowed.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "scheme_rejected", f"only http/https allowed, got {parsed.scheme!r}"
+
+    if not is_allowlisted(url):
+        return (
+            "host_not_allowlisted",
+            f"host {parsed.hostname!r} is not in the LLM allowlist; "
+            f"set BACKLINK_PUBLISHER_LLM_ALLOW_ANY_HOST=1 to opt out",
+        )
+
+    # SSRF check — but skip loopback rejection when operator opted in.
+    ssrf_reason = _check_url_for_ssrf(url)
+    if ssrf_reason is not None:
+        if _LLM_ALLOW_LOOPBACK and (
+                ssrf_reason.startswith("blocked_ip:127.")
+                or ssrf_reason.startswith("blocked_ip:::1")):
+            return None, None
+        return "url_rejected", ssrf_reason
+
+    return None, None
+
+
+def _safe_get_json(url: str, headers: dict, timeout: int = 10):
+    """Bounded GET with content-type + size guards. Returns parsed JSON or
+    raises ValueError. Used by the LLM test-connection route only."""
+    resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
+    ctype = resp.headers.get("Content-Type", "")
+    if "json" not in ctype.lower():
+        raise ValueError(f"bad_content_type: {ctype!r}")
+    body = b""
+    for chunk in resp.iter_content(chunk_size=8192):
+        body += chunk
+        if len(body) > _LLM_TEST_MAX_BYTES:
+            raise ValueError(
+                f"response_too_large: exceeded {_LLM_TEST_MAX_BYTES} bytes")
+    return resp.status_code, json.loads(body)
+
+
+def _safe_post_json(url: str, headers: dict, payload: dict, timeout: int = 10):
+    """Bounded POST counterpart of _safe_get_json."""
+    resp = requests.post(url, headers=headers, json=payload,
+                         timeout=timeout, stream=True)
+    ctype = resp.headers.get("Content-Type", "")
+    if "json" not in ctype.lower():
+        raise ValueError(f"bad_content_type: {ctype!r}")
+    body = b""
+    for chunk in resp.iter_content(chunk_size=8192):
+        body += chunk
+        if len(body) > _LLM_TEST_MAX_BYTES:
+            raise ValueError(
+                f"response_too_large: exceeded {_LLM_TEST_MAX_BYTES} bytes")
+    return resp.status_code, json.loads(body)
 
 
 _LLM_DEFAULTS = {
@@ -37,9 +120,13 @@ def settings_save_llm_config():
     if request.form.get('action') == 'clear':
         try:
             _write_llm_settings(dict(_LLM_DEFAULTS))
-            return redirect('/settings?flash_type=success&flash_msg=LLM 配置已清除#sect-ai')
+            return _safe_flash_redirect(
+                '/settings', flash_type='success',
+                msg='LLM 配置已清除', fragment='sect-ai')
         except Exception as e:
-            return redirect(f'/settings?flash_type=danger&flash_msg=清除失败: {e}#sect-ai')
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg=f'清除失败: {e}', fragment='sect-ai')
 
     existing = _load_llm_settings()
     try:
@@ -63,9 +150,14 @@ def settings_save_llm_config():
     })
     try:
         _write_llm_settings(existing)
-        return redirect('/settings?flash_type=success&flash_msg=LLM 设定已保存#sect-ai')
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='LLM 设定已保存', fragment='sect-ai')
     except Exception as e:
-        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}#sect-ai')
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'保存失败: {e}', fragment='sect-ai')
+
 
 @bp.route('/settings/test-llm-connection', methods=['POST'])
 def settings_test_llm():
@@ -84,34 +176,66 @@ def settings_test_llm():
         if not endpoint or not api_key:
             return jsonify({'status': 'error', 'message': '请填写 Endpoint 和 API Key'}), 200
 
+        # Plan 2026-05-21-006 Unit 3.1 — guard endpoint URL BEFORE sending the
+        # api_key. SSRF gate + host allowlist + scheme check.
+        reason, detail = _guard_llm_endpoint(f"{endpoint}/models")
+        if reason is not None:
+            return jsonify({
+                'status': 'failed',
+                'reason': reason,
+                'message': f'endpoint URL rejected ({reason}): {detail}',
+            }), 400
+
         # Try to call v1/models
         test_url = f"{endpoint}/models"
         headers = {"Authorization": f"Bearer {api_key}"}
-        
+
         models_list = []
         try:
-            resp = requests.get(test_url, headers=headers, timeout=10)
-            if resp.status_code == 200:
-                try:
-                    m_data = resp.json()
-                    if isinstance(m_data, dict) and 'data' in m_data:
-                        models_list = [m['id'] for m in m_data['data'] if isinstance(m, dict) and 'id' in m]
-                except Exception:
-                    pass
-                return jsonify({'status': 'ok', 'message': '连接成功！', 'models': models_list}), 200
-            
-            # Fallback
-            test_url = f"{endpoint}/chat/completions"
-            data = {"model": model or "gpt-3.5-turbo", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 5}
-            resp = requests.post(test_url, headers=headers, json=data, timeout=10)
-            if resp.status_code == 200:
-                return jsonify({'status': 'ok', 'message': '连接成功！', 'models': []}), 200
-            
-            return jsonify({'status': 'error', 'message': f'连接失败: HTTP {resp.status_code}'}), 200
+            status, m_data = _safe_get_json(test_url, headers)
+            if status == 200:
+                if isinstance(m_data, dict) and 'data' in m_data:
+                    models_list = [m['id'] for m in m_data['data']
+                                   if isinstance(m, dict) and 'id' in m]
+                return jsonify({'status': 'ok', 'message': '连接成功！',
+                                'models': models_list}), 200
+
+            # Fallback to /chat/completions with the same guards.
+            fb_url = f"{endpoint}/chat/completions"
+            reason, detail = _guard_llm_endpoint(fb_url)
+            if reason is not None:
+                return jsonify({
+                    'status': 'failed',
+                    'reason': reason,
+                    'message': f'endpoint URL rejected ({reason}): {detail}',
+                }), 400
+            data = {
+                "model": model or "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 5,
+            }
+            status, _ = _safe_post_json(fb_url, headers, data)
+            if status == 200:
+                return jsonify({'status': 'ok', 'message': '连接成功！',
+                                'models': []}), 200
+
+            return jsonify({'status': 'error',
+                            'message': f'连接失败: HTTP {status}'}), 200
+        except ValueError as ve:
+            # Raised by _safe_get_json/_safe_post_json for size/content-type
+            # violations. Surface the structured reason but don't expose
+            # raw bytes.
+            return jsonify({
+                'status': 'failed',
+                'reason': 'response_invalid',
+                'message': f'响应不合规: {ve}',
+            }), 400
         except Exception as e:
-            return jsonify({'status': 'error', 'message': f'请求异常: {str(e)}'}), 200
+            return jsonify({'status': 'error',
+                            'message': f'请求异常: {str(e)}'}), 200
     except Exception as e:
-        return jsonify({'status': 'error', 'message': f'发生错误: {str(e)}'}), 200
+        return jsonify({'status': 'error',
+                        'message': f'发生错误: {str(e)}'}), 200
 
 @bp.route('/settings/test-llm-generation', methods=['POST'])
 def settings_preview_llm():

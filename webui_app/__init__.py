@@ -29,9 +29,33 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         'SECRET_KEY', 'backlink-publisher-secret-' + str(uuid.uuid4()),
     )
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=15)
-    app.config['SESSION_COOKIE_SECURE'] = True
+    # Plan 2026-05-21-006 Unit 3.5 — SESSION_COOKIE_SECURE was unconditional
+    # `True`, which contradicts the loopback-HTTP framing: under HTTP the
+    # Secure flag prevents the cookie from ever being sent back. Loopback
+    # operators got CSRF tokens that browsers stripped, then 403 on
+    # subsequent POSTs. Now env-driven: True when the operator deploys
+    # behind a TLS reverse proxy, False for the default loopback case.
+    app.config['SESSION_COOKIE_SECURE'] = (
+        os.environ.get('BACKLINK_PUBLISHER_SESSION_COOKIE_SECURE', '0') == '1'
+    )
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+    # Plan 2026-05-21-006 Unit 3.5 — make the unsupported off-loopback
+    # configuration obvious to the operator. The WebUI's threat model
+    # assumes localhost binding; `ALLOW_NETWORK=1` plus an ephemeral
+    # SECRET_KEY would silently downgrade session integrity.
+    if os.environ.get('BACKLINK_PUBLISHER_ALLOW_NETWORK') == '1':
+        import warnings
+        warnings.warn(
+            "BACKLINK_PUBLISHER_ALLOW_NETWORK=1 — WebUI is binding off-loopback "
+            "in unsupported configuration: ephemeral SECRET_KEY (set "
+            "BACKLINK_PUBLISHER_SECRET_KEY for persistence), and CSRF/SSRF "
+            "gates are belt-and-suspenders only. Use a TLS-terminating "
+            "reverse proxy and `SESSION_COOKIE_SECURE=1`.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     # Share the publish-path markdown→HTML renderer with Jinja so preview
     # visual matches the published article (Plan 2026-05-19-007 Unit 2).

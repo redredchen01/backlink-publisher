@@ -25,6 +25,8 @@ from backlink_publisher.config import (
     save_ghpages_token,
 )
 
+from ..helpers import _safe_flash_redirect
+
 bp = Blueprint("token_paste", __name__)
 
 
@@ -64,10 +66,10 @@ def save_channel_token():
                 f'{channel} token 文件不存在，无需清除{anchor}'
             )
         except OSError as e:
-            return redirect(
-                f'/settings?flash_type=danger&flash_msg='
-                f'清除 {channel} token 失败: {e}{anchor}'
-            )
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg=f'清除 {channel} token 失败: {e}',
+                fragment=f'channel-{channel}')
 
     # Save button — token can be empty (means "leave as-is").
     token = (request.form.get('token', '') or '').strip()
@@ -97,7 +99,7 @@ def save_channel_token():
             f'{channel} token 已绑定 ✓{anchor}'
         )
     except Exception as e:
-        return redirect(
-            f'/settings?flash_type=danger&flash_msg='
-            f'保存 {channel} token 失败: {e}{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'保存 {channel} token 失败: {e}',
+            fragment=f'channel-{channel}')

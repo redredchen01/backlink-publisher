@@ -684,6 +684,79 @@ def _check_localhost():
         abort(403)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Safe redirect helpers (Plan 2026-05-21-006 Unit 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Max length for any operator-visible flash message embedded in a redirect URL.
+# Long messages get truncated rather than rejected because the operator still
+# needs *some* hint of what went wrong. 200 chars is enough for one short
+# Chinese sentence plus a stack-trace summary.
+_FLASH_MSG_MAX_LEN = 200
+
+
+def _safe_flash_redirect(path: str, *, flash_type: str = "", msg: str = "",
+                         fragment: str = ""):
+    """Return a Flask redirect Response with a sanitized ``flash_msg`` query.
+
+    Plan 2026-05-21-006 Unit 3.4 / F26: 11+ routes interpolated raw
+    exception text into ``redirect(f"/x?flash_msg={e}")``. Werkzeug
+    sanitises the Location header, but bare exception text can carry
+    CRLF, ANSI escapes, or quote characters that confuse log forwarders
+    and naive proxy middlewares. This helper centralises the sanitisation
+    so any flash path gets the same treatment.
+
+    Sanitisation:
+      * Strip CR/LF (header-injection defence)
+      * Replace tabs with spaces
+      * Cap to ``_FLASH_MSG_MAX_LEN`` characters
+      * URL-quote so query semantics survive
+      * Strip leading/trailing whitespace
+
+    The Jinja autoescape on the receiving end (settings.html etc.) already
+    protects against XSS in the rendered message; this helper guards the
+    transport layer (the URL) only.
+    """
+    from urllib.parse import quote
+    from flask import redirect as _flask_redirect
+
+    safe_msg = msg.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ')
+    safe_msg = safe_msg.strip()[:_FLASH_MSG_MAX_LEN]
+    parts = []
+    if flash_type:
+        # flash_type is a short controlled vocab (success/danger/warning/info);
+        # quote defensively but it should already be safe.
+        parts.append(f"flash_type={quote(flash_type, safe='')}")
+    if safe_msg:
+        parts.append(f"flash_msg={quote(safe_msg, safe='')}")
+    qs = ('?' + '&'.join(parts)) if parts else ''
+    frag = ('#' + fragment) if fragment else ''
+    return _flask_redirect(path + qs + frag)
+
+
+def _safe_referrer_redirect(default: str = '/'):
+    """Same-origin guard for ``redirect(request.referrer or '/')``.
+
+    Plan 2026-05-21-006 Unit 3.3 / F8: ``request.referrer`` is attacker-
+    controllable (browser sends whatever the previous page was), so naive
+    use is an open-redirect vector when combined with CSRF bypass. This
+    helper checks that the referrer's scheme + host match ``request.host_url``,
+    falling back to ``default`` otherwise.
+    """
+    from flask import redirect as _flask_redirect
+    referrer = request.referrer or ''
+    if not referrer:
+        return _flask_redirect(default)
+    try:
+        ref = urlparse(referrer)
+        host = urlparse(request.host_url)
+    except Exception:
+        return _flask_redirect(default)
+    if (ref.scheme, ref.netloc) != (host.scheme, host.netloc):
+        return _flask_redirect(default)
+    return _flask_redirect(referrer)
+
+
 def _validate_webui_run_id(run_id):
     if not run_id or not _RUN_ID_RE.match(run_id):
         abort(400)
