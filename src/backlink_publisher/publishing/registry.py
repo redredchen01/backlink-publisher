@@ -45,7 +45,7 @@ is ``publish`` (``verify_adapter_setup`` stays a module function).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, TYPE_CHECKING
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import (
@@ -54,7 +54,17 @@ from backlink_publisher._util.errors import (
     ExternalServiceError,
     RegistryError,
 )
-from .adapters.base import AdapterResult
+
+if TYPE_CHECKING:
+    # Importing AdapterResult at module top triggers loading of
+    # .adapters/__init__.py, which imports back into this module
+    # (dispatch/register/registered_platforms). When THIS module is the
+    # first one loaded in the package, the cycle hits a partially
+    # initialized state and ImportError fires. Type annotations are
+    # PEP 563 lazy via __future__ import above; the only runtime use is
+    # the AdapterResult(...) constructor inside dispatch() — that import
+    # is local to the function body, which by call time is safe.
+    from .adapters.base import AdapterResult
 
 
 class Publisher(ABC):
@@ -261,6 +271,8 @@ def dispatch(
     payload) and defaults to ``None`` which suppresses banner work
     entirely (back-compat for callers that don't set up banners).
     """
+    from .adapters.base import AdapterResult  # local: breaks module-level circular
+
     plat = payload.get("platform", "")
 
     if dry_run:
