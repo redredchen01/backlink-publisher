@@ -42,14 +42,29 @@ from .writeas import WriteAsAPIAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
-# more ``register(...)`` call — no dispatcher changes.
-register("blogger", BloggerAPIAdapter)
-register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
-register("telegraph", TelegraphCdpAdapter, TelegraphAPIAdapter)
-register("velog", VelogGraphQLAdapter)
-register("ghpages", GitHubPagesAPIAdapter)
-register("hashnode", HashnodeAPIAdapter)
-register("writeas", WriteAsCdpAdapter, WriteAsAPIAdapter)
+# more ``register(...)`` call — no dispatcher changes. Each registration
+# declares ``dofollow=True|False|"uncertain"`` (R1 / Plan 2026-05-20-009);
+# ``False`` and ``"uncertain"`` additionally require ``rationale=`` of
+# ≥80 stripped chars (R3, mirrors ``monolith_budget.toml`` discipline).
+#
+# CDP adapters (``TelegraphCdpAdapter`` / ``WriteAsCdpAdapter``) are
+# imported from ``instant_web.py`` so the module is callable from
+# regression tests on this branch, but they are NOT added to the
+# dispatch chain yet — that wiring ships with Plan 001
+# (PR #141 chrome-cdp-multi-channel-publish) which is still open.
+register("blogger", BloggerAPIAdapter, dofollow=True)
+register(
+    "medium",
+    MediumAPIAdapter,
+    MediumBraveAdapter,
+    MediumBrowserAdapter,
+    dofollow=True,
+)
+register("telegraph", TelegraphAPIAdapter, dofollow=True)
+register("velog", VelogGraphQLAdapter, dofollow=True)
+register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
+register("hashnode", HashnodeAPIAdapter, dofollow=True)
+register("writeas", WriteAsAPIAdapter, dofollow=True)
 
 
 def publish(

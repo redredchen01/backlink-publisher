@@ -1,11 +1,11 @@
 """`bind-channel` CLI entry — Plan 2026-05-19-001 Unit 2.
 
-Drives a headed browser session for a single browser-binding channel.
+Drives a headed Playwright session for a single browser-binding channel.
 
 Usage:
-    bind-channel --channel velog --backend auto
-    bind-channel --channel medium --backend chrome
-    bind-channel --channel blogger --backend playwright
+    bind-channel --channel velog
+    bind-channel --channel medium
+    bind-channel --channel blogger
 
 Lifecycle (events emitted on stdout as JSONL):
 
@@ -36,7 +36,6 @@ status badge + Chinese error message.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from typing import Sequence
 
@@ -55,8 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bind-channel",
         description=(
-            "Drive a headed Playwright session or Real Chrome session to "
-            "bind a publisher channel. "
+            "Drive a headed Playwright session to bind a publisher channel. "
             "Opens the channel's login URL, waits for the operator to sign "
             "in, exports storage_state (mode 0600) into the config dir, and "
             "flips channel_status to 'bound'."
@@ -74,15 +72,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "Which channel to bind. One of: " + ", ".join(sorted(CHANNELS))
             + ". Validated against CHANNELS frozenset; unknown values "
               "are rejected before any browser is launched."
-        ),
-    )
-    parser.add_argument(
-        "--backend",
-        default=None,
-        help=(
-            "Browser backend to use. One of: "
-            + ", ".join(sorted(driver.BIND_BACKENDS))
-            + ". Defaults to BACKLINK_PUBLISHER_BIND_BACKEND or auto."
         ),
     )
     return parser
@@ -124,20 +113,13 @@ def main(argv: Sequence[str] | None = None, *, _browser_runner=None) -> None:
             return  # unreachable; handle_error SystemExits
 
     channel = args.channel
-    os.environ.setdefault("BACKLINK_PUBLISHER_BIND_CHANNEL", channel)
-    try:
-        backend = driver.resolve_backend(args.backend)
-    except UsageError as exc:
-        handle_error(exc)
-        return  # unreachable
 
     try:
-        driver._emit("channel.bind.start", channel=channel, backend=backend)
+        driver._emit("channel.bind.start", channel=channel)
         recipe = RECIPES[channel]
         result = driver.run_bind(
             channel=channel,
             recipe=recipe,
-            backend=backend,
             _browser_runner=_browser_runner,
         )
     except PipelineError as exc:
@@ -146,7 +128,6 @@ def main(argv: Sequence[str] | None = None, *, _browser_runner=None) -> None:
         driver._emit(
             "channel.bind.failed",
             channel=channel,
-            backend=backend,
             error_code=type(exc).__name__,
             message=str(exc),
         )
@@ -156,7 +137,6 @@ def main(argv: Sequence[str] | None = None, *, _browser_runner=None) -> None:
         driver._emit(
             "channel.bind.failed",
             channel=channel,
-            backend=backend,
             error_code="unexpected",
             message=str(exc),
         )
@@ -172,7 +152,6 @@ def main(argv: Sequence[str] | None = None, *, _browser_runner=None) -> None:
         driver._emit(
             "channel.bind.failed",
             channel=channel,
-            backend=backend,
             error_code=result.error_code or "unknown",
             **extras,
         )

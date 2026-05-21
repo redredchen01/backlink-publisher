@@ -22,10 +22,10 @@ from google.oauth2.credentials import Credentials
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher.content import fetch as content_fetch
 from backlink_publisher.config import (
+    _config_dir,
     _domain_label,
     load_blogger_token,
     load_config,
-    load_medium_token,
     merge_site_url_categories,
     save_config,
     upgrade_target_to_threeurl,
@@ -36,10 +36,15 @@ from webui_store import (
     drafts_store as _drafts_store,
     history_store as _history_store,
     profiles_store as _profiles_store,
+    queue_store as _queue_store,
     schedule_store as _schedule_store,
 )
 
-_LLM_SETTINGS_FILE = Path.home() / '.config' / 'backlink-publisher' / 'llm-settings.json'
+def _llm_settings_file() -> Path:
+    # Lazy so BACKLINK_PUBLISHER_CONFIG_DIR rebinds are honored per-call.
+    return _config_dir() / 'llm-settings.json'
+
+
 _FLASK_PORT = int(os.environ.get('PORT', 8888))
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -100,9 +105,10 @@ def _load_llm_settings() -> dict:
         'image_gen_api_key': '',
         'use_image_gen': False
     }
-    if _LLM_SETTINGS_FILE.exists():
+    path = _llm_settings_file()
+    if path.exists():
         try:
-            data = json.loads(_LLM_SETTINGS_FILE.read_text(encoding='utf-8'))
+            data = json.loads(path.read_text(encoding='utf-8'))
             defaults.update(data)
         except Exception:
             plan_logger.warning("failed to parse llm-settings.json, using defaults")
@@ -200,7 +206,6 @@ def _get_velog_status() -> dict:
         cfg = load_config()
         from backlink_publisher.publishing.adapters.velog_graphql import (
             _effective_cap,
-            _load_cookies,
             _read_count,
         )
         velog_cfg = cfg.velog
@@ -244,14 +249,24 @@ def _get_velog_status() -> dict:
                 'cap': cap,
             }
 
-        # parse and validate credentials using the same loader as publish.
+        # parse cookies
         try:
-            _load_cookies(cookies_path)
-        except Exception as exc:
+            raw = json.loads(cookies_path.read_text())
+            cookie_list = raw.get('cookies', [])
+            if not cookie_list:
+                return {
+                    'state': 'warn',
+                    'label': 'Cookie 文件为空',
+                    'guide': 'velog-login',
+                    'cookies_path': str(cookies_path),
+                    'count': 0,
+                    'cap': cap,
+                }
+        except Exception:
             return {
                 'state': 'warn',
-                'label': '凭证无效，需重新绑定',
-                'guide': str(exc),
+                'label': 'Cookie 文件解析失败',
+                'guide': 'velog-login',
                 'cookies_path': str(cookies_path),
                 'count': 0,
                 'cap': cap,
@@ -915,7 +930,7 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     Defensive against any load failure — broken token files surface as
     "unbound" rather than crashing the settings page render.
     """
-    from .binding_status import _DOFOLLOW_BY_CHANNEL
+    from backlink_publisher.publishing.registry import dofollow_status
     try:
         token_path_attr = f"{channel}_token_path"
         token_path = getattr(cfg, token_path_attr, None)
@@ -933,7 +948,7 @@ def _token_paste_status(cfg, channel: str, load_fn) -> dict:
     return {
         "bound": bound,
         "masked": masked,
-        "dofollow": _DOFOLLOW_BY_CHANNEL.get(channel),
+        "dofollow": dofollow_status(channel),
     }
 
 
@@ -943,8 +958,8 @@ def _settings_context(flash=None):
 
     from backlink_publisher.config import (
         load_ghpages_token,
+        load_hashnode_token,
         load_medium_token,
-        load_writeas_token,
     )
     from backlink_publisher.cli._bind.channels import CHANNELS
     from webui_store.channel_status import list_all as _channel_list_all
@@ -954,29 +969,16 @@ def _settings_context(flash=None):
     token_data = load_blogger_token(cfg.blogger_token_path)
     medium_token_data = load_medium_token()
 
-    # Phase 3 token-paste platforms (2026-05-20). Hashnode UI deliberately
-    # NOT wired here. Two independent blockers:
-    #   1. Hashnode GraphQL `publishPost` paywalled since 2026-05-13 (Pro
-    #      subscription required) — see docs/refs/hashnode-paywall-2026-05-13
-    #      and memory reference_hashnode_graphql_paywall.md. Free-tier
-    #      bindings would publish 0 posts and emit DependencyError.
-    #   2. Dofollow status not empirically verified —
-    #      webui_app/binding_status.py:_DOFOLLOW_BY_CHANNEL["hashnode"] is
-    #      None. Same pattern that caused PR #108 → #109 revert (devto /
-    #      mastodon / wpcom shipped while nofollow).
-    # Before adding hashnode_status / hashnode_config_summary here AND the
-    # collapse card in settings.html, both blockers must clear AND a fresh
-    # `_DOFOLLOW_BY_CHANNEL` grep must confirm `True`.
+    # Phase 3 token-paste platforms (2026-05-20).
     ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
-    writeas_status = _token_paste_status(cfg, "writeas", load_writeas_token)
+    hashnode_status = _token_paste_status(cfg, "hashnode", load_hashnode_token)
     ghpages_config_summary = [
         ("repo", cfg.ghpages.repo if cfg.ghpages else ""),
         ("branch", cfg.ghpages.branch if cfg.ghpages else "gh-pages"),
         ("path_template", cfg.ghpages.path_template if cfg.ghpages else "_posts/{date}-{slug}.md"),
     ]
-    writeas_config_summary = [
-        ("collection_alias", cfg.writeas.collection_alias if cfg.writeas else ""),
-        ("api_base", cfg.writeas.api_base if cfg.writeas else "https://write.as/api"),
+    hashnode_config_summary = [
+        ("publication_id", cfg.hashnode.publication_id if cfg.hashnode else ""),
     ]
 
     token = cfg.medium_integration_token or ""
@@ -1004,66 +1006,6 @@ def _settings_context(flash=None):
     except Exception:
         channel_statuses = {}
 
-    browser_binding_channels = sorted(CHANNELS)
-    # Per-channel required backend: Playwright-based recipes must not default to
-    # Chrome in the UI (Chrome backend is incompatible with Playwright page API).
-    # This dict is passed to templates so they can pre-select the correct backend.
-    from backlink_publisher.cli._bind.recipes import RECIPES as _BIND_RECIPES
-    channel_required_backends = {
-        ch: (getattr(recipe, "required_backend", None) or "auto")
-        for ch, recipe in _BIND_RECIPES.items()
-    }
-    # Manual-fallback login URLs surfaced to the binding partial so the
-    # operator can copy-paste the URL into their own browser if the bind
-    # subprocess fails to launch a headed window.
-    channel_login_urls = {
-        ch: (getattr(recipe, "login_url", "") or "")
-        for ch, recipe in _BIND_RECIPES.items()
-    }
-    dashboard_binding_methods = {
-        # telegraph: Chrome DevTools (chrome backend)
-        "telegraph": {
-            "kind": "chrome",
-            "label": "Chrome DevTools 綁定",
-            "backend": "chrome",
-        },
-        "medium": {
-            "kind": "chrome",
-            "label": "Chrome DevTools 綁定",
-            "backend": "chrome",
-        },
-        "velog": {
-            "kind": "chrome",
-            "label": "Chrome DevTools 綁定",
-            "backend": "chrome",
-        },
-    }
-    dashboard_binding_methods.update({
-        "blogger": {
-            "kind": "link",
-            "label": "前往 Google OAuth 授權",
-            "anchor": "channel-blogger",
-            "icon": "bi-google",
-        },
-        "ghpages": {
-            "kind": "link",
-            "label": "前往 Token 綁定",
-            "anchor": "channel-ghpages",
-            "icon": "bi-key",
-        },
-        "writeas": {
-            "kind": "link",
-            "label": "前往 Token 綁定",
-            "anchor": "channel-writeas",
-            "icon": "bi-key",
-        },
-        "hashnode": {
-            "kind": "disabled",
-            "label": "暫不啟用",
-            "reason": "API paywall / dofollow 未確認",
-        },
-    })
-
     # csrf_token consumed by Unit 5's bind_channel.js (via <meta name="csrf-token">)
     try:
         csrf_token = _ensure_csrf_token()
@@ -1074,53 +1016,26 @@ def _settings_context(flash=None):
 
     try:
         from backlink_publisher.publishing.registry import registered_platforms
-        from .binding_status import get_channel_status
+        from .binding_status import get_channel_status, HIDDEN_FROM_UI
         dashboard_channels = [
             (name, get_channel_status(name, cfg))
             for name in registered_platforms()
+            if name not in HIDDEN_FROM_UI
         ]
     except Exception:
         dashboard_channels = []
-
-    dashboard_channel_map = dict(dashboard_channels)
-    dashboard_channel_groups = []
-    for group in (
-        {
-            "id": "api-credentials",
-            "title": "API / OAuth / Token 憑證",
-            "description": "可透過官方 API、OAuth 或貼上 access token 完成綁定。",
-            "channels": ("blogger", "ghpages", "writeas"),
-        },
-        {
-            "id": "chrome-devtools",
-            "title": "Chrome DevTools 授權",
-            "description": "需要開啟真實 Chrome 完成登入，WebUI 會透過 DevTools 保存可發布的登入態。",
-            "channels": ("medium", "telegraph", "velog"),
-        },
-        {
-            "id": "paused",
-            "title": "暫不啟用 / 待確認",
-            "description": "暫不提供 WebUI 綁定，等 API 成本或 dofollow 價值確認後再開。",
-            "channels": ("hashnode",),
-        },
-    ):
-        group_channels = [
-            (name, dashboard_channel_map[name])
-            for name in group["channels"]
-            if name in dashboard_channel_map
-        ]
-        if group_channels:
-            dashboard_channel_groups.append({**group, "channels": group_channels})
 
     return dict(
         flash=flash,
         csrf_token=csrf_token,
         dashboard_channels=dashboard_channels,
-        dashboard_channel_groups=dashboard_channel_groups,
         medium_browser_status=_get_medium_browser_status(cfg, session=_flask_session),
         blogger_token=bool(token_data),
         blogger_client_id=cfg.blogger_oauth.client_id if cfg.blogger_oauth else "",
-        blogger_client_secret=cfg.blogger_oauth.client_secret if cfg.blogger_oauth else "",
+        # Boolean only — raw secret stays out of the template render context
+        # so a future regression like value="{{ blogger_client_secret }}" can't
+        # accidentally leak it (P3 defence-in-depth).
+        blogger_client_secret_set=bool(cfg.blogger_oauth and cfg.blogger_oauth.client_secret),
         blog_ids=cfg.blogger_blog_ids,
         medium_token_set=bool(token),
         medium_token_masked=masked if token else "",
@@ -1141,18 +1056,15 @@ def _settings_context(flash=None):
         image_gen_status=_image_gen_status(cfg),
         all_targets=all_targets,
         target_anchor_keywords=cfg.target_anchor_keywords,
-        binding_channels=browser_binding_channels,
-        dashboard_binding_methods=dashboard_binding_methods,
+        binding_channels=sorted(CHANNELS),
         channel_statuses=channel_statuses,
-        channel_required_backends=channel_required_backends,
-        channel_login_urls=channel_login_urls,
         bind_error_messages=BIND_ERROR_MESSAGES,
         velog_status=velog_status,
         velog_cookies_path=velog_status.get('cookies_path', ''),
         ghpages_status=ghpages_status,
-        writeas_status=writeas_status,
         ghpages_config_summary=ghpages_config_summary,
-        writeas_config_summary=writeas_config_summary,
+        hashnode_status=hashnode_status,
+        hashnode_config_summary=hashnode_config_summary,
     )
 
 
@@ -1248,7 +1160,7 @@ def _render(template_name: str, **kwargs):
     ``render_template`` finds it under ``webui_app/templates/``.
 
     Auto-injected context (when not provided by caller):
-      - history, blogger_token_status, profiles, draft_queue,
+      - history, blogger_token_status, profiles, draft_queue, tasks,
         now_iso, suggested_next, incomplete_run
     """
     if 'history' not in kwargs:
@@ -1259,6 +1171,11 @@ def _render(template_name: str, **kwargs):
         kwargs['profiles'] = _profiles_store.load()
     if 'draft_queue' not in kwargs:
         kwargs['draft_queue'] = _drafts_store.load()
+    if 'tasks' not in kwargs:
+        try:
+            kwargs['tasks'] = _queue_store.load()
+        except Exception:
+            kwargs['tasks'] = []
     if 'now_iso' not in kwargs:
         now = datetime.now()
         kwargs['now_iso'] = now.strftime('%Y-%m-%dT%H:%M')
