@@ -1,9 +1,69 @@
 """LLM settings route handlers."""
-from flask import Blueprint, jsonify, request
-from ..helpers import _load_llm_settings
+import json
+import os
+from flask import Blueprint, jsonify, redirect, request
+from ..helpers import _llm_settings_file, _load_llm_settings
 import requests
 
 bp = Blueprint("llm", __name__)
+
+
+_LLM_DEFAULTS = {
+    'api_key': '',
+    'endpoint': '',
+    'model': '',
+    'temperature': 0.7,
+    'system_prompt': '',
+    'use_article_gen': False,
+    'article_system_prompt': '',
+    'image_gen_api_key': '',
+    'use_image_gen': False,
+}
+
+
+def _write_llm_settings(payload: dict) -> None:
+    path = _llm_settings_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    os.replace(tmp, path)
+
+
+@bp.route('/settings/save-llm-config', methods=['POST'])
+def settings_save_llm_config():
+    # P2: clearLlmSettings() flips a hidden action=clear marker to reset the whole file.
+    if request.form.get('action') == 'clear':
+        try:
+            _write_llm_settings(dict(_LLM_DEFAULTS))
+            return redirect('/settings?flash_type=success&flash_msg=LLM 配置已清除#sect-ai')
+        except Exception as e:
+            return redirect(f'/settings?flash_type=danger&flash_msg=清除失败: {e}#sect-ai')
+
+    existing = _load_llm_settings()
+    try:
+        temperature = float(request.form.get('temperature', existing.get('temperature', 0.7)))
+    except ValueError:
+        temperature = existing.get('temperature', 0.7)
+
+    # P3: blank secret inputs preserve the stored value so we don't wipe it on partial edits.
+    new_api_key = request.form.get('api_key', '').strip()
+    new_image_key = request.form.get('image_gen_api_key', '').strip()
+
+    existing.update({
+        'endpoint': request.form.get('endpoint', '').strip().rstrip('/'),
+        'api_key': new_api_key or existing.get('api_key', ''),
+        'model': request.form.get('model', '').strip(),
+        'temperature': temperature,
+        'system_prompt': request.form.get('system_prompt', ''),
+        'use_article_gen': 'use_article_gen' in request.form,
+        'image_gen_api_key': new_image_key or existing.get('image_gen_api_key', ''),
+        'use_image_gen': 'use_image_gen' in request.form,
+    })
+    try:
+        _write_llm_settings(existing)
+        return redirect('/settings?flash_type=success&flash_msg=LLM 设定已保存#sect-ai')
+    except Exception as e:
+        return redirect(f'/settings?flash_type=danger&flash_msg=保存失败: {e}#sect-ai')
 
 @bp.route('/settings/test-llm-connection', methods=['POST'])
 def settings_test_llm():
@@ -11,6 +71,13 @@ def settings_test_llm():
         endpoint = request.form.get('endpoint', '').strip().rstrip('/')
         api_key = request.form.get('api_key', '').strip()
         model = request.form.get('model', '').strip()
+
+        # P3 fallback: form sends blanks when secrets aren't re-typed; read stored values.
+        if not api_key or not endpoint:
+            stored = _load_llm_settings()
+            api_key = api_key or stored.get('api_key', '')
+            endpoint = endpoint or stored.get('endpoint', '').rstrip('/')
+            model = model or stored.get('model', '')
 
         if not endpoint or not api_key:
             return jsonify({'status': 'error', 'message': '请填写 Endpoint 和 API Key'}), 200

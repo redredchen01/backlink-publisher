@@ -1069,6 +1069,20 @@ class TestLlmRoutes:
         assert resp.status_code == 200
         assert resp.is_json
 
+    def test_save_llm_config_redirects(self, client):
+        resp = client.post(
+            "/settings/save-llm-config",
+            data={"endpoint": "https://api.example.com/v1", "api_key": "sk-test",
+                  "model": "gpt-4o", "temperature": "0.7"},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
+    def test_save_llm_config_clear_action_redirects(self, client):
+        resp = client.post("/settings/save-llm-config", data={"action": "clear"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].startswith("/settings?")
+
     def test_test_llm_generation_returns_json(self, client):
         resp = client.post("/settings/test-llm-generation", data={})
         assert resp.status_code == 200

@@ -22,6 +22,7 @@ from google.oauth2.credentials import Credentials
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher.content import fetch as content_fetch
 from backlink_publisher.config import (
+    _config_dir,
     _domain_label,
     load_blogger_token,
     load_config,
@@ -40,7 +41,11 @@ from webui_store import (
     schedule_store as _schedule_store,
 )
 
-_LLM_SETTINGS_FILE = Path.home() / '.config' / 'backlink-publisher' / 'llm-settings.json'
+def _llm_settings_file() -> Path:
+    # Lazy so BACKLINK_PUBLISHER_CONFIG_DIR rebinds are honored per-call.
+    return _config_dir() / 'llm-settings.json'
+
+
 _FLASK_PORT = int(os.environ.get('PORT', 8888))
 _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -101,9 +106,10 @@ def _load_llm_settings() -> dict:
         'image_gen_api_key': '',
         'use_image_gen': False
     }
-    if _LLM_SETTINGS_FILE.exists():
+    path = _llm_settings_file()
+    if path.exists():
         try:
-            data = json.loads(_LLM_SETTINGS_FILE.read_text(encoding='utf-8'))
+            data = json.loads(path.read_text(encoding='utf-8'))
             defaults.update(data)
         except Exception:
             plan_logger.warning("failed to parse llm-settings.json, using defaults")

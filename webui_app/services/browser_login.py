@@ -32,11 +32,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from backlink_publisher.config.loader import _cache_dir
+
 
 def _log_dir() -> Path:
-    raw = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
-    base = Path(raw) if raw else Path.home() / ".cache" / "backlink-publisher"
-    out = base / "browser-login-logs"
+    out = _cache_dir() / "browser-login-logs"
     out.mkdir(parents=True, exist_ok=True)
     return out
 

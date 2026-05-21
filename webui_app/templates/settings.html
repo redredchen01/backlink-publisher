@@ -306,6 +306,7 @@
                     配置自定义 LLM 端口以获得更优质的文章生成效果。支持所有 OpenAI 兼容格式的 API。
                 </p>
                 <form method="POST" action="/settings/save-llm-config">
+                    <input type="hidden" name="action" id="llmFormAction" value="">
                     <div class="row g-3">
                         <div class="col-12">
                             <label class="form-label">LLM Endpoint (Base URL)</label>
@@ -319,8 +320,8 @@
                             <div class="input-group">
                                 <input type="password" class="form-control" name="api_key"
                                        id="llmApiKeyInput"
-                                       placeholder="sk-..."
-                                       value="{{ llm_settings.api_key }}">
+                                       placeholder="{% if llm_settings.api_key %}已设置 (留空保留现值){% else %}sk-...{% endif %}"
+                                       value="">
                                 <button type="button" class="btn btn-outline-secondary"
                                         onclick="toggleLlmSecret()">
                                     <i class="bi bi-eye" id="llmSecretEye"></i>
@@ -373,8 +374,8 @@
                             <label class="form-label">AI Cover Image Generation (FRW API)</label>
                             <div class="input-group mb-2">
                                 <input type="password" class="form-control" name="image_gen_api_key"
-                                       placeholder="输入 FRW API Key"
-                                       value="{{ llm_settings.image_gen_api_key }}">
+                                       placeholder="{% if llm_settings.image_gen_api_key %}已设置 (留空保留现值){% else %}输入 FRW API Key{% endif %}"
+                                       value="">
                             </div>
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" name="use_image_gen" id="useImageGen" {% if llm_settings.use_image_gen %}checked{% endif %}>
@@ -600,14 +601,11 @@
         }
     }
 
-    function clearLlmSettings() {
+    function clearLlmSettings(ev) {
         if (confirm('确定要清除所有 LLM 配置吗？这将还原为系统默认生成模式。')) {
-            document.getElementById('llmEndpointInput').value = '';
-            document.getElementById('llmApiKeyInput').value = '';
-            document.getElementById('llmModelInput').value = '';
-            document.getElementById('llmTestResult').innerHTML = '';
-            document.getElementById('modelSelectBtn').classList.add('d-none');
-            event.target.closest('form').submit();
+            // hidden marker → server-side reset to defaults (all fields, not just visible inputs)
+            document.getElementById('llmFormAction').value = 'clear';
+            document.querySelector('form[action="/settings/save-llm-config"]').submit();
         }
     }
 
