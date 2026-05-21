@@ -40,6 +40,14 @@ from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 from .writeas import WriteAsAPIAdapter
 
+# Import the Unit 4a velog browser recipe module so it can populate
+# RECIPES["velog"] before the registration line below references it.
+# Plan 2026-05-21-001 Unit 4a — registers as auth-missing fallback after
+# VelogGraphQLAdapter (DependencyError → fall through; ExternalServiceError
+# from API path propagates without fall-through, per registry contract).
+from ..browser_publish import BrowserPublishDispatcher
+from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
+
 
 # Register the fallback chain per platform. Adding a new platform = one
 # more ``register(...)`` call — no dispatcher changes. Each registration
@@ -61,7 +69,12 @@ register(
     dofollow=True,
 )
 register("telegraph", TelegraphAPIAdapter, dofollow=True)
-register("velog", VelogGraphQLAdapter, dofollow=True)
+register(
+    "velog",
+    VelogGraphQLAdapter,
+    BrowserPublishDispatcher.for_channel("velog"),
+    dofollow=True,
+)
 register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
 register("hashnode", HashnodeAPIAdapter, dofollow=True)
 register("writeas", WriteAsAPIAdapter, dofollow=True)
