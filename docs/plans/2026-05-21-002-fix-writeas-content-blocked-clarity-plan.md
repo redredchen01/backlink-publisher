@@ -3,6 +3,7 @@ title: "fix: clarify Write.as contentisblocked policy rejection"
 type: fix
 status: completed
 date: 2026-05-21
+claims: {}
 ---
 
 > **Ship status (2026-05-21)**: HTTP-adapter path (R2 + R4 partial) lands in
