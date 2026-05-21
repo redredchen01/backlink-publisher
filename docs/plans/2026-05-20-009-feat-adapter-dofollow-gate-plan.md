@@ -1,8 +1,9 @@
 ---
-title: feat: Adapter Dofollow Gate (Capability Manifest v1)
+title: "feat: Adapter Dofollow Gate (Capability Manifest v1)"
 type: feat
 status: completed
 date: 2026-05-20
+claims: {}
 deepened: 2026-05-20
 origin: docs/brainstorms/2026-05-20-adapter-dofollow-gate-requirements.md
 pr: 126
