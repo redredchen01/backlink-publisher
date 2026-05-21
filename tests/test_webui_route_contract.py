@@ -215,6 +215,39 @@ class TestGetRoutes:
         assert "webui_mode_default" in contents
         assert "__batchTabHint" in contents
 
+    def test_mode_toggle_js_u1_behaviors(self):
+        """Plan 013 U1 — mode_toggle.js contains all 4 new polish behaviors."""
+        from pathlib import Path
+        js_path = (
+            Path(__file__).resolve().parents[1]
+            / "webui_app" / "static" / "js" / "mode_toggle.js"
+        )
+        contents = js_path.read_text(encoding="utf-8")
+
+        # Behavior 1: URL stash key present
+        assert "webui_url_stash" in contents, "URL stash key missing"
+
+        # Behavior 2: Mid-pipeline confirm uses _plansData
+        assert "_plansData" in contents, "mid-pipeline confirm missing"
+        assert "confirm(" in contents, "confirm dialog missing"
+
+        # Behavior 3: ?tab=batch deep-link via URLSearchParams
+        assert "URLSearchParams" in contents, "URLSearchParams deep-link missing"
+        assert "tab" in contents, "tab param check missing"
+
+        # Behavior 4: body class toggle for CSS scoping
+        assert "mode-single" in contents, "mode-single body class missing"
+        assert "mode-batch" in contents, "mode-batch body class missing"
+        assert "applyBodyModeClass" in contents, "applyBodyModeClass helper missing"
+
+    def test_mode_toggle_tab_deep_link_route_accessible(self, client):
+        """Plan 013 U1 — GET /?tab=batch returns 200 (server-side hint injected)."""
+        resp = client.get("/?tab=batch")
+        assert resp.status_code == 200
+        body = resp.data.decode("utf-8", errors="ignore")
+        # The page still renders; JS handles the deep-link client-side
+        assert "batchPanel" in body
+
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
         """Edge case: first-time startup, none of the JSON state files exist
         yet. The autouse fixture points stores at a fresh tmp_path so they're
