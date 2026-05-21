@@ -113,7 +113,14 @@ def load_checkpoint(run_id: str) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-_OPTIONAL_ITEM_FIELDS = ("adapter", "published_url", "error", "error_class", "completed_at")
+_OPTIONAL_ITEM_FIELDS = (
+    "adapter",
+    "published_url",
+    "article_urls",
+    "error",
+    "error_class",
+    "completed_at",
+)
 
 
 def update_item(run_id: str, item_id: str, status: str, **fields: Any) -> None:

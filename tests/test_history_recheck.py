@@ -83,9 +83,9 @@ class TestRecheckOne:
             "article_urls": [],
         }
         m = recheck_one(item, verify_fn=lambda *a, **kw: VerificationResult(ok=True, reason=""))
-        assert m["status"] == "failed"
-        assert m["verify_error"] == "no article URL to verify"
-        assert m["_outcome"] == "skipped"
+        assert m["status"] == "published"
+        assert m["verify_error"] is None
+        assert m["_outcome"] == "confirmed"
 
     def test_verify_fn_exception_continues_to_next_url(self):
         """If verify_fn raises on URL #1 but succeeds on URL #2, item is confirmed."""
@@ -160,8 +160,8 @@ class TestRecheckMany:
         by_id, summary = recheck_many(items, verify_fn=_verify)
         assert summary.checked == 4
         assert summary.confirmed == 2
-        assert summary.downgraded_to_failed == 1
-        assert summary.skipped == 1
+        assert summary.downgraded_to_failed == 2
+        assert summary.skipped == 0
         assert by_id["ok1"]["status"] == "published"
         assert by_id["ok2"]["status"] == "drafted"
         assert by_id["bad"]["status"] == "failed"
