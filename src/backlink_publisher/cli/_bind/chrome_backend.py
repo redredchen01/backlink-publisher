@@ -139,7 +139,7 @@ class RealChromeBrowserRunner:
 
     def _launch_or_connect(self, login_url: str) -> "_CdpClient":
         port = self.port if self.port is not None else _chrome_port()
-        base = f"http://127.0.0.1:{port}"
+        base = f"http://localhost:{port}"
 
         version = self._get_version(base, timeout_s=0.5)
         if version is not None:
@@ -173,6 +173,11 @@ class RealChromeBrowserRunner:
         args = [
             chrome_bin,
             f"--remote-debugging-port={port}",
+            # SPIKE PATCH (plan-016 Unit 1): Chrome 111+ rejects HTTP /json/*
+            # requests without this; symptom is chrome_cdp_unavailable.
+            # Per feedback_chrome_devtools_cdp_traps memory — same fix landed
+            # on dev branch fc41561 but not yet on origin/main.
+            "--remote-allow-origins=*",
             f"--user-data-dir={profile}",
             "--no-first-run",
             "--no-default-browser-check",
