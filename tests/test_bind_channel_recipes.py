@@ -340,30 +340,44 @@ class TestBloggerHostFilter:
 class TestVelogBoundPattern:
     """Velog bound-URL pattern semantics.
 
-    Regression: prior version landed on ``https://velog.io/`` and the
-    pattern only excluded ``/auth*``, so the very URL Playwright navigated
-    to satisfied the predicate instantly — ``wait_for_url`` returned with
-    zero cookies and the operator never saw a "logged in" event.
+    Design note (2026-05-21 update): Velog is a SPA that keeps the URL at
+    ``/setting`` even after login. The old URL-escape approach (pattern ≠
+    login URL) no longer works. The new predicate uses content-based detection:
+
+      1. ``wait_for_url(_BOUND_URL_PATTERN)`` — confirms we're on ``/setting``
+         (trivially satisfied since we navigate there; provides a stable anchor
+         for the subsequent content check).
+      2. ``wait_for_function(...)`` — waits for the Korean login prompt string
+         "로그인 후 이용해주세요" to disappear from the page body.
+
+    Pattern semantics changed: the pattern NOW matches ``/setting`` (the page
+    we stay on). The "not logged in" signal is the presence of the login prompt
+    text, NOT a different URL. Tests updated accordingly.
     """
 
     def setup_method(self):
         from backlink_publisher.cli._bind.recipes.velog import (
             _BOUND_URL_PATTERN,
             _LOGIN_URL,
+            _LOGIN_PROMPT_TEXT,
         )
         self.pat = _BOUND_URL_PATTERN
         self.login_url = _LOGIN_URL
+        self.prompt = _LOGIN_PROMPT_TEXT
 
-    def test_login_url_does_not_match_pattern(self):
-        # The URL the driver navigates to must NOT match the predicate, or
-        # the wait_for_url call returns instantly.
-        assert self.pat.match(self.login_url) is None
+    def test_login_url_matches_pattern(self):
+        # New behavior: pattern MUST match /setting so wait_for_url returns
+        # immediately, allowing the content-based check to run.
+        assert self.pat.match(self.login_url) is not None
+
+    def test_matches_setting_with_query(self):
+        assert self.pat.match("https://velog.io/setting?next=/") is not None
+
+    def test_matches_setting_with_hash(self):
+        assert self.pat.match("https://velog.io/setting#profile") is not None
 
     def test_does_not_match_login_route(self):
         assert self.pat.match("https://velog.io/login") is None
-
-    def test_does_not_match_login_with_query(self):
-        assert self.pat.match("https://velog.io/login?next=/") is None
 
     def test_does_not_match_signup_route(self):
         assert self.pat.match("https://velog.io/signup") is None
@@ -371,17 +385,19 @@ class TestVelogBoundPattern:
     def test_does_not_match_auth_callback(self):
         assert self.pat.match("https://velog.io/auth/callback?code=x") is None
 
-    def test_matches_home_feed_after_login(self):
-        # /  is the most common post-login landing — must resolve the predicate.
-        assert self.pat.match("https://velog.io/") is not None
+    def test_does_not_match_home_feed(self):
+        # Home feed is no longer the bound signal — content-based detection
+        # handles login confirmation while staying on /setting.
+        assert self.pat.match("https://velog.io/") is None
 
-    def test_matches_user_profile_after_login(self):
-        assert self.pat.match("https://velog.io/@myuser") is not None
+    def test_does_not_match_user_profile(self):
+        assert self.pat.match("https://velog.io/@myuser") is None
 
-    def test_matches_post_url_after_login(self):
-        assert self.pat.match("https://velog.io/@myuser/some-post") is not None
+    def test_login_prompt_text_is_korean_string(self):
+        # Ensures the literal is the expected Korean login-gate text.
+        assert "로그인" in self.prompt
 
-    # ── Apex-only enforcement (Codex P1 on PR #86) ─────────────────────────
+    # ── Apex-only enforcement (still required) ─────────────────────────────
 
     def test_rejects_oauth_redirect_on_v3_subdomain(self):
         # Velog's OAuth dance transits v3.velog.io/api/auth/v3/social/
