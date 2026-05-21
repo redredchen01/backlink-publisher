@@ -23,9 +23,23 @@ If any modern stealth fork clears CF in 1 day of testing, the entire Tranche B c
 | # | Library | Install | API style | Maintenance signal |
 |---|---|---|---|---|
 | 1 | **patchright** | `pip install patchright` | Drop-in replacement: `from patchright.sync_api import sync_playwright` | rebrowser-playwright fork; actively maintained as of 2025 |
-| 2 | **playwright-extra + stealth** | `pip install playwright-stealth` | Plain Playwright + `stealth_sync(page)` from playwright_stealth | Most popular; standalone plugin |
-| 3 | **undetected-playwright-python** | `pip install undetected-playwright` | `from undetected_playwright import Tarnished` (may have shifted) | Possibly stale; verify last release date before testing |
+| 2 | **playwright-extra + stealth** | `pip install playwright-stealth` | Plain Playwright + `Stealth().apply_stealth_sync(page)` (new class API; old `stealth_sync` function removed in current release) | Most popular; standalone plugin |
+| 3 | **undetected-playwright-python** | `pip install undetected-playwright` | `from undetected_playwright import Tarnished` → `Tarnished.apply_stealth(ctx)` (0.3.0 verified 2026-05-21) | 0.3.0 last release; possibly stale |
 | 4 | (stretch) **camoufox** | See https://github.com/daijro/camoufox | Firefox-based, anti-fingerprint browser | Only if 1-3 all fail and there's time left |
+
+### Pre-validation 2026-05-21 (already done)
+
+A throwaway worktree `bp-stealth-spike-validate/` with `.venv-spike/` exists at the workspace root with all 3 libraries pip-installed and import-verified. Chromium binaries are in `~/Library/Caches/ms-playwright/` (shared across worktrees) so no extra download is needed.
+
+**Operator quick-start:**
+```bash
+cd "/Users/dex/YDEX/INPORTANT WORK/外链/0511_backlink  publisher/bp-stealth-spike-validate"
+source .venv-spike/bin/activate
+BACKLINK_PUBLISHER_SPIKE_OUT=/tmp/hn-stealth-patchright \
+  python3 ../bp-hashnode-bind/docs/spike-notes/2026-05-22-hashnode-stealth-runners/01_patchright_run.py
+```
+
+If patchright fails, swap `01_*` → `02_*` → `03_*` in the path above. No extra `pip install` needed; all 3 are already in the venv.
 
 ---
 
