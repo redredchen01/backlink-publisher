@@ -3,6 +3,7 @@ title: "feat: Canonical URL contract + Notion/Dev.to adapters + IndexNow push"
 type: feat
 status: active
 date: 2026-05-21
+claims: {}
 origin: docs/brainstorms/2026-05-21-canonical-contract-and-platform-expansion-requirements.md
 ---
 
