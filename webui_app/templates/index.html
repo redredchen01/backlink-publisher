@@ -1533,8 +1533,10 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="id" value="{{ item.id }}">
                                     <select name="status" class="form-select form-select-sm" style="width:100px;">
-                                        <option value="drafted" {% if s == 'drafted' %}selected{% endif %}>草稿</option>
-                                        <option value="published" {% if s in ('published','success') %}selected{% endif %}>已发布</option>
+                                        <option value="drafted" {% if s == 'drafted' %}selected{% endif %}
+                                            {% if not item.article_urls %}disabled title="无文章 URL 时不可设为草稿"{% endif %}>草稿</option>
+                                        <option value="published" {% if s in ('published','success') %}selected{% endif %}
+                                            {% if not item.article_urls %}disabled title="无文章 URL 时不可设为已发布"{% endif %}>已发布</option>
                                         <option value="failed" {% if s == 'failed' %}selected{% endif %}>失败</option>
                                     </select>
                                     <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button>

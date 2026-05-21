@@ -534,6 +534,43 @@ def _push_history_single_failure(
     )
 
 
+def _apply_history_cap(hist: list[dict]) -> list[dict]:
+    """Trim history to the configured maximum, newest-first order preserved."""
+    return hist[:_HISTORY_MAX_ITEMS]
+
+
+# Statuses that require at least one article URL — operator-visible "success"
+# states must be backed by a real URL or the publish-history invariant is broken.
+_REQUIRES_URL_STATUSES: frozenset[str] = frozenset({"published", "drafted"})
+
+
+def _push_history_aggregate(entry: dict) -> list[dict]:
+    """Append a single caller-built aggregate entry to publish history.
+
+    Unlike ``_push_history_per_row`` (which writes one entry per CLI row),
+    this helper is for callers that have already collapsed N rows into one
+    entry — e.g. ``checkpoint.py`` which writes a per-resume summary rather
+    than per-row details.
+
+    Invariant: if ``entry['status']`` is in ``_REQUIRES_URL_STATUSES`` then
+    ``entry['article_urls']`` must be non-empty.  Callers whose status-collapse
+    logic (e.g. exit-code 4 = failed_partial) produces statuses outside this
+    set are always accepted.
+
+    Raises:
+        ValueError: if the invariant is violated.
+    """
+    if (entry.get("status") in _REQUIRES_URL_STATUSES
+            and not entry.get("article_urls")):
+        raise ValueError(
+            f"_push_history_aggregate: entry status={entry.get('status')!r} "
+            f"requires non-empty article_urls; got {entry.get('article_urls')!r}"
+        )
+    return _history_store.update(
+        lambda hist: _apply_history_cap([entry, *hist])
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Three-URL persistence
 # ─────────────────────────────────────────────────────────────────────────────

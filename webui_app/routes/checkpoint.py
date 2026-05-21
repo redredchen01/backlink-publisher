@@ -9,12 +9,11 @@ from datetime import datetime
 from flask import Blueprint, redirect, request, session
 
 from backlink_publisher import checkpoint as _checkpoint_mod
-from webui_store import history_store as _history_store
-
 from ..helpers import (
     _REPO_ROOT,
     _check_localhost,
     _parse_publish_results,
+    _push_history_aggregate,
     _render,
     _rewrite_cli_cmd,
     _validate_webui_run_id,
@@ -52,7 +51,7 @@ def checkpoint_resume():
             return _render('index.html', config=config, history_active=True,
                 flash={"type": "warning",
                        "msg": "没有可恢复的发布任务（checkpoint 已无待处理项），未写入历史记录"})
-        history = _history_store.update(lambda hist: [{
+        history = _push_history_aggregate({
             "id": str(uuid.uuid4())[:8],
             "target_url": config.get("target_url", "unknown"),
             "platform": platform,
@@ -60,14 +59,14 @@ def checkpoint_resume():
             "status": "published",
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "article_urls": article_urls,
-        }, *hist][:100])
+        })
         return _render('index.html',
             publish_results=publish_results, config=config,
             history=history, history_active=True,
             flash={"type": "success", "msg": f"恢复发布成功，共 {len(publish_results)} 篇"})
     elif result.returncode == 4:
         done = [r for r in publish_results if r.get("error") is None]
-        _history_store.update(lambda hist: [{
+        _push_history_aggregate({
             "id": str(uuid.uuid4())[:8],
             "target_url": config.get("target_url", "unknown"),
             "platform": platform,
@@ -77,7 +76,7 @@ def checkpoint_resume():
             "article_urls": [r.get("published_url") or r.get("draft_url", "")
                              for r in done],
             "stderr_summary": result.stderr[:500] if result.stderr else "",
-        }, *hist][:100])
+        })
         return _render('index.html',
             publish_results=publish_results, config=config,
             history_active=True,
