@@ -24,6 +24,8 @@
       <span class="badge-dofollow good" title="dofollow links — SEO 信號強">dofollow</span>
     {%- elif status.dofollow == False %}
       <span class="badge-dofollow weak" title="nofollow — SEO 零價值，僅 referral">nofollow</span>
+    {%- elif status.dofollow == "uncertain" %}
+      <span class="badge-dofollow unknown" title="待 empirical 驗證">dofollow?</span>
     {%- elif status.dofollow is none %}
       <span class="badge-dofollow unknown" title="待 empirical 驗證">dofollow?</span>
     {%- endif %}

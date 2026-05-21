@@ -42,10 +42,14 @@ is ``publish`` (``verify_adapter_setup`` stays a module function).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import (
+    DependencyError,
+    ExternalServiceError,
+    RegistryError,
+)
 from .adapters.base import AdapterResult
 
 
@@ -90,17 +94,126 @@ class Publisher(ABC):
 _REGISTRY: dict[str, list[type[Publisher]]] = {}
 
 
-def register(platform: str, *publishers: type[Publisher]) -> None:
+# Negative-knowledge registry: platforms empirically verified as nofollow
+# (or otherwise unsuitable as dofollow backlink sources) by prior PR
+# attempts. ``register("devto", ...)`` raises ``RegistryError`` at import
+# time — un-rejection path is to delete the entry from this map in the
+# same PR as the re-``register()`` call (see Plan 2026-05-20-009 R12).
+#
+# Each value is a free-form rationale string ≥80 chars stripped, mirroring
+# the ``monolith_budget.toml`` rationale convention. The value-shape stays
+# a plain ``dict[str, str]`` rather than a dataclass because only the
+# rationale string has a programmatic consumer (the failure message);
+# ``rejected_at`` is recoverable from ``git log`` and ``dofollow=False``
+# is implicit (this is a rejection map).
+_REJECTED_PLATFORMS: dict[str, str] = {
+    "devto": (
+        "Dev.to applies rel=\"nofollow ugc\" to outbound links since ~2022 "
+        "per platform policy; every external <a> is decorated server-side "
+        "regardless of account tier or post format — backlinks here carry "
+        "zero PageRank transfer. Reverted in PR #109 after PR #108 ship."
+    ),
+    "mastodon": (
+        "Mastodon hardcodes rel=\"nofollow noopener noreferrer\" on outbound "
+        "links across all instances; the attribute is federation-default and "
+        "cannot be disabled per-post or per-account. Outbound links provide "
+        "no SEO authority transfer. Reverted in PR #109."
+    ),
+    "wordpresscom": (
+        "WordPress.com free tier applies rel=\"nofollow\" to outbound links; "
+        "paid Business/Commerce tiers enable dofollow but require a paid "
+        "subscription not justified at solo-operator scale. Free-tier ship "
+        "would emit nofollow-only backlinks. Reverted in PR #109."
+    ),
+}
+
+
+_DofollowStatus = Literal[True, False, "uncertain"]
+
+
+# Parallel-dict storage for the dofollow capability (Plan 2026-05-20-009
+# U2). Kept alongside ``_REGISTRY`` rather than folded into its value
+# shape so the existing single-key conftest snapshot pattern survives
+# (``tests/conftest.py:206-221`` only saves/restores the ``"fake"`` key).
+# Future capability fields (banner_upload, oauth_dialect, daily_cap)
+# would justify migrating to a ``RegistryEntry`` dataclass — deferred
+# to capability field #2 per Plan 2026-05-20-009 §Scope Boundaries.
+_DOFOLLOW_BY_PLATFORM: dict[str, _DofollowStatus] = {}
+_RATIONALE_BY_PLATFORM: dict[str, str] = {}
+
+
+def register(
+    platform: str,
+    *publishers: type[Publisher],
+    dofollow: _DofollowStatus,
+    rationale: str | None = None,
+) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
     Order matters: the first registered class is tried first.
+
+    ``dofollow`` is a required keyword argument (Literal ``True`` /
+    ``False`` / ``"uncertain"``) declaring whether the platform produces
+    a dofollow backlink. Missing ``dofollow=`` raises ``TypeError`` at
+    import time — the structural gate that replaces the institutional
+    "grep _DOFOLLOW_BY_CHANNEL before shipping" rule (memory feedback
+    ``feedback_grep_dofollow_map_before_shipping_adapter``). ``rationale``
+    is required when ``dofollow`` is anything other than ``True`` (R3 /
+    Plan 2026-05-20-009).
+
+    Raises:
+        RegistryError: when ``platform`` is listed in
+            ``_REJECTED_PLATFORMS`` (un-rejection path: delete the
+            entry in the same PR as the new ``register()`` call), OR
+            when ``dofollow ∈ {False, "uncertain"}`` and the rationale
+            is missing / shorter than 80 chars stripped.
     """
+    if platform in _REJECTED_PLATFORMS:
+        prior = _REJECTED_PLATFORMS[platform]
+        raise RegistryError(
+            f"previously rejected: {platform!r}; prior rationale: {prior!r}. "
+            f"To retry, delete this entry from `_REJECTED_PLATFORMS` in the "
+            f"same PR as the new `register()` call."
+        )
+    if dofollow in (False, "uncertain"):
+        if rationale is None or len(rationale.strip()) < 80:
+            actual = 0 if rationale is None else len(rationale.strip())
+            raise RegistryError(
+                f"`register({platform!r}, ..., dofollow={dofollow!r})` "
+                f"requires `rationale=` with len(rationale.strip()) >= 80 "
+                f"(got {actual}). Length-only gate — content is reviewer "
+                f"concern; see `monolith_budget.toml` for the precedent."
+            )
     _REGISTRY[platform] = list(publishers)
+    _DOFOLLOW_BY_PLATFORM[platform] = dofollow
+    if rationale is not None:
+        _RATIONALE_BY_PLATFORM[platform] = rationale
+    else:
+        _RATIONALE_BY_PLATFORM.pop(platform, None)
 
 
 def registered_platforms() -> list[str]:
     """Return the list of platforms with at least one adapter registered."""
     return sorted(_REGISTRY)
+
+
+def dofollow_status(name: str) -> _DofollowStatus | None:
+    """Return the declared dofollow status for ``name``, or ``None`` if
+    the platform is not registered with explicit dofollow declaration.
+
+    Plan 2026-05-20-009 R5.
+    """
+    return _DOFOLLOW_BY_PLATFORM.get(name)
+
+
+def dofollow_rationale(name: str) -> str | None:
+    """Return the registration rationale string for ``name``, or ``None``
+    if no rationale was supplied (the common case for ``dofollow=True``
+    registrations; mandatory for ``False`` / ``"uncertain"`` per R3).
+
+    Plan 2026-05-20-009 R5.
+    """
+    return _RATIONALE_BY_PLATFORM.get(name)
 
 
 def dispatch(

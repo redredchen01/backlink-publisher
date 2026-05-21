@@ -51,6 +51,22 @@ class ExternalServiceError(PipelineError):
     exit_code = 4
 
 
+class RegistryError(PipelineError):
+    """Adapter registry violation — programmer bug, not user input.
+
+    Raised by ``publishing.registry.register()`` when a registration
+    violates the dofollow-gate contract: missing required ``dofollow=``
+    after the gate flip, rationale too short for non-True dofollow, or
+    re-attempting a name listed in ``_REJECTED_PLATFORMS`` without first
+    deleting that entry. Exit code 5 (Internal) because these are
+    code-author errors visible at import time, not runtime user errors.
+
+    Plan 2026-05-20-009 Unit 1.
+    """
+
+    exit_code = 5
+
+
 class AuthExpiredError(DependencyError):
     """Channel credentials expired — user must re-bind via webui or CLI.
 
