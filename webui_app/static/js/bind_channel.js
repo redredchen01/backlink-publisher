@@ -55,6 +55,21 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    function showRefreshNotice(channel) {
+        var host = document.getElementById('bind-section-' + channel);
+        if (!host) return;
+        var existing = document.getElementById('bind-refresh-' + channel);
+        if (existing) return;
+        var notice = document.createElement('div');
+        notice.id = 'bind-refresh-' + channel;
+        notice.className = 'alert alert-success py-2 px-3 mt-3 mb-0';
+        notice.setAttribute('role', 'status');
+        notice.innerHTML =
+            '<strong>授权已完成。</strong> 请刷新页面以更新当前状态。';
+        host.appendChild(notice);
+        try { notice.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } catch (e) {}
+    }
+
     function describeEvent(ev) {
         if (!ev || !ev.event) return '';
         switch (ev.event) {
@@ -86,6 +101,12 @@
 
                 if (data.status === 'done') {
                     setBadge(channel, 'done');
+                    showRefreshNotice(channel);
+                    appendLog(
+                        channel,
+                        '已取得授权，请刷新页面查看最新状态',
+                        {scroll: true}
+                    );
                 } else if (data.status === 'failed') {
                     setBadge(channel, 'failed');
                     if (data.error_message) appendLog(channel, data.error_message);

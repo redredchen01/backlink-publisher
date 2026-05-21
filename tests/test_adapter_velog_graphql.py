@@ -23,7 +23,7 @@ import pytest
 
 from backlink_publisher.config import Config
 from backlink_publisher.config.types import VelogConfig
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import AuthExpiredError, DependencyError, ExternalServiceError
 from backlink_publisher.publishing.adapters.velog_graphql import (
     UNLOCK_DATE_UTC,
     VelogGraphQLAdapter,
@@ -70,6 +70,22 @@ class TestLoadCookies:
             ]
         })
         result = _load_cookies(p)
+        assert result == {"access_token": "at123", "refresh_token": "rt456"}
+
+    def test_storage_state_with_account_localstorage_is_accepted(self, tmp_path):
+        legacy = tmp_path / "velog-cookies.json"
+        legacy.write_text(json.dumps({
+            "cookies": [],
+            "origins": [{
+                "origin": "https://velog.io",
+                "localStorage": [{
+                    "name": "account",
+                    "value": json.dumps({"access_token": "at123", "refresh_token": "rt456"}),
+                }],
+            }],
+        }))
+        os.chmod(legacy, 0o600)
+        result = _load_cookies(legacy)
         assert result == {"access_token": "at123", "refresh_token": "rt456"}
 
     def test_missing_file(self, tmp_path):
@@ -332,7 +348,7 @@ class TestVelogGraphQLAdapterPublish:
         assert sess.post.call_count == 2
 
     def test_silent_drop_both_retries_raises(self, tmp_path):
-        """Both attempts return null → ExternalServiceError."""
+        """Both attempts return null → AuthExpiredError (rebind required)."""
         config = _make_config(tmp_path)
         adapter = VelogGraphQLAdapter()
 
@@ -342,7 +358,7 @@ class TestVelogGraphQLAdapterPublish:
                 MockSession.return_value = sess
                 sess.post.return_value = _mock_null_response()
 
-                with pytest.raises(ExternalServiceError, match="velog-login"):
+                with pytest.raises(AuthExpiredError, match="velog"):
                     adapter.publish(PAYLOAD, mode="publish", config=config)
 
         assert sess.post.call_count >= 2
