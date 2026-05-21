@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backlink_publisher._util.errors import UsageError
+from backlink_publisher.cli._bind.driver import BIND_BACKENDS
 from backlink_publisher.cli._bind.channels import CHANNELS
 
 
@@ -37,6 +38,12 @@ BIND_ERROR_MESSAGES: dict[str, str] = {
     # Settings UI renders a confirmation card (keep vs replace) when
     # channel_status_store[<channel>].status == "identity_mismatch".
     "identity_mismatch": "检测到登录账号变更，请在设置页选择保留旧账号或替换为新账号",
+    "chrome_not_available": "未找到真实 Chrome，请安装 Chrome，或改用 Playwright 备用后端",
+    "chrome_launch_failed": "无法启动真实 Chrome，请检查 Chrome 路径、显示环境和 profile 权限",
+    "chrome_cdp_unavailable": "Chrome DevTools 端口不可用；如需接管现有调试浏览器，请显式设置 BACKLINK_PUBLISHER_REAL_CHROME_ATTACH=1",
+    "chrome_profile_locked": "真实 Chrome profile 正被占用，请关闭对应 Chrome 窗口后重试",
+    "chrome_login_timeout": "真实 Chrome 登录超时，请重新发起绑定并完成登录",
+    "chrome_recipe_incompatible": "此渠道需要 Playwright 后端，请在下拉选单选「Playwright（备用）」后重新绑定",
 }
 
 
@@ -48,6 +55,7 @@ _SRC_DIR = os.path.join(_REPO_ROOT, "src")
 class BindJob:
     id: str
     channel: str
+    backend: str
     status: str  # "running" | "done" | "failed"
     started_at: str
     proc: subprocess.Popen | None = None
@@ -66,11 +74,16 @@ class BindJobRegistry:
         self._lock = threading.Lock()
         self._popen = subprocess.Popen  # injectable for tests
 
-    def start(self, channel: str) -> BindJob:
+    def start(self, channel: str, *, backend: str = "auto") -> BindJob:
         if channel not in CHANNELS:
             raise UsageError(
                 f"bind_job: unknown channel {channel!r} "
                 f"(allowed: {sorted(CHANNELS)})"
+            )
+        if backend not in BIND_BACKENDS:
+            raise UsageError(
+                f"bind_job: unknown backend {backend!r} "
+                f"(allowed: {sorted(BIND_BACKENDS)})"
             )
 
         with self._lock:
@@ -89,6 +102,7 @@ class BindJobRegistry:
             cmd = [
                 sys.executable, "-m", "backlink_publisher.cli.bind_channel",
                 "--channel", channel,
+                "--backend", backend,
             ]
             try:
                 proc = self._popen(
@@ -108,6 +122,7 @@ class BindJobRegistry:
             job = BindJob(
                 id=job_id,
                 channel=channel,
+                backend=backend,
                 status="running",
                 started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 proc=proc,
@@ -204,6 +219,7 @@ class BindJobRegistry:
             return {
                 "job_id": job.id,
                 "channel": job.channel,
+                "backend": job.backend,
                 "status": job.status,
                 "started_at": job.started_at,
                 "events": list(job.events),

@@ -32,6 +32,7 @@ from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
 from .hashnode import HashnodeAPIAdapter
+from .instant_web import TelegraphCdpAdapter, WriteAsCdpAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
@@ -41,37 +42,14 @@ from .writeas import WriteAsAPIAdapter
 
 
 # Register the fallback chain per platform. Adding a new platform = one
-# more ``register(...)`` call — no dispatcher changes. Each registration
-# declares ``dofollow=True|False|"uncertain"`` (R1 / Plan 2026-05-20-009);
-# ``False`` and ``"uncertain"`` additionally require ``rationale=`` of
-# ≥80 stripped chars (R3, mirrors ``monolith_budget.toml`` discipline).
-register("blogger", BloggerAPIAdapter, dofollow=True)
-register(
-    "medium",
-    MediumAPIAdapter,
-    MediumBraveAdapter,
-    MediumBrowserAdapter,
-    dofollow=True,
-)
-register("telegraph", TelegraphAPIAdapter, dofollow=True)
-register("velog", VelogGraphQLAdapter, dofollow=True)
-register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
-register(
-    "hashnode",
-    HashnodeAPIAdapter,
-    dofollow=False,
-    rationale=(
-        "Hashnode GraphQL API moved behind a paid subscription on "
-        "2026-05-13 and Cloudflare anti-bot blocks every *.hashnode.dev "
-        "direct fetch (curl returns the CF challenge page, not rendered "
-        "article HTML). Publish path is operationally dead today; "
-        "registered defensively so the adapter is reachable when an "
-        "operator re-verifies post-CF / post-paywall. Honestly degraded "
-        "to dofollow=False (not 'uncertain') because the platform is "
-        "not just verification-blocked but ship-blocked."
-    ),
-)
-register("writeas", WriteAsAPIAdapter, dofollow=True)
+# more ``register(...)`` call — no dispatcher changes.
+register("blogger", BloggerAPIAdapter)
+register("medium", MediumAPIAdapter, MediumBraveAdapter, MediumBrowserAdapter)
+register("telegraph", TelegraphCdpAdapter, TelegraphAPIAdapter)
+register("velog", VelogGraphQLAdapter)
+register("ghpages", GitHubPagesAPIAdapter)
+register("hashnode", HashnodeAPIAdapter)
+register("writeas", WriteAsCdpAdapter, WriteAsAPIAdapter)
 
 
 def publish(
@@ -208,10 +186,13 @@ def verify_adapter_setup(
         return
 
     if platform == "writeas":
+        from .instant_web import WriteAsCdpAdapter
+        if WriteAsCdpAdapter.available(config):
+            return
         if config.writeas is None:
             raise DependencyError(
-                "Write.as config missing. Add [writeas] section to "
-                "~/.config/backlink-publisher/config.toml"
+                "Write.as direct web publish needs real Chrome/CDP, or add "
+                "[writeas] plus writeas-token.json for API publishing."
             )
         if not config.writeas_token_path.exists():
             raise DependencyError(
@@ -581,12 +562,14 @@ def _verify_blogger_live(config: Config) -> VerifyResult:
 
 _VELOG_VERIFY_TIMEOUT_S = 5
 _VELOG_CURRENT_USER_QUERY = (
-    "query CurrentUser { currentUser { id username display_name } }"
+    "query CurrentUser { "
+    "auth { id username email is_trusted profile { id thumbnail display_name } } "
+    "}"
 )
 
 
 def _verify_velog_live(config: Config) -> VerifyResult:
-    """POST velog GraphQL ``currentUser`` to confirm the cookie session is live.
+    """POST Velog v2 GraphQL ``auth`` to confirm the cookie session is live.
 
     Plan 2026-05-19-006 Unit 6b — replaces the stub for velog.
 
@@ -597,9 +580,9 @@ def _verify_velog_live(config: Config) -> VerifyResult:
     cookies back to disk, matching the publish adapter's behaviour.
 
     Status mapping:
-      - 200 + ``data.currentUser`` non-null → ``ok``, identity=username,
+      - 200 + ``data.auth`` non-null → ``ok``, identity=username,
         dofollow=True (velog is confirmed dofollow per Plan R-Phase4 roster)
-      - 200 + ``data.currentUser`` is null → ``token_expired`` (velog's
+      - 200 + ``data.auth`` is null → ``token_expired`` (velog's
         silent-drop signal that the session is no longer authenticated)
       - ``requests.Timeout`` → ``timeout``
       - everything else (HTTP non-200 / parse failure / connection error)
@@ -640,7 +623,7 @@ def _verify_velog_live(config: Config) -> VerifyResult:
             ok=False,
             last_verify_result="timeout",
             blockers=[
-                f"velog currentUser timed out after {_VELOG_VERIFY_TIMEOUT_S}s"
+                f"velog auth probe timed out after {_VELOG_VERIFY_TIMEOUT_S}s"
             ],
         )
     except requests.RequestException as e:
@@ -666,7 +649,7 @@ def _verify_velog_live(config: Config) -> VerifyResult:
             blockers=["velog returned non-JSON response"],
         )
 
-    current_user = ((body or {}).get("data") or {}).get("currentUser")
+    current_user = ((body or {}).get("data") or {}).get("auth")
     if current_user is None:
         return VerifyResult(
             ok=False,

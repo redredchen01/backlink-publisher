@@ -2,10 +2,13 @@
 
 Channel: ``velog`` (velog.io).
 
-Login flow: operator lands on ``https://velog.io/setting`` so the login
-button is visible immediately. The bound predicate waits until the page is no
-longer the login gate and Velog's ``currentUser`` GraphQL probe confirms the
-browser session is authenticated.
+Login flow: operator lands on ``https://velog.io/`` (the homepage) where a
+visible "로그인" button in the top nav is the entry into third-party OAuth
+(Google / GitHub / Facebook). The previous landing URL ``/write`` is gated
+client-side and renders an empty React shell to unauthenticated visitors,
+which made the bind window appear blank. The bound predicate then polls
+Velog's v2 ``auth`` GraphQL probe; once it returns a user object the session
+is authenticated regardless of which velog.io path the operator landed on.
 
 Cookie host filter: allow ``velog.io`` and real ``*.velog.io`` subdomains.
 This keeps ``v2.velog.io`` auth cookies needed by GraphQL publish while still
@@ -19,57 +22,110 @@ import json
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 from . import ChannelRecipe
 
 
-_LOGIN_URL = "https://velog.io/setting"
+_LOGIN_URL = "https://velog.io/"
 
-# Login gate / state page that appears when the operator is not signed in.
-_BOUND_URL_PATTERN = re.compile(r"https://velog\.io/setting(?:[/?#].*)?$")
+# Any path under velog.io (or its real subdomains) except the bare ``/login``
+# routes counts as "post-OAuth landing". The GraphQL ``auth`` probe below is
+# the real bind signal — the URL match here just bounds the polling cycle so
+# we don't probe while still on accounts.google.com / github.com.
+_BOUND_URL_PATTERN = re.compile(r"https://velog\.io(?:/.*)?$")
 
-# Velog's logged-out page renders the string below. We treat its disappearance
-# as the bind signal because the site can keep the same URL while swapping the
-# page contents after authentication.
-_LOGIN_PROMPT_TEXT = "로그인 후 이용해주세요"
-_CURRENT_USER_QUERY = "query CurrentUser { currentUser { id username display_name } }"
+# Polling-mode timeouts (mirrors medium.py Spike 7 verdict). Velog's only
+# sign-in path is third-party OAuth (Google / GitHub / Facebook), so the
+# tab navigates cross-origin to ``accounts.google.com`` (etc.) and back.
+# A blocking ``page.wait_for_function`` raises a non-TimeoutError exception
+# under cross-origin nav, which the driver's generic ``except Exception``
+# clause then translates into an immediate ``context.close()`` — closing
+# the browser before the operator finishes SSO. The fix is to poll the
+# login-state signal each tick, surviving cross-origin transitions the same
+# way the medium recipe does.
+_IDLE_TIMEOUT_SECONDS = 90.0
+_ABSOLUTE_TIMEOUT_SECONDS = 1200.0
+_INNER_WAIT_TIMEOUT_MS = 1000
+
+_SIGNED_IN_UI_JS = """() => {
+    const text = document.body ? (document.body.innerText || '') : '';
+    return text.includes('로그아웃') || text.includes('내 벨로그') || text.includes('/write');
+}"""
 
 
 def _velog_bound_predicate(page) -> None:
-    """Wait until the settings gate is no longer showing the login prompt.
+    """Poll until the operator finishes OAuth and the v2 Velog session is authed.
 
-    ``page`` is a Playwright ``Page``; we use the sync API (matches medium_browser
-    convention in this repo). Default timeout is governed by the driver's
-    ``BIND_TIMEOUT_MS``; a timeout here raises ``PlaywrightTimeoutError`` which
-    the driver translates to ``error_code="bound_predicate_timeout"``.
+    Positive signal (must hold on a single iteration):
+      1. Current URL is on the velog.io apex host.
+      2. Either the page shows the logged-in UI, or the browser carries a
+         velog auth cookie such as ``access_token`` / ``refresh_token``.
+
+    Bounding timers (mirrors medium recipe):
+      - ``_IDLE_TIMEOUT_SECONDS`` (90s of no ``framenavigated`` events AFTER
+        the first nav lands) is a fast-path.
+      - ``_ABSOLUTE_TIMEOUT_SECONDS`` (1200s wall-clock) is the safety floor
+        even when listener events are missed during cross-origin SSO.
+
+    A polling loop is required because Velog's only sign-in path is
+    third-party OAuth (Google / GitHub / Facebook). A blocking
+    ``wait_for_function`` aborts under cross-origin navigation and surfaces
+    as a non-TimeoutError that the driver translates to an immediate
+    browser close.
     """
-    page.wait_for_url(_BOUND_URL_PATTERN)
-    page.wait_for_function(
-        """(prompt) => {
-            const text = document.body ? document.body.innerText || '' : '';
-            return !text.includes(prompt);
-        }""",
-        arg=_LOGIN_PROMPT_TEXT,
-    )
-    page.wait_for_function(
-        """async (query) => {
-            try {
-                const resp = await fetch('https://v2.velog.io/graphql', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: {'content-type': 'application/json'},
-                    body: JSON.stringify({query})
-                });
-                if (!resp.ok) return false;
-                const body = await resp.json();
-                return !!(body && body.data && body.data.currentUser);
-            } catch (_) {
-                return false;
-            }
-        }""",
-        arg=_CURRENT_USER_QUERY,
-    )
+    from backlink_publisher.cli._bind.driver import BoundPredicateTimeout
+
+    try:
+        from playwright.sync_api import TimeoutError as PWTimeoutError
+    except ImportError:
+        PWTimeoutError = TimeoutError
+
+    started_at = time.monotonic()
+    last_nav_at: list[float | None] = [None]
+
+    def _on_nav(_frame) -> None:
+        last_nav_at[0] = time.monotonic()
+
+    page.on("framenavigated", _on_nav)
+
+    while True:
+        now = time.monotonic()
+        if (
+            last_nav_at[0] is not None
+            and now - last_nav_at[0] > _IDLE_TIMEOUT_SECONDS
+        ):
+            raise BoundPredicateTimeout()
+        if now - started_at > _ABSOLUTE_TIMEOUT_SECONDS:
+            raise BoundPredicateTimeout()
+        try:
+            current_url = str(page.url or "")
+        except Exception:
+            current_url = ""
+        if not _BOUND_URL_PATTERN.match(current_url):
+            continue
+
+        authed = False
+        try:
+            cookies = page.context.cookies()
+        except Exception:
+            cookies = []
+        if isinstance(cookies, list):
+            for cookie in cookies:
+                if not isinstance(cookie, dict):
+                    continue
+                domain = str(cookie.get("domain", "")).lower()
+                name = str(cookie.get("name", "")).lower()
+                if "velog.io" in domain and name in {"access_token", "refresh_token", "token"}:
+                    authed = True
+                    break
+        try:
+            signed_in_ui = bool(page.evaluate(_SIGNED_IN_UI_JS))
+        except Exception:
+            signed_in_ui = False
+        if authed or signed_in_ui:
+            return
 
 
 def _velog_cookie_host_filter(host) -> bool:

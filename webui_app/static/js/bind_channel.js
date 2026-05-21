@@ -166,6 +166,55 @@
                 });
             })(btn);
         }
+
+        // Manual-fallback login URL: copy-to-clipboard handler.
+        // Falls back to a one-shot ``document.execCommand('copy')`` against a
+        // hidden textarea when the async Clipboard API is unavailable (older
+        // browsers, insecure contexts).
+        var copyButtons = document.querySelectorAll('.bind-copy-url-btn');
+        for (var j = 0; j < copyButtons.length; j++) {
+            var cbtn = copyButtons[j];
+            (function (button) {
+                button.addEventListener('click', function () {
+                    var url = button.getAttribute('data-url') || '';
+                    if (!url) return;
+                    var done = function () {
+                        var target = button.getAttribute('data-clipboard-target');
+                        var ch = '';
+                        if (target) {
+                            var m = target.match(/#bind-login-url-(.+)$/);
+                            if (m) ch = m[1];
+                        }
+                        var toast = ch ? document.getElementById('bind-copy-toast-' + ch) : null;
+                        if (toast) {
+                            toast.style.display = 'inline';
+                            setTimeout(function () { toast.style.display = 'none'; }, 1500);
+                        }
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(url).then(done, function () {
+                            fallbackCopy(url, done);
+                        });
+                    } else {
+                        fallbackCopy(url, done);
+                    }
+                });
+            })(cbtn);
+        }
+    }
+
+    function fallbackCopy(text, onDone) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (onDone) onDone();
+        } catch (_) { /* swallow */ }
     }
 
     if (document.readyState === 'loading') {
