@@ -62,6 +62,7 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
         "last_verified_at": None,
         "last_verify_result": "never",
         "dofollow": dofollow_status(name),
+        "publish_backend": _publish_backend_for(name),
         "blockers": [],
     }
 
@@ -72,6 +73,42 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
     except DependencyError as e:
         base["blockers"] = [str(e)]
         return base
+
+
+def _publish_backend_for(name: str) -> str:
+    """Classify a channel's publish chain (Plan 2026-05-21-001 Unit 5).
+
+    Reads ``publishing.registry._REGISTRY`` and returns one of:
+      - ``"api"``        every chain entry is an API-class adapter
+      - ``"chrome"``     every chain entry is a BrowserPublishDispatcher
+      - ``"api+chrome"`` mixed chain (API primary, Chrome fallback)
+      - ``"unknown"``    channel not registered or import failure
+
+    Drives the dashboard pill in ``_channel_card_macro.html``. Read-only
+    in this unit — per-channel backend selector is deferred to a
+    follow-up plan (per plan body §Unit 5 "Out of scope").
+    """
+    try:
+        from backlink_publisher.publishing.registry import _REGISTRY
+        from backlink_publisher.publishing.browser_publish import (
+            BrowserPublishDispatcher,
+        )
+    except Exception:
+        return "unknown"
+
+    chain = _REGISTRY.get(name)
+    if not chain:
+        return "unknown"
+
+    has_chrome = any(isinstance(e, BrowserPublishDispatcher) for e in chain)
+    has_api = any(
+        not isinstance(e, BrowserPublishDispatcher) for e in chain
+    )
+    if has_chrome and has_api:
+        return "api+chrome"
+    if has_chrome:
+        return "chrome"
+    return "api"
 
 
 def _identity_for(name: str, config: Config) -> str | None:

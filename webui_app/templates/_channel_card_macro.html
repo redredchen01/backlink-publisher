@@ -29,7 +29,22 @@
     {%- elif status.dofollow is none %}
       <span class="badge-dofollow unknown" title="待 empirical 驗證">dofollow?</span>
     {%- endif %}
+    {#- Plan 2026-05-21-001 Unit 5 — publish-backend pill (read-only). #}
+    {%- if status.publish_backend == "chrome" %}
+      <span class="badge-publish-backend chrome" data-field="publish_backend" title="僅 Chrome attach 發帖（無 API 路徑）">Chrome</span>
+    {%- elif status.publish_backend == "api+chrome" %}
+      <span class="badge-publish-backend mixed" data-field="publish_backend" title="API 為主、Chrome attach 為 auth-missing fallback">API + Chrome</span>
+    {%- elif status.publish_backend == "api" %}
+      <span class="badge-publish-backend api" data-field="publish_backend" title="API 發帖（無 Chrome fallback）">API</span>
+    {%- endif %}
   </div>
+  {%- if status.dofollow == False %}
+  {#- Plan 2026-05-21-001 Unit 5 — explicit nofollow warning row.
+      Hidden when dofollow is True / uncertain / unknown. #}
+  <div class="dch-nofollow-warning" data-field="nofollow_warning">
+    ⚠ <strong>nofollow</strong>：此通道發帖會被平台加 <code>rel="nofollow"</code>，<u>不傳遞 PageRank</u>，僅 referral 流量與主題相關性訊號。
+  </div>
+  {%- endif %}
   {%- if status.identity %}
   <div class="dch-identity">身份: <code>{{ status.identity }}</code></div>
   {%- endif %}
