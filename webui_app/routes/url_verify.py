@@ -39,7 +39,6 @@ from backlink_publisher._util.logger import get_logger
 from ..helpers import (
     _LOOPBACK_HOSTS,
     _check_bind_origin_or_abort,
-    _check_csrf_or_abort,
     _is_fetch_verify_disabled,
     _refuse_when_allow_network,
 )
@@ -143,12 +142,9 @@ def url_verify():
     if origin is None and referer is None:
         _emit_recon("origin_missing")
     _check_bind_origin_or_abort()
-    # Guard 4: CSRF
-    token = request.form.get("csrf_token") or request.headers.get("X-CSRFToken", "")
-    expected = session.get("csrf_token", "")
-    if not token or not expected or not secrets.compare_digest(token, expected):
-        _emit_recon("csrf_reject")
-    _check_csrf_or_abort()
+    # Guard 4: CSRF — handled by app-level ``_global_csrf_guard``
+    # (webui_app/__init__.py). If we reach this line, the token already
+    # passed validation.
 
     # Short-circuit BEFORE throttle consumption — the operator escape hatch
     # must not be silently rate-limited.

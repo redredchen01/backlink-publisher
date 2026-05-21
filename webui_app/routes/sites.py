@@ -26,7 +26,6 @@ from backlink_publisher._util.logger import plan_logger
 from ..helpers import (
     _WORK_THEMED_RUNS,
     _WORK_THEMED_RUNS_MAX,
-    _check_csrf_or_abort,
     _derive_branded_pool,
     _derive_exact_pool,
     _derive_partial_pool,
@@ -80,8 +79,6 @@ def sites_form():
 
 @bp.route("/sites/save-three-url", methods=["POST"])
 def sites_save_three_url():
-    _check_csrf_or_abort()
-
     raw = {
         "main_url": (request.form.get("main_url") or "").strip(),
         "list_url": (request.form.get("list_url") or "").strip(),
@@ -234,8 +231,6 @@ def sites_scrape_preview():
 
 @bp.route("/sites/run", methods=["POST"])
 def sites_run():
-    _check_csrf_or_abort()
-
     main_url = (request.form.get("main_url") or "").strip().rstrip("/")
     if not main_url:
         abort(400)

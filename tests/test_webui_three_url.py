@@ -74,6 +74,22 @@ def client():
     return webui.app.test_client()
 
 
+@pytest.fixture
+def csrf_client():
+    """Enables the global CSRF guard so tests can assert 403 on missing/wrong tokens."""
+    import webui
+
+    webui.app.config["TESTING"] = True
+    webui.app.config["SESSION_COOKIE_SECURE"] = False
+    webui.app.config["WTF_CSRF_ENABLED"] = True
+    webui.app.config["CSRF_ENABLED"] = True
+    try:
+        yield webui.app.test_client()
+    finally:
+        webui.app.config["WTF_CSRF_ENABLED"] = False
+        webui.app.config["CSRF_ENABLED"] = False
+
+
 def _fetch_csrf(client) -> str:
     """Hit GET /sites, parse the hidden csrf_token out of the rendered form."""
     import re as _re
@@ -146,8 +162,8 @@ class TestSitesFormRender:
 
 
 class TestSaveThreeUrl:
-    def test_missing_csrf_returns_403_and_does_not_write_config(self, client):
-        resp = client.post(
+    def test_missing_csrf_returns_403_and_does_not_write_config(self, csrf_client):
+        resp = csrf_client.post(
             "/sites/save-three-url",
             data={
                 "main_url": "https://x.com/",
@@ -161,9 +177,9 @@ class TestSaveThreeUrl:
         from backlink_publisher.config import load_config
         assert load_config().target_three_url == {}
 
-    def test_wrong_csrf_returns_403(self, client):
-        _fetch_csrf(client)  # establish session
-        resp = client.post(
+    def test_wrong_csrf_returns_403(self, csrf_client):
+        _fetch_csrf(csrf_client)  # establish session
+        resp = csrf_client.post(
             "/sites/save-three-url",
             data={"csrf_token": "obviously-wrong"},
         )
@@ -318,9 +334,11 @@ class TestSitesRun:
         )
         return token
 
-    def test_missing_csrf_returns_403(self, client):
-        self._save_basic(client)
-        resp = client.post("/sites/run", data={"main_url": "https://run.com/"})
+    def test_missing_csrf_returns_403(self, csrf_client):
+        # _save_basic sends a valid token so it passes the global guard;
+        # the assertion POST below omits the token to verify rejection.
+        self._save_basic(csrf_client)
+        resp = csrf_client.post("/sites/run", data={"main_url": "https://run.com/"})
         assert resp.status_code == 403
 
     def test_run_invokes_run_pipe_and_redirects_to_result(self, client):
