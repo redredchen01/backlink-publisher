@@ -33,7 +33,9 @@ Workspace root (not a git repo) holds `backlink-publisher/` (canonical) and `bp-
 
 ### WebUI
 
-Flask app at `webui_app/` (12 route modules, `create_app()` factory). State persistence at `webui_store/` (4 module-level singletons). Launcher: `python webui.py`.
+Flask app at `webui_app/` (20 route modules, `create_app()` factory). State persistence at `webui_store/` — five module-level singletons in `webui_store/__init__.py` (`history_store`, `profiles_store`, `drafts_store`, `schedule_store`, `queue_store`) plus `channel_status_store` from the `channel_status` submodule. Launcher: `python webui.py`.
+
+App-level CSRF guard `_global_csrf_guard` (PR #143, `webui_app/__init__.py`) enforces a token on every POST/PUT/PATCH/DELETE. Tests opt out via `app.config['CSRF_ENABLED'] = False` (or the legacy `WTF_CSRF_ENABLED` flag — both honored). The `_check_csrf_or_abort` helper has a single production call site inside the global guard; PR #148 removed all inline per-route calls.
 
 ### CLI entrypoints (6)
 
@@ -133,15 +135,12 @@ NOTE: A stale copy exists at workspace root `./.github/workflows/ci.yml` (refere
 
 ## Known Quirks
 
-- `GEMINI.md` is the Gemini CLI counterpart to this file — kept at repo root for Gemini project detection
-- `planning/` subpackage exists but has no source files (only `__pycache__/`)
-- `webui_app/services/` directory exists but has no source files (only `__pycache__/`)
-- `src/backlink_publisher/adapters/` is a stale dir; real adapters are in `publishing/adapters/`
-- `INSECURE_TLS` is mentioned in docs but not implemented in source yet
+- `webui_app/services/` is real: 5 source modules (`bind_job`, `browser_login`, `recheck`, `seo_viz`, `url_verify_throttle`). Earlier drafts of this doc claimed it was empty; obsolete.
 - Exit code table (0-6) is a documented contract, not enforced by `sys.exit()` in CLI code
 - `bp-*/AGENTS.md` are stale copies — update this file, not those
 - `docs/plans/`, `docs/brainstorms/` contain real operator domain names — don't propagate to `docs/solutions/`
 - `develop` branch doesn't exist (locally or remote) despite CI triggering on `branches: [main, develop]`
+- `~/.config/backlink-publisher/llm-settings.json` holds the LLM `api_key`; PR #140 routed writes through `safe_write.atomic_write` so the file lands `0o600`. Files written by pre-#140 code may still be `0644` until the next save.
 
 ## Lessons capture (dual-track)
 
