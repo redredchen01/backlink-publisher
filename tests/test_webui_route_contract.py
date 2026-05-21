@@ -248,6 +248,33 @@ class TestGetRoutes:
         # The page still renders; JS handles the deep-link client-side
         assert "batchPanel" in body
 
+    def test_sticky_step_bar_css_scoped_to_single_mode(self, client):
+        """Plan 013 U3 — step-bar sticky rule scoped to body.mode-single only."""
+        resp = client.get("/")
+        body = resp.data.decode("utf-8", errors="ignore")
+        # Scoped sticky rules must appear in the inlined CSS
+        assert "mode-single" in body, "mode-single CSS scope missing from rendered page"
+        assert "step-bar" in body, "step-bar CSS missing from rendered page"
+        assert "mode-batch" in body, "mode-batch CSS scope missing"
+
+    def test_sticky_step_bar_css_in_template_source(self):
+        """Plan 013 U3 — index.html source contains scoped step-bar rules."""
+        from pathlib import Path
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "webui_app" / "templates" / "index.html"
+        ).read_text(encoding="utf-8")
+        # Both mode-scoped rules must be present
+        assert "body.mode-single .step-bar" in src, (
+            "mode-single step-bar sticky rule missing from template"
+        )
+        assert "body.mode-batch .step-bar" in src, (
+            "mode-batch step-bar static rule missing from template"
+        )
+        assert "hide-history-nav" in src, (
+            "hide-history-nav CSS rule missing from template"
+        )
+
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
         """Edge case: first-time startup, none of the JSON state files exist
         yet. The autouse fixture points stores at a fresh tmp_path so they're

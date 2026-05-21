@@ -425,6 +425,25 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
 
+        /* Plan 013 U3 — step-bar sticky scope: only sticky in single mode.
+         * In batch mode the step-bar sits inside #newPanel which is hidden,
+         * so the rule is a no-op there. We still declare it explicitly so
+         * future additions to batchPanel don't accidentally get sticky. */
+        body.mode-single .step-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        body.mode-batch .step-bar {
+            position: static;
+        }
+
+        /* Plan 013 U3 — hide history nav tab row in batch mode.
+         * mode_toggle.js adds/removes .hide-history-nav on document.body. */
+        body.hide-history-nav #mainTabs {
+            display: none;
+        }
+
         .history-item {
             padding: 16px;
             border-radius: 12px;
