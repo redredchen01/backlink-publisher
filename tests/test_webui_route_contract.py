@@ -100,7 +100,7 @@ def _no_run_pipe():
         return {"stdout": "", "stderr": ""}
 
     targets = [
-        "webui_app.helpers.run_pipe",
+        "webui_app.helpers.cli_runner.run_pipe",
         "webui_app.routes.pipeline.run_pipe",
         "webui_app.routes.batch.run_pipe",
         "webui_app.routes.sites.run_pipe",

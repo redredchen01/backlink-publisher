@@ -23,7 +23,7 @@ from backlink_publisher._util.url import (
 from backlink_publisher.content.scraper import fetch_work_metadata
 from backlink_publisher._util.logger import plan_logger
 
-from ..helpers import (
+from ..helpers.cli_runner import (
     _WORK_THEMED_RUNS,
     _WORK_THEMED_RUNS_MAX,
     _parse_lines,

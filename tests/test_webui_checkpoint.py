@@ -218,7 +218,7 @@ def test_resume_route_uses_subprocess_not_run_pipe(client):
     mock_result.stderr = ""
 
     with patch("subprocess.run", return_value=mock_result) as mock_sub:
-        with patch("webui_app.helpers.run_pipe") as mock_run_pipe:
+        with patch("webui_app.helpers.cli_runner.run_pipe") as mock_run_pipe:
             client.post("/checkpoint/resume", data={"run_id": "20260101T000000-abcdef01"})
             mock_run_pipe.assert_not_called()
             mock_sub.assert_called_once()
