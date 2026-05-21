@@ -17,11 +17,32 @@ from ..helpers import _draft_tab_extra, _render
 bp = Blueprint("history", __name__)
 
 
+def _normalize_history_item(item: dict) -> dict:
+    """Backfill URL fields for older history rows."""
+    normalized = dict(item)
+    article_urls = normalized.get("article_urls")
+    if not isinstance(article_urls, list) or not article_urls:
+        article_urls = [u for u in (
+            (normalized.get("published_url") or "").strip(),
+            (normalized.get("draft_url") or "").strip(),
+        ) if u]
+    if article_urls:
+        normalized["article_urls"] = article_urls
+    target_url = (normalized.get("target_url") or "").strip()
+    if not target_url:
+        normalized["target_url"] = article_urls[0] if article_urls else "unknown"
+    return normalized
+
+
+def _normalize_history_items(items: list[dict]) -> list[dict]:
+    return [_normalize_history_item(item) for item in items]
+
+
 @bp.route('/ce:history', methods=['GET', 'POST'])
 def ce_history():
     config = session.get('config', {})
     return _render('index.html',
-        history=_history_store.load(),
+        history=_normalize_history_items(_history_store.load()),
         history_active=True,
         config=config,
         **_draft_tab_extra())
@@ -33,7 +54,7 @@ def ce_history_delete():
     history = _history_store.update(
         lambda hist: [h for h in hist if h.get('id') != item_id]
     )
-    return _render('index.html', history=history, history_active=True,
+    return _render('index.html', history=_normalize_history_items(history), history_active=True,
                    config=session.get('config', {}))
 
 
@@ -50,7 +71,7 @@ def ce_history_update_status():
         return hist
 
     history = _history_store.update(_apply)
-    return _render('index.html', history=history, history_active=True,
+    return _render('index.html', history=_normalize_history_items(history), history_active=True,
                    config=session.get('config', {}))
 
 
@@ -103,7 +124,7 @@ def ce_history_recheck():
     if not item:
         return redirect('/ce:history?flash_type=danger&flash_msg=记录不存在')
     from ..services.recheck import recheck_one
-    mutation = recheck_one(item)
+    mutation = recheck_one(_normalize_history_item(item))
     mutation.pop('_outcome', None)
     _history_store.update_item(item_id, **mutation)
     status = mutation.get('status', '')
@@ -131,7 +152,7 @@ def ce_history_bulk_recheck():
     if not items:
         return redirect('/ce:history?flash_type=warning&flash_msg=未匹配到记录')
     from ..services.recheck import recheck_many
-    by_id, summary = recheck_many(items)
+    by_id, summary = recheck_many(_normalize_history_items(items))
     # Apply mutations one-by-one (each has its own field set; bulk_update
     # only supports a single field set across ids).
     for item_id, mutation in by_id.items():

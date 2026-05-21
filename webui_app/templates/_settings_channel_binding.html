@@ -17,6 +17,9 @@
 #}
 {% set _rec = channel_statuses.get(channel) or {"status": "unbound", "bound_at": None} %}
 {% set _status = _rec.get("status", "unbound") %}
+{% if channel == "velog" and velog_status is defined and velog_status.state not in ("ok", "fresh") %}
+    {% set _status = "expired" if _rec.get("bound_at") else "unbound" %}
+{% endif %}
 {% set _bound_at = _rec.get("bound_at") %}
 {# Plan 2026-05-19-003 Unit 4 — identity_mismatch state context vars. #}
 {% set _identity_old = _rec.get("identity_mismatch_old") %}
@@ -40,7 +43,13 @@
 <div class="bind-section" id="bind-section-{{ channel }}" data-channel="{{ channel }}">
     <p class="text-muted" style="font-size:13px; margin-bottom:8px;">
         <strong>🌐 浏览器登录绑定</strong>
-        — 通过本机浏览器登录 {{ channel }}，凭据写入 <code>~/.config/backlink-publisher/{{ channel }}-storage-state.json</code>（0600 权限）。
+        — 通过本机浏览器登录 {{ channel }}，凭据写入
+        {% if channel == "velog" %}
+            <code>~/.config/backlink-publisher/velog-cookies.json</code>
+        {% else %}
+            <code>~/.config/backlink-publisher/{{ channel }}-storage-state.json</code>
+        {% endif %}
+        （0600 权限）。
     </p>
 
     <div class="bind-status-row" style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
@@ -111,6 +120,35 @@
             <i class="bi bi-box-arrow-in-right me-1" aria-hidden="true"></i>{{ _button_text }}
         </button>
     </div>
+
+    {# Manual-fallback login URL — surface the recipe's login_url so the
+       operator can copy-paste into their own browser if the bind subprocess
+       fails to open a headed window. The bind worker still drives detection
+       through the launched browser; this row is purely informational + a
+       quick-open shortcut. #}
+    {% set _login_url = (channel_login_urls or {}).get(channel, "") %}
+    {% if _login_url %}
+    <div class="bind-login-url-row" style="margin-bottom:8px; font-size:12px;">
+        <span class="text-muted">登录网址（如未自动跳出可手动复制/打开）：</span>
+        <a href="{{ _login_url }}"
+           target="_blank"
+           rel="noopener noreferrer"
+           id="bind-login-url-{{ channel }}"
+           style="font-family:monospace;">{{ _login_url }}</a>
+        <button type="button"
+                class="btn btn-link btn-sm p-0 ms-1 bind-copy-url-btn"
+                data-clipboard-target="#bind-login-url-{{ channel }}"
+                data-url="{{ _login_url }}"
+                aria-label="复制 {{ channel }} 登录网址">
+            <i class="bi bi-clipboard" aria-hidden="true"></i> 复制
+        </button>
+        <span class="bind-copy-url-toast text-success ms-1"
+              id="bind-copy-toast-{{ channel }}"
+              role="status"
+              aria-live="polite"
+              style="display:none;">已复制 ✓</span>
+    </div>
+    {% endif %}
     {% endif %}
 
     <div class="bind-log small text-muted"

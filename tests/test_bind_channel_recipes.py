@@ -54,9 +54,7 @@ class TestRecipeFields:
 
 
 class TestVelogHostFilter:
-    """Velog cookie host filter — exact-apex match against velog.io.
-    Mirrors the spike's _velog_host_allowed primitive (plan-012 R16).
-    """
+    """Velog cookie host filter — velog.io plus real subdomains."""
 
     def setup_method(self):
         self.filter = RECIPES["velog"].cookie_host_filter
@@ -77,9 +75,8 @@ class TestVelogHostFilter:
     def test_rejects_suffix_confusion(self):
         assert self.filter("velog.io.attacker.tld") is False
 
-    def test_rejects_subdomain(self):
-        # Subdomains are not the apex — explicit deny per R16 ("精确匹配")
-        assert self.filter("api.velog.io") is False
+    def test_accepts_subdomain(self):
+        assert self.filter("api.velog.io") is True
 
     def test_rejects_empty(self):
         assert self.filter("") is False
@@ -340,10 +337,8 @@ class TestBloggerHostFilter:
 class TestVelogBoundPattern:
     """Velog bound-URL pattern semantics.
 
-    Regression: prior version landed on ``https://velog.io/`` and the
-    pattern only excluded ``/auth*``, so the very URL Playwright navigated
-    to satisfied the predicate instantly — ``wait_for_url`` returned with
-    zero cookies and the operator never saw a "logged in" event.
+    The predicate only needs to anchor on the Velog apex host. The real login
+    signal is the signed-in UI / auth probe, not the route.
     """
 
     def setup_method(self):
@@ -354,52 +349,16 @@ class TestVelogBoundPattern:
         self.pat = _BOUND_URL_PATTERN
         self.login_url = _LOGIN_URL
 
-    def test_login_url_does_not_match_pattern(self):
-        # The URL the driver navigates to must NOT match the predicate, or
-        # the wait_for_url call returns instantly.
-        assert self.pat.match(self.login_url) is None
+    def test_login_url_matches_pattern(self):
+        assert self.pat.match(self.login_url) is not None
 
-    def test_does_not_match_login_route(self):
-        assert self.pat.match("https://velog.io/login") is None
-
-    def test_does_not_match_login_with_query(self):
-        assert self.pat.match("https://velog.io/login?next=/") is None
-
-    def test_does_not_match_signup_route(self):
-        assert self.pat.match("https://velog.io/signup") is None
-
-    def test_does_not_match_auth_callback(self):
-        assert self.pat.match("https://velog.io/auth/callback?code=x") is None
-
-    def test_matches_home_feed_after_login(self):
-        # /  is the most common post-login landing — must resolve the predicate.
+    def test_matches_home(self):
         assert self.pat.match("https://velog.io/") is not None
 
-    def test_matches_user_profile_after_login(self):
-        assert self.pat.match("https://velog.io/@myuser") is not None
-
-    def test_matches_post_url_after_login(self):
-        assert self.pat.match("https://velog.io/@myuser/some-post") is not None
-
-    # ── Apex-only enforcement (Codex P1 on PR #86) ─────────────────────────
-
-    def test_rejects_oauth_redirect_on_v3_subdomain(self):
-        # Velog's OAuth dance transits v3.velog.io/api/auth/v3/social/
-        # redirect/<provider> before the social login completes. A
-        # subdomain-permissive regex would treat this intermediate URL
-        # as "logged in" and persist an empty storage state.
-        assert self.pat.match(
-            "https://v3.velog.io/api/auth/v3/social/redirect/google?provider=google"
-        ) is None
-
-    def test_rejects_oauth_redirect_on_v2_subdomain(self):
-        assert self.pat.match(
-            "https://v2.velog.io/api/v2/auth/social/redirect/github"
-        ) is None
+    def test_matches_write(self):
+        assert self.pat.match("https://velog.io/write?id=abc") is not None
 
     def test_rejects_any_subdomain(self):
-        # Apex-only contract mirrors _velog_cookie_host_filter's
-        # exact-apex match. Logged-in session lives on the apex.
         assert self.pat.match("https://api.velog.io/anything") is None
         assert self.pat.match("https://www.velog.io/") is None
         assert self.pat.match("https://anything.velog.io/@user") is None
@@ -420,8 +379,10 @@ class TestMediumPostPersistHookWired:
     def test_medium_recipe_has_post_persist(self):
         assert RECIPES["medium"].post_persist is not None
 
-    def test_velog_recipe_has_no_post_persist(self):
-        assert RECIPES["velog"].post_persist is None
+    def test_velog_recipe_has_post_persist(self):
+        # Velog now has a post_persist hook (writes velog-cookies.json from
+        # storage_state, same pattern as medium).
+        assert RECIPES["velog"].post_persist is not None
 
     def test_blogger_recipe_has_no_post_persist(self):
         assert RECIPES["blogger"].post_persist is None

@@ -325,12 +325,19 @@ def _record_resume_failure(
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert a done checkpoint item to the standard 9-field publish output shape."""
+    """Convert a done checkpoint item to the standard publish output shape."""
+    article_urls = item.get("article_urls")
+    if not isinstance(article_urls, list) or not article_urls:
+        article_urls = [u for u in (
+            item.get("published_url") or "",
+            item.get("draft_url") or "",
+        ) if u]
     return {
         "id": item.get("id", ""),
         "platform": item.get("platform", ""),
         "status": item.get("status", ""),
         "title": item.get("title", ""),
+        "article_urls": article_urls,
         "draft_url": "",
         "published_url": item.get("published_url") or "",
         "created_at": item.get("completed_at", ""),
@@ -985,6 +992,7 @@ def main(argv: list[str] | None = None) -> None:
                     checkpoint.update_item(
                         run_id, row.get("id", ""), "done",
                         published_url=result.published_url,
+                        article_urls=[u for u in (result.published_url, result.draft_url) if u],
                         adapter=result.adapter,
                         completed_at=datetime.now(timezone.utc).isoformat(),
                     )

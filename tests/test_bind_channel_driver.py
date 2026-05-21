@@ -582,3 +582,26 @@ class TestPostPersistHook:
         )
         status = get_status("medium")
         assert status["storage_state_path"].endswith("medium-storage-state.json")
+
+
+class TestVelogPostPersistRegression:
+    """Velog post_persist hook converts storage_state → velog-cookies.json
+    canonical path. Regression guard for the velog landing redesign that
+    moved bound credentials from storage_state.json to cookies.json."""
+
+    def test_real_velog_recipe_canonical_path_is_cookies(self, tmp_path, monkeypatch):
+        from backlink_publisher.cli._bind.recipes import RECIPES
+
+        recipe = RECIPES["velog"]
+        storage_state = tmp_path / "velog-storage-state.json"
+        storage_state.write_text('{"cookies":[{"name":"access_token","value":"AT"}],"origins":[]}')
+        os.chmod(storage_state, 0o600)
+
+        canonical = recipe.post_persist(tmp_path, storage_state)
+        assert canonical == tmp_path / "velog-cookies.json"
+        assert canonical.exists()
+        payload = json.loads(canonical.read_text())
+        assert payload["cookies"] == [{"name": "access_token", "value": "AT"}]
+        assert payload["origins"] == []
+        assert not storage_state.exists()
+        assert (canonical.stat().st_mode & 0o777) == 0o600

@@ -55,6 +55,21 @@
         log.scrollTop = log.scrollHeight;
     }
 
+    function showRefreshNotice(channel) {
+        var host = document.getElementById('bind-section-' + channel);
+        if (!host) return;
+        var existing = document.getElementById('bind-refresh-' + channel);
+        if (existing) return;
+        var notice = document.createElement('div');
+        notice.id = 'bind-refresh-' + channel;
+        notice.className = 'alert alert-success py-2 px-3 mt-3 mb-0';
+        notice.setAttribute('role', 'status');
+        notice.innerHTML =
+            '<strong>授权已完成。</strong> 请刷新页面以更新当前状态。';
+        host.appendChild(notice);
+        try { notice.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } catch (e) {}
+    }
+
     function describeEvent(ev) {
         if (!ev || !ev.event) return '';
         switch (ev.event) {
@@ -86,6 +101,12 @@
 
                 if (data.status === 'done') {
                     setBadge(channel, 'done');
+                    showRefreshNotice(channel);
+                    appendLog(
+                        channel,
+                        '已取得授权，请刷新页面查看最新状态',
+                        {scroll: true}
+                    );
                 } else if (data.status === 'failed') {
                     setBadge(channel, 'failed');
                     if (data.error_message) appendLog(channel, data.error_message);
@@ -145,6 +166,55 @@
                 });
             })(btn);
         }
+
+        // Manual-fallback login URL: copy-to-clipboard handler.
+        // Falls back to a one-shot ``document.execCommand('copy')`` against a
+        // hidden textarea when the async Clipboard API is unavailable (older
+        // browsers, insecure contexts).
+        var copyButtons = document.querySelectorAll('.bind-copy-url-btn');
+        for (var j = 0; j < copyButtons.length; j++) {
+            var cbtn = copyButtons[j];
+            (function (button) {
+                button.addEventListener('click', function () {
+                    var url = button.getAttribute('data-url') || '';
+                    if (!url) return;
+                    var done = function () {
+                        var target = button.getAttribute('data-clipboard-target');
+                        var ch = '';
+                        if (target) {
+                            var m = target.match(/#bind-login-url-(.+)$/);
+                            if (m) ch = m[1];
+                        }
+                        var toast = ch ? document.getElementById('bind-copy-toast-' + ch) : null;
+                        if (toast) {
+                            toast.style.display = 'inline';
+                            setTimeout(function () { toast.style.display = 'none'; }, 1500);
+                        }
+                    };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(url).then(done, function () {
+                            fallbackCopy(url, done);
+                        });
+                    } else {
+                        fallbackCopy(url, done);
+                    }
+                });
+            })(cbtn);
+        }
+    }
+
+    function fallbackCopy(text, onDone) {
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (onDone) onDone();
+        } catch (_) { /* swallow */ }
     }
 
     if (document.readyState === 'loading') {

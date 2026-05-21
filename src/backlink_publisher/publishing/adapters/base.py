@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def _resolve_article_urls(row: dict[str, Any], draft_url: str, published_url: str) -> list[str]:
+    """Return the canonical article URL list for publish outputs."""
+    urls = row.get("article_urls")
+    if isinstance(urls, list):
+        resolved = [str(url).strip() for url in urls if str(url).strip()]
+        if resolved:
+            return resolved
+    return [u for u in (published_url.strip(), draft_url.strip()) if u]
+
+
 @dataclass
 class AdapterResult:
     """Normalised result returned by every adapter."""
@@ -23,12 +33,14 @@ class AdapterResult:
 
     def to_publish_output(self, row: dict[str, Any], created_at: str) -> dict[str, Any]:
         """Convert to the JSONL output shape expected by publish_backlinks."""
+        article_urls = _resolve_article_urls(row, self.draft_url, self.published_url)
         return {
             "id": row.get("id", ""),
             "platform": self.platform,
             "status": self.status,
             "title": row.get("title", ""),
             "target_url": row.get("target_url", ""),
+            "article_urls": article_urls,
             "draft_url": self.draft_url,
             "published_url": self.published_url,
             "created_at": created_at,

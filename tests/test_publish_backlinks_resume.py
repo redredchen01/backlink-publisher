@@ -410,7 +410,7 @@ def test_resume_full_throttle_no_prior_medium(mock_pub, mock_verify, mock_sleep,
     assert mock_sleep.called
 
 
-# ── item_to_publish_output has all 9 required fields ──────────────────────────
+# ── item_to_publish_output has all required fields ───────────────────────────
 
 def test_item_to_publish_output_has_all_fields():
     from backlink_publisher.cli.publish_backlinks import item_to_publish_output
@@ -420,13 +420,18 @@ def test_item_to_publish_output_has_all_fields():
         "status": "done",
         "title": "T",
         "published_url": "https://x.com",
+        "article_urls": ["https://x.com"],
         "completed_at": "2026-01-01T00:00:00+00:00",
         "adapter": "blogger-api",
     }
     out = item_to_publish_output(item)
-    required = {"id", "platform", "status", "title", "draft_url", "published_url", "created_at", "adapter", "error"}
+    required = {
+        "id", "platform", "status", "title", "article_urls", "draft_url",
+        "published_url", "created_at", "adapter", "error",
+    }
     assert required.issubset(out.keys())
     assert out["created_at"] == item["completed_at"]
+    assert out["article_urls"] == ["https://x.com"]
 
 
 # ── integration: Unit 2 → Unit 3 ──────────────────────────────────────────────

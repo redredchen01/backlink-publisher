@@ -42,7 +42,7 @@ from typing import Any
 import requests
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.errors import AuthExpiredError, DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.registry import Publisher
 from .base import AdapterResult
@@ -126,21 +126,26 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
     Raises:
         DependencyError: file missing, wrong permissions, or unparseable.
     """
-    if not cookies_path.exists():
-        raise DependencyError(
-            f"velog cookies not found: {cookies_path}\n"
-            "Run: velog-login"
-        )
+    source_path = cookies_path
+    if not source_path.exists():
+        legacy_path = cookies_path.with_name("velog-storage-state.json")
+        if legacy_path.exists():
+            source_path = legacy_path
+        else:
+            raise DependencyError(
+                f"velog cookies not found: {cookies_path}\n"
+                "Run: velog-login"
+            )
 
-    mode = os.stat(cookies_path).st_mode & 0o777
+    mode = os.stat(source_path).st_mode & 0o777
     if mode != 0o600:
         raise DependencyError(
             f"velog-cookies.json must be 0600 (found {oct(mode)})\n"
-            f"Run: chmod 600 {cookies_path}"
+            f"Run: chmod 600 {source_path}"
         )
 
     try:
-        raw = json.loads(cookies_path.read_text())
+        raw = json.loads(source_path.read_text())
     except (json.JSONDecodeError, OSError) as exc:
         raise DependencyError(
             f"Cannot read velog cookies: {exc}\n"
@@ -148,13 +153,57 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
         ) from None
 
     cookie_list = raw.get("cookies", [])
-    if not cookie_list:
+    if not isinstance(cookie_list, list):
+        cookie_list = []
+
+    cookies = {
+        c["name"]: c["value"]
+        for c in cookie_list
+        if isinstance(c, dict) and "name" in c and "value" in c
+    }
+
+    # Velog may persist auth in browser localStorage instead of cookies.
+    # Preserve compatibility with both shapes by mining the captured
+    # storage_state payload for an account token if needed.
+    if not cookies or "access_token" not in cookies:
+        origins = raw.get("origins", [])
+        if isinstance(origins, list):
+            for origin in origins:
+                if not isinstance(origin, dict):
+                    continue
+                if "velog.io" not in str(origin.get("origin", "")):
+                    continue
+                local_storage = origin.get("localStorage", [])
+                if not isinstance(local_storage, list):
+                    continue
+                for entry in local_storage:
+                    if not isinstance(entry, dict):
+                        continue
+                    key = str(entry.get("name", ""))
+                    val = str(entry.get("value", ""))
+                    if key == "account":
+                        try:
+                            account = json.loads(val)
+                        except Exception:
+                            continue
+                        for token_key in ("access_token", "refresh_token", "token"):
+                            token_val = account.get(token_key)
+                            if token_val and token_key not in cookies:
+                                cookies[token_key] = str(token_val)
+                    elif key in {"access_token", "refresh_token", "token"} and val and key not in cookies:
+                        cookies[key] = val
+
+    if not cookies:
         raise DependencyError(
-            "velog-cookies.json is empty or has no cookies.\n"
+            "velog-cookies.json is empty or has no usable auth data.\n"
             "Run: velog-login"
         )
-
-    return {c["name"]: c["value"] for c in cookie_list if "name" in c and "value" in c}
+    if not (cookies.get("access_token") or cookies.get("refresh_token")):
+        raise AuthExpiredError(
+            channel="velog",
+            reason="velog credential file has no access_token or refresh_token",
+        )
+    return cookies
 
 
 # ── Rate-limit lock + count file ──────────────────────────────────────────────
@@ -469,9 +518,9 @@ class VelogGraphQLAdapter(Publisher):
                         id=article_id,
                         resp=str(resp_json2)[:200],
                     ))
-                    raise ExternalServiceError(
-                        "velog writePost returned null after retry. "
-                        "Cookie may be expired — run: velog-login"
+                    raise AuthExpiredError(
+                        channel="velog",
+                        reason="velog writePost returned null after retry",
                     )
 
             url_slug_returned = (write_post or {}).get("url_slug", "")
@@ -481,9 +530,9 @@ class VelogGraphQLAdapter(Publisher):
             )
 
             if not url_slug_returned:
-                raise ExternalServiceError(
-                    "velog writePost succeeded but returned no url_slug",
-                    _meta={"write_post": write_post},
+                raise AuthExpiredError(
+                    channel="velog",
+                    reason="velog writePost succeeded but returned no url_slug",
                 )
 
             published_url = f"https://velog.io/@{username}/{url_slug_returned}"

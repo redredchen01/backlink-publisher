@@ -80,7 +80,7 @@ def recheck_one(
     plus an ``_outcome`` key consumed by :func:`recheck_many` for the
     summary count.
     """
-    article_urls: Sequence[str] = item.get("article_urls") or []
+    article_urls: Sequence[str] = _resolve_article_urls(item)
     title = item.get("title", "")
     required_links = _resolve_required_link(item)
     original_status = item.get("status", "")
@@ -123,6 +123,20 @@ def recheck_one(
         "verified_at": datetime.now().isoformat(timespec="seconds"),
         "_outcome": "downgraded",
     }
+
+
+def _resolve_article_urls(item: dict) -> list[str]:
+    urls = item.get("article_urls")
+    if isinstance(urls, Sequence) and not isinstance(urls, (str, bytes)):
+        resolved = [str(url).strip() for url in urls if str(url).strip()]
+        if resolved:
+            return resolved
+
+    for key in ("published_url", "draft_url", "target_url"):
+        url = str(item.get(key, "") or "").strip()
+        if url:
+            return [url]
+    return []
 
 
 def recheck_many(

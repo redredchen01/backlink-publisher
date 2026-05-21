@@ -35,8 +35,10 @@ from backlink_publisher.config import (
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher.publishing.adapters import (
     WriteAsAPIAdapter,
+    WriteAsCdpAdapter,
     verify_adapter_setup,
 )
+from backlink_publisher.publishing.adapters import instant_web as instant_web_mod
 from backlink_publisher.publishing.adapters.writeas import (
     DEFAULT_API_BASE,
     _build_post_body,
@@ -394,6 +396,83 @@ class TestPublish:
 
 
 # ───────────────────────────────────────────────────────────────────────────────
+# WriteAsCdpAdapter blocked-content detection
+# ───────────────────────────────────────────────────────────────────────────────
+
+class _FakeCdpPage:
+    """Stand-in for the CDP page object handed to WriteAsCdpAdapter.publish."""
+
+    def __init__(self, evaluate_result):
+        self._evaluate_result = evaluate_result
+
+    def wait_for_function(self, *_args, **_kwargs):  # noqa: D401 -- mock surface
+        return None
+
+    def evaluate(self, *_args, **_kwargs):
+        return self._evaluate_result
+
+
+class _FakeChromeSession:
+    """Mocked _ChromeSession that returns a fixed evaluate result."""
+
+    def __init__(self, evaluate_result):
+        self._evaluate_result = evaluate_result
+        self.closed = False
+
+    def open(self, _url):
+        return _FakeCdpPage(self._evaluate_result)
+
+    def close(self):
+        self.closed = True
+
+
+class TestWriteAsCdpBlockedContent:
+    def _patch_session(self, monkeypatch, evaluate_result):
+        sentinel = _FakeChromeSession(evaluate_result)
+        monkeypatch.setattr(
+            instant_web_mod, "_ChromeSession", lambda: sentinel
+        )
+        return sentinel
+
+    def test_blocked_content_raises_site_policy_error(self, monkeypatch):
+        evaluate_result = {
+            "status": 201,
+            "parsed": {
+                "code": 201,
+                "data": {
+                    "id": "contentisblocked",
+                    "slug": None,
+                    "full_post_url": "",
+                },
+            },
+        }
+        session = self._patch_session(monkeypatch, evaluate_result)
+
+        adapter = WriteAsCdpAdapter()
+        with pytest.raises(ExternalServiceError) as excinfo:
+            adapter.publish(
+                {"title": "T", "content_markdown": "body"},
+                "publish",
+                Config(),
+            )
+        msg = str(excinfo.value)
+        assert "contentisblocked" in msg
+        assert "site policy" in msg
+        # Negative assertions: the previous misdiagnosis must be gone.
+        assert "returned no URL" not in msg
+        assert "CDP publish failed" not in msg
+        assert session.closed is True
+
+    def test_draft_mode_unaffected(self):
+        """Draft mode never hits the network — blocked detection must not
+        regress that fast path."""
+        adapter = WriteAsCdpAdapter()
+        result = adapter.publish({"title": "x"}, "draft", Config())
+        assert result.status == "drafted"
+        assert result.platform == "writeas"
+
+
+# ───────────────────────────────────────────────────────────────────────────────
 # verify_adapter_setup (offline mode)
 # ───────────────────────────────────────────────────────────────────────────────
 
@@ -420,6 +499,22 @@ class TestOfflineVerify:
         _seed_token(tmp_path)
         cfg = Config(writeas=WriteAsConfig(collection_alias=""))
         assert verify_adapter_setup("writeas", cfg) is None
+
+    def test_cdp_availability_does_not_short_circuit_api_contract(
+        self, monkeypatch
+    ):
+        """Regression: a previous WIP attempted to skip the API verify gate
+        when ``WriteAsCdpAdapter.available()`` returned True (Chrome binary
+        present). That let machines with Chrome but no writeas-token pass
+        verify and crash at publish-time when the dispatch chain fell
+        through to the API adapter. Force-flag CDP availability and assert
+        verify still requires the API prerequisites.
+        """
+        from backlink_publisher.publishing.adapters import instant_web as iw
+
+        monkeypatch.setattr(iw.WriteAsCdpAdapter, "available", classmethod(lambda cls, cfg: True))
+        with pytest.raises(DependencyError, match="Write.as config missing"):
+            verify_adapter_setup("writeas", Config())
 
 
 # ───────────────────────────────────────────────────────────────────────────────

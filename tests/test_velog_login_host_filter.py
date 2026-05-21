@@ -23,12 +23,11 @@ class TestVelogCookieHostFilter:
     def test_velog_io_uppercase(self):
         assert _velog_cookie_host_filter("VELOG.IO") is True
 
-    def test_v2_subdomain_rejected(self):
-        # Subdomains are now explicitly rejected per recipe comment
-        assert _velog_cookie_host_filter("v2.velog.io") is False
+    def test_v2_subdomain_accepted(self):
+        assert _velog_cookie_host_filter("v2.velog.io") is True
 
-    def test_v3_subdomain_rejected(self):
-        assert _velog_cookie_host_filter("v3.velog.io") is False
+    def test_v3_subdomain_accepted(self):
+        assert _velog_cookie_host_filter("v3.velog.io") is True
 
     def test_prefix_confusion_evilvelog(self):
         assert _velog_cookie_host_filter("evilvelog.io") is False
@@ -55,7 +54,7 @@ class TestApplyHostFilterVelog:
     def _cookie(self, name: str, domain: str) -> dict:
         return {"name": name, "domain": domain, "value": "x"}
 
-    def test_happy_path_keeps_velog_drops_idp_and_subdomain(self):
+    def test_happy_path_keeps_velog_and_v2_drops_idp(self):
         raw = {
             "cookies": [
                 self._cookie("access_token", "velog.io"),
@@ -66,9 +65,9 @@ class TestApplyHostFilterVelog:
         }
         result = _apply_host_filter(raw, _velog_cookie_host_filter)
         cookies = result.get("cookies", [])
-        assert len(cookies) == 2
+        assert len(cookies) == 3
         names = {c["name"] for c in cookies}
-        assert names == {"access_token", "refresh_token"}
+        assert names == {"access_token", "refresh_token", "sub"}
 
     def test_missing_domain_key_dropped(self):
         raw = {

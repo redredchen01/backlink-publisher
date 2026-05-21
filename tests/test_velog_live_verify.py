@@ -2,12 +2,12 @@
 
 Replaces the ``unverifiable_live`` stub for velog in ``adapters._verify_live``
 with a POST to ``https://v2.velog.io/graphql`` running a tiny
-``{ currentUser { id username display_name } }`` query, authenticated with
+``{ auth { id username profile { display_name } } }`` query, authenticated with
 the cookie jar loaded by the existing ``_load_cookies`` helper.
 
 Tests cover:
-  - happy path (200 + currentUser) → identity = username + dofollow=True
-  - currentUser is null → token_expired (cookies invalidated)
+  - happy path (200 + auth) → identity = username + dofollow=True
+  - auth is null → token_expired (cookies invalidated)
   - timeout, connection error, non-200 → never/timeout split
   - read-only invariant: cookies file untouched after verify (velog refresh
     happens server-side via Set-Cookie which requests.Session captures
@@ -59,10 +59,10 @@ def _ok_response(username: str = "test-velog-user") -> MagicMock:
     resp.status_code = 200
     resp.json.return_value = {
         "data": {
-            "currentUser": {
+            "auth": {
                 "id": "uuid-1234",
                 "username": username,
-                "display_name": "Test Velog User",
+                "profile": {"display_name": "Test Velog User"},
             }
         }
     }
@@ -70,11 +70,11 @@ def _ok_response(username: str = "test-velog-user") -> MagicMock:
 
 
 def _null_user_response() -> MagicMock:
-    """200 + data.currentUser null — velog's silent-drop signal that the
+    """200 + data.auth null — velog's silent-drop signal that the
     cookie session is no longer authenticated."""
     resp = MagicMock()
     resp.status_code = 200
-    resp.json.return_value = {"data": {"currentUser": None}}
+    resp.json.return_value = {"data": {"auth": None}}
     return resp
 
 
@@ -118,7 +118,7 @@ class TestVelogLiveVerifyHappyPath:
         url = mock_post.call_args.args[0]
         assert url == "https://v2.velog.io/graphql"
         body = mock_post.call_args.kwargs.get("json", {})
-        assert "currentUser" in body.get("query", "")
+        assert "auth" in body.get("query", "")
         assert mock_post.call_args.kwargs.get("cookies") == {
             "access_token": "AT_LIVE",
             "refresh_token": "RT_LIVE",
@@ -131,7 +131,7 @@ class TestVelogLiveVerifyHappyPath:
 
 
 class TestVelogLiveVerifyTokenExpired:
-    """200 + data.currentUser=null → cookies no longer authenticated → token_expired."""
+    """200 + data.auth=null → cookies no longer authenticated → token_expired."""
 
     def test_currentUser_null_yields_token_expired(self, tmp_path, monkeypatch):
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))

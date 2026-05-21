@@ -272,3 +272,162 @@ class TestMediumLoginRoutes:
         assert resp.status_code == 302
         loc = resp.headers["Location"]
         assert loc.startswith("/settings?")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Plan 2026-05-20-010 Unit 4 — Playwright lifecycle + closed-window catch
+# Regression tests for the crash fix shipped in webui_app/medium_login.py.
+# Without these, removing the `except _PWError` block silently reverts the
+# fix to a 500 + Flask debug page on user-closed Chromium windows.
+# ══════════════════════════════════════════════════════════════════════════════
+
+import urllib.parse
+
+
+class TestPlaywrightLifecycle:
+    """U1 — pw_cm.__exit__ called on ContextManager, not Playwright instance.
+
+    The original bug was ``pw.__exit__(None, None, None)`` where ``pw`` was
+    the ``Playwright`` *instance* (no ``__exit__`` attribute). The fix
+    stores the ``PlaywrightContextManager`` separately as ``pw_cm`` and
+    calls ``__exit__`` on it. This test asserts the fix by verifying the
+    mock's ``__exit__`` is actually invoked during cleanup.
+    """
+
+    def test_launch_calls_exit_on_context_manager(self, isolated_cfg):
+        from webui_app.medium_login import launch_login_window
+        mock_spw, _page, _ctx, pw_instance = _make_mock_pw()
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            launch_login_window(isolated_cfg)
+        pw_instance.__exit__.assert_called_once_with(None, None, None)
+
+    def test_probe_calls_exit_on_context_manager(self, isolated_cfg):
+        from webui_app.medium_login import probe_login_status
+        mock_spw, _page, _ctx, pw_instance = _make_mock_pw()
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            probe_login_status(isolated_cfg, timeout=5)
+        pw_instance.__exit__.assert_called_once_with(None, None, None)
+
+
+class TestPWErrorCatchLaunch:
+    """U2 — launch_login_window catches playwright.sync_api.Error.
+
+    Regression net for the "Target page, context or browser has been closed"
+    crash. Without these tests, deleting the ``except _PWError`` block
+    silently reverts to a 500 error.
+    """
+
+    def test_closed_window_raises_friendly_external_error(self, isolated_cfg):
+        from webui_app.medium_login import launch_login_window, _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.wait_for_url.side_effect = _PWError(
+            "Target page, context or browser has been closed"
+        )
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError, match="登录窗口已关闭"):
+                launch_login_window(isolated_cfg)
+
+    def test_generic_pw_error_falls_through_to_generic_message(self, isolated_cfg):
+        from webui_app.medium_login import launch_login_window, _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.wait_for_url.side_effect = _PWError("Browser launch failed: xyz")
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError, match="Medium 登录失败"):
+                launch_login_window(isolated_cfg)
+
+    def test_lock_released_after_pw_error(self, isolated_cfg):
+        from webui_app.medium_login import (
+            launch_login_window, _lock_path, _PWError,
+        )
+        mock_spw, page, *_ = _make_mock_pw()
+        page.wait_for_url.side_effect = _PWError("Target ... closed")
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError):
+                launch_login_window(isolated_cfg)
+        # _FileLock context exit must release even when _PWError bubbles.
+        assert not _lock_path(isolated_cfg).exists()
+
+
+class TestPWErrorCatchProbe:
+    """U2 — probe_login_status catches playwright.sync_api.Error too."""
+
+    def test_closed_window_raises_friendly_external_error(self, isolated_cfg):
+        from webui_app.medium_login import probe_login_status, _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.goto.side_effect = _PWError(
+            "Target page, context or browser has been closed"
+        )
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError, match="浏览器窗口被关闭"):
+                probe_login_status(isolated_cfg, timeout=5)
+
+    def test_generic_pw_error_falls_through(self, isolated_cfg):
+        from webui_app.medium_login import probe_login_status, _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.goto.side_effect = _PWError("Some other Playwright issue")
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError, match="Medium probe 失败"):
+                probe_login_status(isolated_cfg, timeout=5)
+
+
+class TestCtxCloseTolerant:
+    """U3 — finally's ctx.close() must tolerate already-closed context.
+
+    When the user closes the Chromium window, both ``page.wait_for_url`` and
+    the subsequent ``ctx.close()`` can throw the same _PWError. Without
+    the try/except in the finally block, the secondary error would mask
+    the original (which carried the user-friendly message).
+    """
+
+    def test_ctx_close_pw_error_does_not_mask_original(self, isolated_cfg):
+        from webui_app.medium_login import launch_login_window, _PWError
+        mock_spw, page, ctx, _ = _make_mock_pw()
+        page.wait_for_url.side_effect = _PWError("...closed")
+        ctx.close.side_effect = _PWError("ctx already closed")
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            with pytest.raises(ExternalServiceError, match="登录窗口已关闭"):
+                launch_login_window(isolated_cfg)
+        # ctx.close was attempted (and swallowed); __exit__ still ran.
+        ctx.close.assert_called_once()
+
+
+class TestPWErrorRouteIntegration:
+    """U2 + route-level — user-closed window surfaces as flash redirect,
+    not 500. This is the operator-visible behavior the plan promises.
+    """
+
+    def test_launch_closed_window_flashes_danger(self, csrf_client):
+        client, token = csrf_client
+        from webui_app.medium_login import _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.wait_for_url.side_effect = _PWError(
+            "Target page, context or browser has been closed"
+        )
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            resp = client.post(
+                "/settings/medium/launch-browser-login",
+                data={"_csrf_token": token},
+            )
+        assert resp.status_code == 302  # NOT 500
+        loc = urllib.parse.unquote(resp.headers["Location"])
+        assert "flash_type=danger" in loc
+        assert "登录窗口已关闭" in loc
+        assert "channel-medium" in loc
+
+    def test_probe_closed_window_flashes_warning(self, csrf_client):
+        client, token = csrf_client
+        from webui_app.medium_login import _PWError
+        mock_spw, page, *_ = _make_mock_pw()
+        page.goto.side_effect = _PWError(
+            "Target page, context or browser has been closed"
+        )
+        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+            resp = client.post(
+                "/settings/medium/probe-browser-login",
+                data={"_csrf_token": token},
+            )
+        assert resp.status_code == 302  # NOT 500
+        loc = urllib.parse.unquote(resp.headers["Location"])
+        # route handler maps probe ExternalServiceError -> warning, not danger
+        assert "flash_type=warning" in loc
+        assert "浏览器窗口被关闭" in loc
