@@ -54,10 +54,14 @@ class TestPerChannelCards:
     attribute the JS uses for routing button clicks.
     """
 
+    def _visible_channels(self):
+        from webui_app.binding_status import HIDDEN_FROM_UI
+        return [c for c in registered_platforms() if c not in HIDDEN_FROM_UI]
+
     def test_card_rendered_for_every_registered_channel(self, client):
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
-        for channel in registered_platforms():
+        for channel in self._visible_channels():
             # data-channel="<name>" appears on the card div + each button.
             pattern = f'data-channel="{channel}"'
             assert pattern in body, (
@@ -67,7 +71,7 @@ class TestPerChannelCards:
     def test_each_card_has_verify_button(self, client):
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
-        for channel in registered_platforms():
+        for channel in self._visible_channels():
             # Verify Token button per channel.
             assert re.search(
                 rf'class="[^"]*dch-btn-verify[^"]*"[^>]*data-channel="{channel}"',
@@ -77,7 +81,7 @@ class TestPerChannelCards:
     def test_each_card_has_dryrun_button(self, client):
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
-        for channel in registered_platforms():
+        for channel in self._visible_channels():
             assert re.search(
                 rf'class="[^"]*dch-btn-dryrun[^"]*"[^>]*data-channel="{channel}"',
                 body,
@@ -114,14 +118,19 @@ class TestDashboardDriftWithRegistry:
     """
 
     def test_dashboard_card_count_equals_registered_platform_count(self, client):
+        from webui_app.binding_status import HIDDEN_FROM_UI
+
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
         # Count of `dashboard-channel-card` outer divs.
         card_count = body.count('class="dashboard-channel-card"')
-        platform_count = len(registered_platforms())
-        assert card_count == platform_count, (
+        # Some adapters are intentionally hidden from the UI (e.g. retired
+        # channels whose source stays in repo for CLI use). The dashboard
+        # shows every registered platform EXCEPT those.
+        expected = len(registered_platforms()) - len(HIDDEN_FROM_UI)
+        assert card_count == expected, (
             f"Dashboard cards ({card_count}) != registered platforms "
-            f"({platform_count}). Drift detected — investigate "
+            f"minus hidden ({expected}). Drift detected — investigate "
             f"_settings_context.dashboard_channels and the card macro."
         )
 

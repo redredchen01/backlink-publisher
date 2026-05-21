@@ -253,39 +253,6 @@
             </div>
         </div>
 
-        <!-- Write.as 渠道折叠卡 (token-paste, Plan 006) -->
-        <div class="card channel-card">
-            <div class="card-header p-0">
-                <button type="button" class="channel-toggle"
-                        data-bs-toggle="collapse" data-bs-target="#channel-writeas"
-                        aria-expanded="false" aria-controls="channel-writeas">
-                    <i class="bi bi-journal-text" style="color:#0070a8;" aria-hidden="true"></i>
-                    <span>Write.as</span>
-                    <span class="badges">
-                        {% if writeas_status.bound %}
-                        <span class="badge-status ok">已绑定 ✓</span>
-                        {% else %}
-                        <span class="badge-status err">未绑定</span>
-                        {% endif %}
-                    </span>
-                    <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
-                </button>
-            </div>
-            <div id="channel-writeas" class="collapse">
-                <div class="card-body">
-                    {% with channel='writeas',
-                            token_status=writeas_status,
-                            token_label='Write.as access token',
-                            token_hint_url='https://write.as/me/app',
-                            token_hint_text='登录 Write.as 后访问应用设置，POST /api/auth/login 获取 access token。',
-                            config_summary=writeas_config_summary,
-                            config_path=config_path %}
-                        {% include '_settings_channel_token_paste.html' %}
-                    {% endwith %}
-                </div>
-            </div>
-        </div>
-
         <h2 class="section-heading">全局设置</h2>
 
         {% include '_settings_global_keywords.html' %}

@@ -984,9 +984,10 @@ class TestChannelBindingAPIRoutes:
 
 
 class TestTokenPasteRoutes:
-    """Plan 006 follow-up (2026-05-20) — token-paste binding for ghpages /
-    writeas. Full lifecycle in tests/test_webui_token_paste.py; this smoke
-    test satisfies the route-coverage gate below."""
+    """Plan 006 follow-up (2026-05-20) — token-paste binding for ghpages.
+    (writeas was retired from the WebUI on 2026-05-20.) Full lifecycle in
+    tests/test_webui_token_paste.py; this smoke test satisfies the
+    route-coverage gate below."""
 
     def test_post_save_channel_token_missing_csrf_returns_403(self, client):
         resp = client.post("/settings/save-channel-token")
