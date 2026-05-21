@@ -1083,6 +1083,26 @@ class TestLlmRoutes:
         assert resp.status_code == 302
         assert resp.headers["Location"].startswith("/settings?")
 
+
+class TestSecretLeakRegression:
+    """Guard against the P3 pattern reappearing — long-term credentials must
+    never be re-rendered into HTML where DevTools can read them."""
+
+    def test_blogger_client_secret_not_rendered(self, client):
+        from backlink_publisher.config import load_config, save_config
+        canary = "GOCSPX-LEAK-CANARY-do-not-render"
+        save_config(load_config(),
+                    blogger_client_id="canary.apps.googleusercontent.com",
+                    blogger_client_secret=canary,
+                    target_three_url=None)
+        resp = client.get("/settings")
+        assert resp.status_code == 200
+        assert canary.encode() not in resp.data, (
+            "client_secret leaked into rendered HTML — check helpers.py "
+            "_settings_context and _settings_channel_blogger.html for raw "
+            "secret backfill (regression of PR #139 P3 fix)."
+        )
+
     def test_test_llm_generation_returns_json(self, client):
         resp = client.post("/settings/test-llm-generation", data={})
         assert resp.status_code == 200

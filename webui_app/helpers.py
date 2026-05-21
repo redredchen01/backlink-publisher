@@ -1033,7 +1033,10 @@ def _settings_context(flash=None):
         medium_browser_status=_get_medium_browser_status(cfg, session=_flask_session),
         blogger_token=bool(token_data),
         blogger_client_id=cfg.blogger_oauth.client_id if cfg.blogger_oauth else "",
-        blogger_client_secret=cfg.blogger_oauth.client_secret if cfg.blogger_oauth else "",
+        # Boolean only — raw secret stays out of the template render context
+        # so a future regression like value="{{ blogger_client_secret }}" can't
+        # accidentally leak it (P3 defence-in-depth).
+        blogger_client_secret_set=bool(cfg.blogger_oauth and cfg.blogger_oauth.client_secret),
         blog_ids=cfg.blogger_blog_ids,
         medium_token_set=bool(token),
         medium_token_masked=masked if token else "",
