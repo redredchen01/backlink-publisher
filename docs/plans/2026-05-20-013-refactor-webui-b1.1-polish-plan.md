@@ -3,6 +3,7 @@ title: "refactor(webui): Plan 013 B-1.1 — mode_toggle.js extensions + shared c
 type: refactor
 status: active
 date: 2026-05-20
+claims: {}
 ---
 
 # WebUI Plan 013 B-1.1 — mode_toggle.js Extensions + Shared 4-Select Partial + Sticky CSS Scope
