@@ -33,7 +33,7 @@ class TestFullStackFlow:
         4. Bulk-recheck the unverified rows — mock verify_fn to fail
         5. Purge the resulting failures
         """
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
 
         rows = [
             {"status": "published", "target_url": "https://a/", "platform": "medium",

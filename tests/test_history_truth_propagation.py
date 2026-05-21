@@ -31,7 +31,7 @@ def isolated_history_store(tmp_path, monkeypatch):
 
 class TestPushHistoryPerRow:
     def test_writes_one_entry_per_row(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [
             {
                 "status": "published",
@@ -65,7 +65,7 @@ class TestPushHistoryPerRow:
         assert history[1]["article_urls"] == ["https://medium.com/p/def-draft"]
 
     def test_preserves_unverified_suffix(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [{
             "status": "published_unverified",
             "target_url": "https://x.example/",
@@ -78,7 +78,7 @@ class TestPushHistoryPerRow:
         assert isolated_history_store.load()[0]["status"] == "published_unverified"
 
     def test_empty_urls_with_no_error_coerces_to_failed(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [{
             "status": "drafted",
             "target_url": "https://x.example/",
@@ -96,7 +96,7 @@ class TestPushHistoryPerRow:
     def test_unverified_with_empty_urls_stays_unverified(self, isolated_history_store):
         # An `_unverified` row with empty URLs is still informative — the
         # adapter at least *tried*. Don't downgrade to failed.
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [{
             "status": "published_unverified",
             "target_url": "https://x.example/",
@@ -109,7 +109,7 @@ class TestPushHistoryPerRow:
         assert isolated_history_store.load()[0]["status"] == "published_unverified"
 
     def test_falls_back_to_provided_target_url(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [{
             "status": "published",
             # no target_url in the row
@@ -121,14 +121,14 @@ class TestPushHistoryPerRow:
         assert isolated_history_store.load()[0]["target_url"] == "https://fallback.example/"
 
     def test_empty_rows_is_noop(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         isolated_history_store.save([{"id": "preexisting"}])
         result = _push_history_per_row([])
         # Existing items untouched, no new items prepended
         assert [it.get("id") for it in result] == ["preexisting"]
 
     def test_carries_adapter_field(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         rows = [{
             "status": "published",
             "title": "T",
@@ -140,7 +140,7 @@ class TestPushHistoryPerRow:
         assert isolated_history_store.load()[0]["adapter"] == "medium-api"
 
     def test_error_row_preserved(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row
+        from webui_app.helpers.history import _push_history_per_row
         # publish-backlinks only sends successful rows to stdout, but
         # defensively a row with error should be carried as-is.
         rows = [{
@@ -155,7 +155,7 @@ class TestPushHistoryPerRow:
         assert item["error"] == "service error: 503 from medium"
 
     def test_truncates_to_max_items(self, isolated_history_store):
-        from webui_app.helpers import _push_history_per_row, _HISTORY_MAX_ITEMS
+        from webui_app.helpers.history import _push_history_per_row, _HISTORY_MAX_ITEMS
         # Pre-populate at limit
         isolated_history_store.save([
             {"id": f"old{n}"} for n in range(_HISTORY_MAX_ITEMS)
@@ -174,7 +174,7 @@ class TestPushHistoryPerRow:
 
 class TestPushHistorySingleFailure:
     def test_writes_one_failed_entry(self, isolated_history_store):
-        from webui_app.helpers import _push_history_single_failure
+        from webui_app.helpers.history import _push_history_single_failure
         _push_history_single_failure(
             target_url="https://x.example/",
             platform="medium",
@@ -188,7 +188,7 @@ class TestPushHistorySingleFailure:
         assert items[0]["article_urls"] == []
 
     def test_uses_default_error_when_blank(self, isolated_history_store):
-        from webui_app.helpers import _push_history_single_failure
+        from webui_app.helpers.history import _push_history_single_failure
         _push_history_single_failure(
             target_url="https://x.example/", platform="", language="", error="",
         )

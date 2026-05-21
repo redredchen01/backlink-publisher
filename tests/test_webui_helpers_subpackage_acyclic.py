@@ -13,8 +13,8 @@ from pathlib import Path
 
 HELPERS_DIR = Path(__file__).resolve().parents[1] / "webui_app" / "helpers"
 
-# Sub-modules present after Unit 1. Extend as Units 2-5 land.
-KNOWN_MODULES = {"url_meta"}
+# Sub-modules present after Unit 2. Extend as Units 3-5 land.
+KNOWN_MODULES = {"url_meta", "history"}
 
 # Documented inter-sibling edges (from → to). Unit 1 has none yet:
 # url_meta currently duplicates _TRUTHY_BYPASS rather than importing security.

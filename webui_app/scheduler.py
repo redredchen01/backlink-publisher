@@ -11,11 +11,11 @@ from webui_store import drafts_store as _drafts_store
 from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
-from .helpers import (
+from .helpers import run_pipe
+from .helpers.history import (
     _parse_publish_results,
     _push_history_per_row,
     _push_history_single_failure,
-    run_pipe,
 )
 
 

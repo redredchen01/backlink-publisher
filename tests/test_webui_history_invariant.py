@@ -26,7 +26,7 @@ def client():
     return webui.app.test_client()
 
 
-from webui_app.helpers import (
+from webui_app.helpers.history import (
     _HISTORY_MAX_ITEMS,
     _REQUIRES_URL_STATUSES,
     _apply_history_cap,

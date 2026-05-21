@@ -12,12 +12,14 @@ from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id 
 
 from ..helpers import (
     _REPO_ROOT,
-    _parse_publish_results,
-    _push_history_per_row,
-    _push_history_single_failure,
     _render,
     _rewrite_cli_cmd,
     run_pipe,
+)
+from ..helpers.history import (
+    _parse_publish_results,
+    _push_history_per_row,
+    _push_history_single_failure,
 )
 from ..helpers.url_meta import get_main_domain
 

@@ -12,7 +12,8 @@ from flask import Blueprint, jsonify, redirect, request, session
 from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
-from ..helpers import _REQUIRES_URL_STATUSES, _draft_tab_extra, _render
+from ..helpers import _draft_tab_extra, _render
+from ..helpers.history import _REQUIRES_URL_STATUSES
 
 bp = Blueprint("history", __name__)
 

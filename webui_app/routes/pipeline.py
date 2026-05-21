@@ -11,13 +11,15 @@ from backlink_publisher._util.logger import plan_logger
 from flask import Blueprint, request, session
 
 from ..helpers import (
-    _parse_publish_results,
     _persist_three_tier_config,
-    _push_history_per_row,
-    _push_history_single_failure,
     _render,
     _get_velog_status,
     run_pipe,
+)
+from ..helpers.history import (
+    _parse_publish_results,
+    _push_history_per_row,
+    _push_history_single_failure,
 )
 from ..helpers.url_meta import (
     _normalize_url,

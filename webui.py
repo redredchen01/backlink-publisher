@@ -40,12 +40,18 @@ from webui_app.helpers import (  # noqa: E402
     _load_schedule_settings,
     _oauth_callback_uri,
     _parse_lines,
-    _parse_publish_results,
     _persist_three_tier_config,
     _render,
     _settings_context,
     _validate_webui_run_id,
     run_pipe,
+)
+from webui_app.helpers.history import (  # noqa: E402
+    _parse_publish_results,
+    _push_history_per_row,
+    _push_history_single_failure,
+    _push_history_aggregate,
+    _REQUIRES_URL_STATUSES,
 )
 from webui_app.helpers.url_meta import (  # noqa: E402
     _content_gate_enabled,
