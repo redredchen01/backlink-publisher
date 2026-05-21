@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 from flask import Flask, jsonify
 
-from webui_app.helpers import (
+from webui_app.helpers.security import (
     _check_bind_origin_or_abort,
     _refuse_when_allow_network,
     _FLASK_PORT,

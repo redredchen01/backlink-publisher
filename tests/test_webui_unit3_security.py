@@ -46,7 +46,7 @@ def client(app):
 
 class TestSafeFlashRedirect:
     def test_strips_crlf(self, app):
-        from webui_app.helpers import _safe_flash_redirect
+        from webui_app.helpers.security import _safe_flash_redirect
         with app.test_request_context():
             resp = _safe_flash_redirect(
                 "/x", flash_type="danger",
@@ -57,7 +57,7 @@ class TestSafeFlashRedirect:
         assert "Set-Cookie" in loc  # text preserved, but no raw CRLF
 
     def test_caps_length(self, app):
-        from webui_app.helpers import _safe_flash_redirect, _FLASH_MSG_MAX_LEN
+        from webui_app.helpers.security import _safe_flash_redirect, _FLASH_MSG_MAX_LEN
         with app.test_request_context():
             resp = _safe_flash_redirect(
                 "/x", flash_type="warning", msg="A" * 500)
@@ -69,7 +69,7 @@ class TestSafeFlashRedirect:
         assert len(msg_decoded) <= _FLASH_MSG_MAX_LEN
 
     def test_quotes_special_chars(self, app):
-        from webui_app.helpers import _safe_flash_redirect
+        from webui_app.helpers.security import _safe_flash_redirect
         with app.test_request_context():
             resp = _safe_flash_redirect(
                 "/x", flash_type="info",
@@ -81,7 +81,7 @@ class TestSafeFlashRedirect:
         assert "%23" in loc
 
     def test_fragment_appended(self, app):
-        from webui_app.helpers import _safe_flash_redirect
+        from webui_app.helpers.security import _safe_flash_redirect
         with app.test_request_context():
             resp = _safe_flash_redirect(
                 "/x", flash_type="success", msg="ok",
@@ -89,7 +89,7 @@ class TestSafeFlashRedirect:
         assert resp.headers["Location"].endswith("#sect-ai")
 
     def test_empty_msg_omits_param(self, app):
-        from webui_app.helpers import _safe_flash_redirect
+        from webui_app.helpers.security import _safe_flash_redirect
         with app.test_request_context():
             resp = _safe_flash_redirect("/x", flash_type="info", msg="")
         assert "flash_msg=" not in resp.headers["Location"]
@@ -99,7 +99,7 @@ class TestSafeFlashRedirect:
 
 class TestSafeReferrerRedirect:
     def test_same_origin_referrer_followed(self, app):
-        from webui_app.helpers import _safe_referrer_redirect
+        from webui_app.helpers.security import _safe_referrer_redirect
         with app.test_request_context(
                 "/profiles/delete", method="POST",
                 headers={"Referer": "http://localhost/some-page"}):
@@ -107,7 +107,7 @@ class TestSafeReferrerRedirect:
         assert "/some-page" in resp.headers["Location"]
 
     def test_cross_origin_referrer_blocked(self, app):
-        from webui_app.helpers import _safe_referrer_redirect
+        from webui_app.helpers.security import _safe_referrer_redirect
         with app.test_request_context(
                 "/profiles/delete", method="POST",
                 headers={"Referer": "https://evil.com/phish"}):
@@ -115,7 +115,7 @@ class TestSafeReferrerRedirect:
         assert resp.headers["Location"] == "/"
 
     def test_no_referrer_uses_default(self, app):
-        from webui_app.helpers import _safe_referrer_redirect
+        from webui_app.helpers.security import _safe_referrer_redirect
         with app.test_request_context("/profiles/delete", method="POST"):
             resp = _safe_referrer_redirect(default="/")
         assert resp.headers["Location"] == "/"

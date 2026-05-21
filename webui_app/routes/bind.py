@@ -35,7 +35,7 @@ from backlink_publisher._util.errors import UsageError
 from backlink_publisher.cli._bind.channels import CHANNELS
 from backlink_publisher.config.loader import _config_dir
 
-from ..helpers import (
+from ..helpers.security import (
     _check_bind_origin_or_abort,
     _LOOPBACK_HOSTS,
     _refuse_when_allow_network,

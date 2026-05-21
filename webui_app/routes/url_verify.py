@@ -36,7 +36,7 @@ from flask import Blueprint, abort, jsonify, request, session
 
 from backlink_publisher._util.logger import get_logger
 
-from ..helpers import (
+from ..helpers.security import (
     _LOOPBACK_HOSTS,
     _check_bind_origin_or_abort,
     _refuse_when_allow_network,

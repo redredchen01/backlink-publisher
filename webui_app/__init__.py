@@ -100,7 +100,7 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         # ``{{ csrf_token() }}`` exploded under /settings. The try/except
         # handles template-only renders that some unit tests do outside
         # of a real request context (session is unavailable there).
-        from .helpers import _ensure_csrf_token
+        from .helpers.security import _ensure_csrf_token
         try:
             return {"csrf_token": _ensure_csrf_token()}
         except RuntimeError:
@@ -131,7 +131,7 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         # the cross-origin redirect.
         if _req.endpoint and _req.endpoint.endswith('oauth_callback'):
             return
-        from .helpers import _check_csrf_or_abort
+        from .helpers.security import _check_csrf_or_abort
         _check_csrf_or_abort()
 
     # Start scheduler unless under pytest (tests don't need background jobs)
