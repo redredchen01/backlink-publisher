@@ -69,12 +69,14 @@ class ChannelRecipe:
 from .velog import RECIPE as _VELOG_RECIPE
 from .medium import RECIPE as _MEDIUM_RECIPE
 from .blogger import RECIPE as _BLOGGER_RECIPE
+from .hashnode import RECIPE as _HASHNODE_RECIPE  # plan-016 Unit 1 SPIKE STUB
 
 
 RECIPES: dict[str, ChannelRecipe] = {
     "velog": _VELOG_RECIPE,
     "medium": _MEDIUM_RECIPE,
     "blogger": _BLOGGER_RECIPE,
+    "hashnode": _HASHNODE_RECIPE,
 }
 
 
