@@ -1173,16 +1173,35 @@
         </div>
         {% endif %}
         
-        {% if published %}
+        {% if published or publish_state %}
+        {# publish_state ∈ {all_success, partial_success, all_failed}; defaults
+           to all_success when absent so legacy callers (passing only `published`)
+           keep the original green banner. #}
+        {% set _ps = publish_state or 'all_success' %}
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-trophy me-2"></i>发布结果
             </div>
             <div class="card-body">
+                {% if _ps == 'all_success' %}
                 <div class="success-box mb-3">
                     <i class="bi bi-check-circle me-2"></i>
                     发布成功！
                 </div>
+                {% elif _ps == 'partial_success' %}
+                <div class="success-box mb-3" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border-left-color:var(--warning);color:#92400e;">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    部分发布成功 ({{ n_ok }}/{{ n_total }})
+                </div>
+                {% if publish_error %}
+                <div class="error-box mb-3">{{ publish_error }}</div>
+                {% endif %}
+                {% else %}
+                <div class="error-box mb-3">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    发布失败{% if publish_error %}：{{ publish_error }}{% endif %}
+                </div>
+                {% endif %}
                 {% if publish_results %}
                 {% for r in publish_results %}
                 {% set article_url = r.published_url or r.draft_url %}
@@ -1214,10 +1233,12 @@
                 </div>
                 {% endfor %}
                 {% endif %}
+                {% if published %}
                 <details style="margin-top:12px;">
                     <summary style="font-size:12px;color:var(--secondary);cursor:pointer;">原始输出</summary>
                     <pre class="content-preview mt-2" style="font-size:11px;">{{ published }}</pre>
                 </details>
+                {% endif %}
             </div>
         </div>
         {% endif %}

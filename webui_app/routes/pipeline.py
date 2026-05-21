@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import json
-import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 
 from backlink_publisher._util.markdown import render_to_html
 from backlink_publisher._util.logger import plan_logger
 
 from flask import Blueprint, request, session
 
-from webui_store import history_store
-
 from ..helpers import (
     _normalize_url,
     _parse_publish_results,
     _persist_three_tier_config,
+    _push_history_per_row,
+    _push_history_single_failure,
     _render,
     _get_velog_status,
     _verify_urls_or_error,
@@ -243,6 +241,8 @@ def ce_publish():
 
     platform = request.form.get('platform', config.get('platform', 'blogger'))
     publish_mode = request.form.get('publish_mode', config.get('publish_mode', 'publish'))
+    target_url = config.get('target_url', 'unknown')
+    language = config.get('target_language', 'zh-CN')
 
     try:
         if platform == 'velog':
@@ -256,39 +256,80 @@ def ce_publish():
         cmd = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
         result = run_pipe(cmd, plans)
         published = result['stdout']
+        stderr = result.get('stderr', '') or ''
+    except Exception as exc:
+        msg = str(exc)
+        _push_history_single_failure(
+            target_url=target_url, platform=platform, language=language, error=msg,
+        )
+        plan_logger.warn(
+            "webui_publish_result",
+            state="all_failed", platform=platform, publish_mode=publish_mode,
+            n_ok=0, n_failed=0, stderr_preview=msg[:200],
+        )
+        return _render('index.html',
+            publish_state='all_failed', publish_error=f"发布失败: {msg}",
+            config=config, history_active=True)
 
-        if not published.strip():
-            return _render('index.html',
-                error=result['stderr'] or "发布失败",
-                config=config, history_active=True)
+    publish_results = _parse_publish_results(published)
+    if not publish_results:
+        # CLI exited 0 with stdout that did not parse into rows — treat as
+        # failure rather than silently masking the lack of usable output.
+        diagnostic = stderr.strip() or "publish-backlinks returned no parseable rows"
+        _push_history_single_failure(
+            target_url=target_url, platform=platform, language=language,
+            error=diagnostic,
+        )
+        plan_logger.warn(
+            "webui_publish_result",
+            state="all_failed", platform=platform, publish_mode=publish_mode,
+            n_ok=0, n_failed=0, stderr_preview=diagnostic[:200],
+        )
+        return _render('index.html',
+            publish_state='all_failed', publish_error=diagnostic,
+            published=published, config=config, history_active=True)
 
-        publish_results = _parse_publish_results(published)
-        article_urls = [u for u in (r.get('published_url') or r.get('draft_url', '')
-                                    for r in publish_results if r) if u]
-        # Invariant: a "drafted"/"published" row must carry at least one URL.
-        # If the CLI returned 0 but emitted no usable URL, downgrade to
-        # "failed" so the UI doesn't show a false green check. Mirrors
-        # _push_history_per_row in helpers.py (Plan 2026-05-19-006 Unit 1).
-        status = ('drafted' if publish_mode == 'draft' else 'published') if article_urls else 'failed'
-        entry = {
-            'id': str(uuid.uuid4())[:8],
-            'target_url': config.get('target_url', 'unknown'),
-            'platform': platform,
-            'language': config.get('target_language', 'zh-CN'),
-            'status': status,
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
-            'article_urls': article_urls,
-        }
-        if not article_urls:
-            entry['error'] = 'publish-backlinks returned 0 but emitted no URL'
-        history_store.update(lambda hist: [entry, *hist][:100])
+    _push_history_per_row(
+        publish_results,
+        target_url_fallback=target_url,
+        platform_fallback=platform,
+        language_fallback=language,
+    )
 
-        return _render('index.html', published=published,
-                       publish_results=publish_results,
-                       config=config, history_active=True)
-    except Exception as e:
-        return _render('index.html', error=f"发布失败: {str(e)}",
-                       config=config, history_active=True)
+    n_ok = sum(
+        1 for r in publish_results
+        if (r.get('published_url') or '').strip() or (r.get('draft_url') or '').strip()
+    )
+    n_failed = len(publish_results) - n_ok
+    if n_failed == 0:
+        publish_state = 'all_success'
+    elif n_ok == 0:
+        publish_state = 'all_failed'
+    else:
+        publish_state = 'partial_success'
+
+    publish_error = ''
+    if n_failed:
+        failure_msgs = [
+            (r.get('error') or '').strip() or f"{r.get('status') or 'failed'} (no URL)"
+            for r in publish_results
+            if not ((r.get('published_url') or '').strip()
+                    or (r.get('draft_url') or '').strip())
+        ]
+        publish_error = "；".join(m for m in failure_msgs if m)
+
+    log_fn = plan_logger.info if publish_state == 'all_success' else plan_logger.warn
+    log_fn(
+        "webui_publish_result",
+        state=publish_state, platform=platform, publish_mode=publish_mode,
+        n_ok=n_ok, n_failed=n_failed, stderr_preview=stderr[:200],
+    )
+
+    return _render('index.html', published=published,
+                   publish_results=publish_results,
+                   publish_state=publish_state, publish_error=publish_error,
+                   n_ok=n_ok, n_total=len(publish_results),
+                   config=config, history_active=True)
 
 @bp.route('/ce:preview', methods=['POST'])
 def ce_preview():
