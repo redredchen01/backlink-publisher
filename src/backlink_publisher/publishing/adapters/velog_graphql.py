@@ -1,5 +1,14 @@
 """Velog adapter — GraphQL writePost via cookie auth.
 
+**Canonical URL support: N/A** (Plan 2026-05-21-003 Unit 2). Velog's
+``WRITE_POST_MUTATION`` (see ``_BUILD_MUTATION`` constants below) is fixed
+at the 7 fields the server accepts (title, body, tags, is_markdown,
+is_temp, is_private, url_slug, thumbnail, meta, series_id, token). There
+is no ``originalArticleURL`` / ``canonical_url`` equivalent; adding one
+to the mutation would be rejected server-side. ``payload.seo.canonical_url``
+is therefore ignored by this adapter, by design. Rows that need
+syndication-mode canonical should route to a different platform.
+
 Authentication model (P0-2 + P0-3 spike results):
 - Credentials stored as cookies-only JSON (0600); produced by ``velog-login``.
 - ``access_token`` TTL: 24 h (initial login) or 1 h (after implicit refresh).

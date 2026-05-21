@@ -132,6 +132,15 @@ def _build_markdown_body(payload: dict[str, Any]) -> str:
         front_matter_lines.append(
             "tags: [" + ", ".join(json.dumps(t, ensure_ascii=False) for t in tags) + "]"
         )
+    # Mixed canonical (Plan 003 R2): emit Jekyll-compatible ``canonical_url:``
+    # only when payload carries a non-empty schema-validated URL. ``json.dumps``
+    # gives us a YAML-safe quoted scalar even though the regex already
+    # rejected newlines / quotes / control chars at schema time.
+    canonical = payload.get("seo", {}).get("canonical_url") or None
+    if canonical:
+        front_matter_lines.append(
+            f"canonical_url: {json.dumps(canonical, ensure_ascii=False)}"
+        )
     front_matter_lines.append("---")
     front_matter = "\n".join(front_matter_lines)
 

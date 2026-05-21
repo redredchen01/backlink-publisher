@@ -3,6 +3,13 @@
 Plan: docs/plans/2026-05-19-002-feat-telegraph-channel-end-to-end-wiring-plan.md
 Origin: docs/brainstorms/2026-05-19-telegraph-channel-end-to-end-wiring-requirements.md
 
+**Canonical URL support: N/A** (Plan 2026-05-21-003 Unit 2). Telegraph's
+node-tag whitelist (see ``telegraph_node._ALLOWED_TAGS``) does not include
+``<link>`` or any head-meta tag; the API renders only structural body
+elements. Telegraph therefore cannot carry a ``rel=canonical`` —
+``payload.seo.canonical_url`` is ignored by this adapter, by design. Rows
+that need syndication-mode canonical should route to a different platform.
+
 Design summary:
 * Single adapter (no fallback element) registered via
   ``register("telegraph", TelegraphAPIAdapter)``.  Telegraph has no

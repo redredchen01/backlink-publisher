@@ -78,12 +78,25 @@ def _build_post_body(payload: dict[str, Any]) -> dict[str, Any]:
     Write.as accepts ``title`` (optional), ``body`` (markdown), ``font``
     (norm / sans / wrap / serif / mono), and ``lang`` (BCP-47).
     Body source priority: ``content_markdown`` → rendered HTML.
+
+    Mixed canonical (Plan 003 R2): when payload carries a non-empty
+    schema-validated ``seo.canonical_url``, prepend ``<link rel=canonical>``
+    to the body. Markdown allows inline HTML; the link tag is delivered
+    verbatim per the forwarder contract. SEO impact: Write.as renders
+    body server-side without exposing post ``<head>`` to the operator,
+    so this is best-effort cosmetic — Google's canonical resolver may
+    not honor a body-level tag. Adapter does not escape the URL (schema
+    gate already rejected control chars / quotes / angle brackets /
+    non-http schemes).
     """
     title = payload.get("title", "")
     body = (
         payload.get("content_markdown")
         or extract_publish_html(payload, "writeas")
     )
+    canonical = payload.get("seo", {}).get("canonical_url") or None
+    if canonical:
+        body = f'<link rel="canonical" href="{canonical}">\n\n{body}'
     lang = payload.get("language") or "en"
     out: dict[str, Any] = {"body": body, "font": "norm", "lang": lang}
     if title:
