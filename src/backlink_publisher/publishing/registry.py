@@ -115,12 +115,11 @@ _REGISTRY: dict[str, list[type[Publisher] | Publisher]] = {}
 # ``rejected_at`` is recoverable from ``git log`` and ``dofollow=False``
 # is implicit (this is a rejection map).
 _REJECTED_PLATFORMS: dict[str, str] = {
-    "devto": (
-        "Dev.to applies rel=\"nofollow ugc\" to outbound links since ~2022 "
-        "per platform policy; every external <a> is decorated server-side "
-        "regardless of account tier or post format — backlinks here carry "
-        "zero PageRank transfer. Reverted in PR #109 after PR #108 ship."
-    ),
+    # devto: re-registered as nofollow chrome-publish channel in
+    #   Plan 2026-05-21-001 Unit 4b. Operator surface notes the
+    #   nofollow status via the dashboard chip; backlinks still
+    #   provide referral traffic + topical relevance signals even
+    #   though they don't transfer PageRank.
     "mastodon": (
         "Mastodon hardcodes rel=\"nofollow noopener noreferrer\" on outbound "
         "links across all instances; the attribute is federation-default and "

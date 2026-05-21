@@ -48,6 +48,7 @@ from .writeas import WriteAsAPIAdapter
 from ..browser_publish import BrowserPublishDispatcher
 from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
 from ..browser_publish.recipes import hashnode as _hashnode_recipe  # noqa: F401
+from ..browser_publish.recipes import devto as _devto_recipe  # noqa: F401
 
 
 # Register the fallback chain per platform. Adding a new platform = one
@@ -95,6 +96,21 @@ register(
     ),
 )
 register("writeas", WriteAsAPIAdapter, dofollow=True)
+register(
+    "devto",
+    BrowserPublishDispatcher.for_channel("devto"),
+    dofollow=False,
+    rationale=(
+        "Dev.to applies rel=\"nofollow ugc\" to outbound links since "
+        "~2022 per platform policy; every external <a> is decorated "
+        "server-side regardless of account tier or post format. "
+        "Re-registered in Plan 2026-05-21-001 Unit 4b as a chrome "
+        "publish channel — backlinks here still drive referral traffic "
+        "and topical relevance signals even though they don't transfer "
+        "PageRank. Operator dashboard chip surfaces the nofollow "
+        "status (Unit 5)."
+    ),
+)
 
 
 def publish(

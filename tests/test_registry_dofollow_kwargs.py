@@ -108,10 +108,15 @@ class TestDofollowUncertainRequiresRationale:
 
 
 class TestRejectedPlatform:
+    # Post Plan 2026-05-21-001 Unit 4b: devto removed from rejection
+    # map (shipped as chrome-publish channel). Remaining canonical
+    # rejected platforms: mastodon, wordpresscom. Mastodon's removal
+    # will follow in Unit 4c.
+
     def test_register_rejected_name_raises_even_with_valid_dofollow(self) -> None:
         # R12: rejection check fires regardless of dofollow value.
         with pytest.raises(RegistryError, match="previously rejected"):
-            register("devto", FakeAdapter, dofollow=False, rationale=RATIONALE_PAD)
+            register("wordpresscom", FakeAdapter, dofollow=False, rationale=RATIONALE_PAD)
 
     def test_register_rejected_name_with_dofollow_true_still_raises(self) -> None:
         with pytest.raises(RegistryError, match="previously rejected"):
@@ -129,11 +134,12 @@ class TestRejectedPlatform:
 
     def test_un_rejection_by_deletion_then_register_succeeds(self) -> None:
         # R12 happy path: delete entry from _REJECTED_PLATFORMS, then
-        # register() succeeds with normal R3 validation.
-        _REJECTED_PLATFORMS.pop("devto")
-        register("devto", FakeAdapter, dofollow=False, rationale=RATIONALE_PAD)
-        assert dofollow_status("devto") is False
-        assert "devto" not in _REJECTED_PLATFORMS
+        # register() succeeds with normal R3 validation. wordpresscom
+        # is the canonical example post Unit 4b.
+        _REJECTED_PLATFORMS.pop("wordpresscom")
+        register("wordpresscom", FakeAdapter, dofollow=False, rationale=RATIONALE_PAD)
+        assert dofollow_status("wordpresscom") is False
+        assert "wordpresscom" not in _REJECTED_PLATFORMS
 
 
 class TestDofollowKwargRequired:

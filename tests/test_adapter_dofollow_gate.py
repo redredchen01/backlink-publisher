@@ -154,8 +154,12 @@ class TestSyntheticRedPaths:
     def test_register_rejected_name_raises_with_deletion_instruction(
         self,
     ) -> None:
+        # ``wordpresscom`` replaces ``devto`` as the canonical rejected
+        # example post Plan 2026-05-21-001 Unit 4b — devto was removed
+        # from the rejection map when it shipped as a chrome-publish
+        # channel. Mastodon will follow in Unit 4c.
         with pytest.raises(RegistryError) as exc:
-            register("devto", _FakeAdapter, dofollow=True)
+            register("wordpresscom", _FakeAdapter, dofollow=True)
         message = str(exc.value)
         assert "previously rejected" in message
         assert "delete this entry" in message
@@ -174,9 +178,12 @@ class TestSyntheticRedPaths:
         self, _isolate_registry
     ) -> None:
         # Happy-path R12: delete entry, then register normally.
-        _REJECTED_PLATFORMS.pop("devto")
+        # ``wordpresscom`` is the canonical rejected example post Unit 4b
+        # — devto was removed from rejection map and shipped as a
+        # chrome-publish channel in that PR.
+        _REJECTED_PLATFORMS.pop("wordpresscom")
         register(
-            "devto",
+            "wordpresscom",
             _FakeAdapter,
             dofollow=False,
             rationale=(
@@ -185,5 +192,5 @@ class TestSyntheticRedPaths:
                 "replaces R12's deferred-from-brainstorm override kwarg."
             ),
         )
-        assert dofollow_status("devto") is False
-        assert "devto" not in _REJECTED_PLATFORMS
+        assert dofollow_status("wordpresscom") is False
+        assert "wordpresscom" not in _REJECTED_PLATFORMS
