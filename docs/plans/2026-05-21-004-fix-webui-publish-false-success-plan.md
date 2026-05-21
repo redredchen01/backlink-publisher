@@ -3,6 +3,7 @@ title: "fix: WebUI publish button shows success banner with no article URL"
 type: fix
 status: completed
 date: 2026-05-21
+claims: {}
 ---
 
 # fix: WebUI publish button shows success banner with no article URL
