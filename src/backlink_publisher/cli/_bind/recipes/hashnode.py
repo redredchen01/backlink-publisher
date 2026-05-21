@@ -56,8 +56,13 @@ def _hashnode_bound_predicate(page) -> None:
     Spike-grade — production version (Unit 2) adds cookie sanity gate
     and identity-mismatch guard. This stub trusts URL alone, which is
     sufficient for capturing the post-login state for offline inspection.
+
+    Note: explicit ``timeout=600_000`` (10 min) because Playwright's
+    ``wait_for_url`` uses NAVIGATION default timeout (30s), NOT the
+    ``set_default_timeout(BIND_TIMEOUT_MS)`` the driver sets — different
+    timeout buckets. Operator needs realistic SSO + 2FA budget.
     """
-    page.wait_for_url(_BOUND_URL_PATTERN)
+    page.wait_for_url(_BOUND_URL_PATTERN, timeout=600_000)
 
 
 def _hashnode_cookie_host_filter(host) -> bool:
