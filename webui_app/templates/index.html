@@ -1457,13 +1457,16 @@
                                 <i class="bi bi-funnel me-1"></i>⚡ 一键清失败 ({{ _failed_count }})
                             </button>
                         </div>
+                        {# Lift platform-slug list outside the per-row loop:
+                           was rebuilt on every history item (~7 platforms ×
+                           N rows attribute walks). #}
+                        {% set _platform_slugs = platforms | map(attribute='slug') | list %}
                         {% for item in history %}
                         {% set s = item.status %}
                         {% set norm_status =
                             'unverified' if s in ('published_unverified', 'drafted_unverified')
                             else ('published' if s in ('success', 'published')
                                   else (s if s in ('drafted', 'failed') else 'other')) %}
-                        {% set _platform_slugs = platforms | map(attribute='slug') | list %}
                         {% set norm_platform = item.platform if item.platform in _platform_slugs else 'other' %}
                         <div class="history-item {% if s in ('success','published') %}success{% elif s in ('published_unverified','drafted_unverified') %}unverified{% elif s == 'failed' %}failed{% else %}pending{% endif %}"
                              data-id="{{ item.id }}"

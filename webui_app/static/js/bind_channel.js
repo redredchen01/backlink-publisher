@@ -14,7 +14,21 @@
 (function () {
     'use strict';
 
-    var POLL_INTERVAL_MS = 1000;
+    // Poll cadence: exponential backoff 1s → 2s → 4s, capped at 5s.
+    // A flat 1s poll generated 60+ requests per minute for long binds
+    // (Chrome attach can take 30-120s). The backoff drops that to ~10
+    // requests per minute steady-state without sacrificing responsiveness
+    // for fast binds (first poll still fires at 1s).
+    var POLL_INITIAL_MS = 1000;
+    var POLL_MAX_MS = 5000;
+    var POLL_BACKOFF_FACTOR = 2;
+    // After this many consecutive poll errors, surface failure to UI and
+    // stop polling — protects operator from a silently-stuck loop when the
+    // bind subprocess died or the server stopped responding.
+    var POLL_MAX_CONSECUTIVE_ERRORS = 3;
+    // Per-job mutable state — keyed by jobId so concurrent binds across
+    // multiple channels don't interfere.
+    var _pollState = {};
     var BADGE_TEXTS = {
         bound:   '已绑定 ✓',
         expired: '已过期 ⚠',
@@ -82,13 +96,27 @@
         }
     }
 
+    function _initState(jobId) {
+        if (!_pollState[jobId]) {
+            _pollState[jobId] = {interval: POLL_INITIAL_MS, errors: 0};
+        }
+        return _pollState[jobId];
+    }
+
+    function _clearState(jobId) {
+        delete _pollState[jobId];
+    }
+
     function pollJob(channel, jobId) {
+        var state = _initState(jobId);
         var url = '/settings/channels/' + encodeURIComponent(channel)
                 + '/bind/' + encodeURIComponent(jobId);
         fetch(url, {credentials: 'same-origin'})
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!data) return;
+                // Reset error counter on any successful response.
+                state.errors = 0;
                 var renderedCount = parseInt(
                     document.getElementById('bind-log-' + channel)
                         .getAttribute('data-rendered') || '0', 10);
@@ -107,17 +135,38 @@
                         '已取得授权，请刷新页面查看最新状态',
                         {scroll: true}
                     );
+                    _clearState(jobId);
                 } else if (data.status === 'failed') {
                     setBadge(channel, 'failed');
                     if (data.error_message) appendLog(channel, data.error_message);
+                    _clearState(jobId);
                 } else {
                     setBadge(channel, 'running');
-                    setTimeout(function () { pollJob(channel, jobId); }, POLL_INTERVAL_MS);
+                    var delay = state.interval;
+                    // Compute next interval AFTER scheduling current one,
+                    // so the first re-poll uses POLL_INITIAL_MS.
+                    state.interval = Math.min(
+                        state.interval * POLL_BACKOFF_FACTOR, POLL_MAX_MS);
+                    setTimeout(function () { pollJob(channel, jobId); }, delay);
                 }
             })
             .catch(function (err) {
-                appendLog(channel, '轮询出错：' + err);
-                setBadge(channel, 'failed');
+                state.errors += 1;
+                if (state.errors >= POLL_MAX_CONSECUTIVE_ERRORS) {
+                    appendLog(channel,
+                        '轮询连续失败 ' + state.errors + ' 次，停止轮询：' + err);
+                    setBadge(channel, 'failed');
+                    _clearState(jobId);
+                    return;
+                }
+                appendLog(channel,
+                    '轮询出错 (重试 ' + state.errors + '/'
+                    + POLL_MAX_CONSECUTIVE_ERRORS + ')：' + err);
+                // Retry with backoff on transient errors.
+                var delay = state.interval;
+                state.interval = Math.min(
+                    state.interval * POLL_BACKOFF_FACTOR, POLL_MAX_MS);
+                setTimeout(function () { pollJob(channel, jobId); }, delay);
             });
     }
 
