@@ -153,12 +153,13 @@ class TestSettingsRenderWithCards:
         resp = client.get("/settings")
         assert b'dofollow' in resp.data
 
-    def test_settings_does_not_expose_devto_card(self, client):
-        # Reverted Phase 4 platforms should NOT appear in the settings UI
-        # — defensive check against accidentally re-exposing nofollow platforms.
-        # Write.as retired 2026-05-20 — also asserted absent.
+    def test_settings_devto_card_exposed_after_unit4b(self, client):
+        # Plan 2026-05-21-001 Unit 4b un-rejects devto and ships it as a
+        # chrome-publish channel — the binding dashboard card must appear.
+        # mastodon still rejected until Unit 4c; wpcom permanently rejected;
+        # writeas retired to HIDDEN_FROM_UI — all three must stay absent.
         resp = client.get("/settings")
-        assert b'channel-devto' not in resp.data
+        assert b'channel-devto' in resp.data
         assert b'channel-mastodon' not in resp.data
         assert b'channel-wpcom' not in resp.data
         assert b'channel-writeas' not in resp.data

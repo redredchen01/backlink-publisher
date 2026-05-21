@@ -38,8 +38,8 @@ ceiling = 580
 rationale = "U4 read-side projector (SLOC 548 at seed): flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until U5 inline-flush seam reveals a real boundary. Re-evaluate when U7 bp-events-rebuild bootstrap reuses the reducer entry points."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
-ceiling = 660
-rationale = "Registry + re-export hub (SLOC 625): 41 register() calls, 9 chained-adapter tuples, tier matrix, content-negotiation dispatch, and re-exports for 18 publishing sub-modules. Warning-only canary until a decomposition boundary appears (e.g., tier matrix + helpers → _tiers.py)."
+ceiling = 700
+rationale = "Registry + re-export hub (SLOC 676 post Plan 2026-05-21-001 Unit 4b): devto chrome-publish registration chain added nofollow rationale block, growing from 625 to 676. Ceiling raised from 660 to 700 to cover Units 4b/4c/5 chain expansions without per-unit bumps. Decomposition target: extract per-channel nofollow rationale strings to _rationales.py once all chrome-publish channels land."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
 ceiling = 750
