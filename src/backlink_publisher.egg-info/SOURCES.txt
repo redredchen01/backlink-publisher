@@ -35,6 +35,7 @@ src/backlink_publisher/anchor/scheduler.py
 src/backlink_publisher/cli/__init__.py
 src/backlink_publisher/cli/_publish_helpers.py
 src/backlink_publisher/cli/_resume.py
+src/backlink_publisher/cli/_seal_init.py
 src/backlink_publisher/cli/bind_channel.py
 src/backlink_publisher/cli/footprint.py
 src/backlink_publisher/cli/frw_login.py
@@ -78,6 +79,7 @@ src/backlink_publisher/config/parsers/llm.py
 src/backlink_publisher/config/parsers/target.py
 src/backlink_publisher/config/parsers/three_url.py
 src/backlink_publisher/content/__init__.py
+src/backlink_publisher/content/_http.py
 src/backlink_publisher/content/fetch.py
 src/backlink_publisher/content/scraper.py
 src/backlink_publisher/content/themed_gen.py
@@ -307,12 +309,16 @@ tests/test_webui_helpers_medium_status.py
 tests/test_webui_helpers_subpackage_acyclic.py
 tests/test_webui_history_invariant.py
 tests/test_webui_image_gen.py
+tests/test_webui_index_js_bootstrap.py
+tests/test_webui_index_template_structure.py
 tests/test_webui_inject_platforms_non_empty.py
 tests/test_webui_platforms_context.py
 tests/test_webui_publish_backend_pill.py
 tests/test_webui_publish_route.py
 tests/test_webui_route_contract.py
 tests/test_webui_scheduler.py
+tests/test_webui_settings_template_split.py
+tests/test_webui_static_css_served.py
 tests/test_webui_store.py
 tests/test_webui_store_bulk_helpers.py
 tests/test_webui_store_isolation.py
