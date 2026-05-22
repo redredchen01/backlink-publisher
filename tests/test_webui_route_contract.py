@@ -258,21 +258,22 @@ class TestGetRoutes:
         assert "mode-batch" in body, "mode-batch CSS scope missing"
 
     def test_sticky_step_bar_css_in_template_source(self):
-        """Plan 013 U3 — index.html source contains scoped step-bar rules."""
+        """Plan 013 U3 — scoped step-bar rules present in extracted CSS file (Plan B Unit 1)."""
         from pathlib import Path
+        # CSS extracted to static file by Plan B Unit 1; check index.css not index.html
         src = (
             Path(__file__).resolve().parents[1]
-            / "webui_app" / "templates" / "index.html"
+            / "webui_app" / "static" / "css" / "index.css"
         ).read_text(encoding="utf-8")
         # Both mode-scoped rules must be present
         assert "body.mode-single .step-bar" in src, (
-            "mode-single step-bar sticky rule missing from template"
+            "mode-single step-bar sticky rule missing from index.css"
         )
         assert "body.mode-batch .step-bar" in src, (
-            "mode-batch step-bar static rule missing from template"
+            "mode-batch step-bar static rule missing from index.css"
         )
         assert "hide-history-nav" in src, (
-            "hide-history-nav CSS rule missing from template"
+            "hide-history-nav CSS rule missing from index.css"
         )
 
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
