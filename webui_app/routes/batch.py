@@ -10,7 +10,7 @@ from flask import Blueprint, request, session
 
 from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
 
-from ..helpers import _render
+from ..helpers.contexts import _render
 from ..helpers.cli_runner import _REPO_ROOT, _rewrite_cli_cmd, run_pipe
 from ..helpers.history import (
     _parse_publish_results,

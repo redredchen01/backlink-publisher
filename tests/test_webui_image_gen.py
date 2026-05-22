@@ -152,7 +152,7 @@ def test_test_image_gen_network_error(client, tmp_path, monkeypatch):
 
 
 def test_image_gen_status_helper_reports_token_presence(tmp_path, monkeypatch):
-    from webui_app.helpers import _image_gen_status
+    from webui_app.helpers.contexts import _image_gen_status
     from backlink_publisher.config import load_config
 
     monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))

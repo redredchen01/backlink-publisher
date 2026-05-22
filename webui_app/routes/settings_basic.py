@@ -13,7 +13,7 @@ from backlink_publisher.publishing.adapters import verify_adapter_setup
 from backlink_publisher.publishing.registry import registered_platforms
 
 from ..binding_status import get_channel_status
-from ..helpers import _save_schedule_settings, _settings_context
+from ..helpers.contexts import _save_schedule_settings, _settings_context
 from ..helpers.security import _safe_flash_redirect
 
 bp = Blueprint("settings_basic", __name__)
@@ -226,5 +226,5 @@ def api_velog_login():
 @bp.route('/api/velog/status', methods=['GET'])
 def api_velog_status():
     """Return current velog channel status as JSON for polling."""
-    from ..helpers import _get_velog_status
+    from ..helpers.contexts import _get_velog_status
     return jsonify(_get_velog_status())

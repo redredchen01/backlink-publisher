@@ -63,7 +63,7 @@ class TestPushHistoryAggregateInvariant:
             written.append(result)
             return result
 
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", fake_update)
 
         entry = {"status": "published", "article_urls": ["https://example.com/post"]}
@@ -79,7 +79,7 @@ class TestPushHistoryAggregateInvariant:
             written.append(result)
             return result
 
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", fake_update)
 
         entry = {"status": "drafted", "article_urls": ["https://example.com/draft"]}
@@ -87,7 +87,7 @@ class TestPushHistoryAggregateInvariant:
         assert written
 
     def test_published_without_urls_raises(self, monkeypatch):
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn([]))
 
         entry = {"status": "published", "article_urls": []}
@@ -95,7 +95,7 @@ class TestPushHistoryAggregateInvariant:
             _push_history_aggregate(entry)
 
     def test_published_no_article_urls_key_raises(self, monkeypatch):
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn([]))
 
         entry = {"status": "published"}
@@ -103,7 +103,7 @@ class TestPushHistoryAggregateInvariant:
             _push_history_aggregate(entry)
 
     def test_drafted_without_urls_raises(self, monkeypatch):
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn([]))
 
         entry = {"status": "drafted", "article_urls": []}
@@ -112,7 +112,7 @@ class TestPushHistoryAggregateInvariant:
 
     def test_failed_without_urls_accepted(self, monkeypatch):
         """failed status does not require article_urls."""
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn([]))
 
         entry = {"status": "failed", "article_urls": []}
@@ -121,7 +121,7 @@ class TestPushHistoryAggregateInvariant:
 
     def test_failed_partial_without_urls_accepted(self, monkeypatch):
         """failed_partial is not in REQUIRES_URL_STATUSES."""
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn([]))
 
         entry = {
@@ -143,7 +143,7 @@ class TestPushHistoryAggregateInvariant:
         """_push_history_aggregate applies the history cap."""
         existing = [{"id": str(i), "status": "failed"} for i in range(_HISTORY_MAX_ITEMS)]
 
-        import webui_app.helpers as h
+        import webui_app.helpers.history as h
         monkeypatch.setattr(h._history_store, "update", lambda fn: fn(existing))
 
         entry = {"status": "failed", "article_urls": []}

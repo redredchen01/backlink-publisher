@@ -29,7 +29,7 @@ app = create_app()
 # Unit 3 split, the canonical home is ``webui_app.helpers``. Re-exporting
 # here keeps existing patch points working without forcing a tests/ sweep.
 # When patching has migrated (next major version), this block can shrink.
-from webui_app.helpers import (  # noqa: E402
+from webui_app.helpers.contexts import (  # noqa: E402
     _calc_next_available,
     _draft_tab_extra,
     _get_blogger_token_status,

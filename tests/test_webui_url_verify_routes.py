@@ -71,7 +71,7 @@ def _seed_csrf(client) -> str:
 
 
 def _origin_headers() -> dict[str, str]:
-    from webui_app.helpers import _FLASK_PORT
+    from webui_app.helpers.security import _FLASK_PORT
     return {"Origin": f"http://127.0.0.1:{_FLASK_PORT}"}
 
 

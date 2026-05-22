@@ -1,0 +1,314 @@
+            <!-- History Panel -->
+            <div class="tab-pane fade {% if history_active %}show active{% endif %}" id="historyPanel" role="tabpanel">
+                <!-- ── 草稿队列 ── -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-calendar-check me-2"></i>草稿队列</span>
+                        {% set sched_settings = draft_queue | selectattr('status','equalto','scheduled') | list %}
+                        <small class="text-muted">{{ draft_queue | length }} 项 · {{ sched_settings | length }} 已排程</small>
+                    </div>
+                    <div class="card-body" id="draftCardBody">
+                        {% if draft_queue %}
+                        <!-- Plan 2026-05-19-006 Unit 6: bulk-action bar -->
+                        <form id="draftBulkForm" method="POST" style="margin:0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <div class="bulk-action-bar">
+                            <span class="form-check" style="margin:0;">
+                                <input class="form-check-input" type="checkbox" id="draftSelectAll">
+                                <label class="form-check-label" for="draftSelectAll" style="font-size:12px;">
+                                    全选 <span id="draftSelectedCount" class="text-muted">(0/{{ draft_queue|length }})</span>
+                                </label>
+                            </span>
+                            <span class="bulk-action-label">|</span>
+                            <button type="submit" formaction="/ce:draft/bulk-publish-now"
+                                    class="btn btn-sm btn-success draft-bulk-btn" disabled
+                                    onclick="return confirm('批量立即发布所选草稿？')">
+                                <i class="bi bi-send me-1"></i>批量发布
+                            </button>
+                            <button type="submit" formaction="/ce:draft/bulk-cancel"
+                                    class="btn btn-sm btn-outline-warning draft-bulk-btn" disabled>
+                                <i class="bi bi-x-circle me-1"></i>批量取消排程
+                            </button>
+                            <button type="submit" formaction="/ce:draft/bulk-delete"
+                                    class="btn btn-sm btn-outline-danger draft-bulk-btn" disabled
+                                    onclick="return confirm('批量删除所选草稿？')">
+                                <i class="bi bi-trash me-1"></i>批量删除
+                            </button>
+                        </div>
+                        {% for item in draft_queue %}
+                        {% set s = item.status %}
+                        <div class="history-item {% if s == 'published' %}success{% elif s == 'failed' %}failed{% elif s == 'scheduled' %}pending{% else %}{% endif %}"
+                             data-id="{{ item.id }}"
+                             data-status="{{ s }}"
+                             style="{% if s == 'scheduled' %}border-left-color:var(--info);{% endif %}">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                <input class="form-check-input bulk-select draft-bulk-select"
+                                       type="checkbox" name="ids" value="{{ item.id }}"
+                                       form="draftBulkForm" style="margin-top:6px;">
+                                <div style="flex:1;min-width:0;">
+                                    <strong style="word-break:break-all;font-size:14px;">{{ item.target_url }}</strong>
+                                    <br><small style="color:var(--secondary);">
+                                        加入 {{ item.created_at }}
+                                        {% if item.platform %} · <i class="bi bi-broadcast"></i> {{ item.platform }}{% endif %}
+                                        · {{ item.publish_mode or 'draft' }}
+                                    </small>
+                                    {% if item.scheduled_at and s == 'scheduled' %}
+                                    <br><small style="color:var(--info);font-weight:600;">
+                                        <i class="bi bi-alarm me-1"></i>排程：{{ item.scheduled_at[:16] | replace('T',' ') }}
+                                    </small>
+                                    {% endif %}
+                                </div>
+                                <span class="status-badge {% if s == 'published' %}success{% elif s == 'failed' %}error{% elif s == 'scheduled' %}pending{% else %}{% endif %}" style="flex-shrink:0;{% if s == 'scheduled' %}background:#dbeafe;color:var(--info);{% endif %}">
+                                    {% if s == 'published' %}<i class="bi bi-check-circle"></i> 已发布
+                                    {% elif s == 'failed' %}<i class="bi bi-x-circle"></i> 失败
+                                    {% elif s == 'scheduled' %}<i class="bi bi-alarm"></i> 已排程
+                                    {% else %}<i class="bi bi-hourglass-split"></i> 待排程{% endif %}
+                                </span>
+                            </div>
+
+                            {% if item.error %}
+                            <div style="margin-top:6px;font-size:12px;color:var(--danger);background:#fee2e2;padding:6px 10px;border-radius:6px;">
+                                <i class="bi bi-exclamation-triangle me-1"></i>{{ item.error[:200] }}
+                            </div>
+                            {% endif %}
+
+                            {% if item.article_urls %}
+                            <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+                                {% for url in item.article_urls %}
+                                <a href="{{ url }}" target="_blank" rel="noopener"
+                                   style="font-size:12px;color:var(--primary);word-break:break-all;">
+                                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ url }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+
+                            <!-- 操作栏 -->
+                            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+                                {% if s == 'pending' %}
+                                <!-- 排程表单 -->
+                                <form method="POST" action="/ce:draft/schedule" style="margin:0;display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <div>
+                                        <label style="font-size:11px;color:var(--secondary);display:block;margin-bottom:2px;">排程时间</label>
+                                        <input type="datetime-local" name="scheduled_at"
+                                               class="form-control form-control-sm"
+                                               style="width:180px;"
+                                               min="{{ now_iso }}"
+                                               value="{{ suggested_next }}">
+                                    </div>
+                                    <button type="submit" class="btn btn-sm btn-primary">
+                                        <i class="bi bi-alarm me-1"></i>排程发布
+                                    </button>
+                                </form>
+                                <form method="POST" action="/ce:draft/publish-now" style="margin:0;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-success"
+                                            onclick="return confirm('立即发布此草稿？')">
+                                        <i class="bi bi-send me-1"></i>立即发布
+                                    </button>
+                                </form>
+                                {% elif s == 'scheduled' %}
+                                <form method="POST" action="/ce:draft/cancel" style="margin:0;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning">
+                                        <i class="bi bi-x-circle me-1"></i>取消排程
+                                    </button>
+                                </form>
+                                {% endif %}
+                                <!-- 删除 -->
+                                <form method="POST" action="/ce:draft/delete" style="margin:0;"
+                                      onsubmit="return confirm('确定删除此草稿？')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        </form>
+                        {% else %}
+                        <div style="text-align:center;padding:30px;color:var(--secondary);">
+                            <i class="bi bi-calendar-plus" style="font-size:36px;"></i>
+                            <p style="margin-top:10px;">草稿栏暂无任务<br><small>在发布中心点击「加入草稿栏」即可排程</small></p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- ── 发布历史 ── -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-clock-history me-2"></i>发布历史
+                    </div>
+                    <div class="card-body" id="historyCardBody">
+                        {# Filter bars render unconditionally so the registered-platforms
+                           contract (test_webui_platforms_context.py) holds even on a
+                           fresh install with empty history. Chip counts start at 0 and
+                           are populated by JS once rows exist. #}
+                        <div class="filter-bar" data-filter-group-row="status">
+                            <span class="filter-bar-label">状态</span>
+                            <button type="button" class="filter-chip active" data-filter-group="status" data-filter-value="all">全部 <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="drafted">草稿 <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="published">已发布 <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="unverified">未核实 <span class="chip-count">0</span></button>
+                            <button type="button" class="filter-chip" data-filter-group="status" data-filter-value="failed">失败 <span class="chip-count">0</span></button>
+                        </div>
+                        <div class="filter-bar" data-filter-group-row="platform" style="margin-bottom:14px;">
+                            <span class="filter-bar-label">平台</span>
+                            <button type="button" class="filter-chip active" data-filter-group="platform" data-filter-value="all">全部 <span class="chip-count">0</span></button>
+                            {# Reverse-driven from publisher registry; Plan 2026-05-19-002 U2. #}
+                            {% for p in platforms %}
+                            <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="{{ p.slug }}">{{ p.display_name }} <span class="chip-count">0</span></button>
+                            {% endfor %}
+                            <button type="button" class="filter-chip" data-filter-group="platform" data-filter-value="other">其他 <span class="chip-count">0</span></button>
+                        </div>
+                        {% if history %}
+                        <!-- Plan 2026-05-19-006 Unit 6: bulk-action bar for history -->
+                        <form id="historyBulkForm" method="POST" style="margin:0;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <div class="bulk-action-bar">
+                            <span class="form-check" style="margin:0;">
+                                <input class="form-check-input" type="checkbox" id="historySelectAll">
+                                <label class="form-check-label" for="historySelectAll" style="font-size:12px;">
+                                    全选可见 <span id="historySelectedCount" class="text-muted">(0/{{ history|length }})</span>
+                                </label>
+                            </span>
+                            <span class="bulk-action-label">|</span>
+                            <button type="submit" formaction="/ce:history/bulk-recheck"
+                                    class="btn btn-sm btn-outline-primary history-bulk-btn" disabled
+                                    onclick="return confirm('对所选记录执行重新核实（GET 外站校验 title+anchor）？耗时约 10s/条')">
+                                <i class="bi bi-shield-check me-1"></i>批量重新核实
+                            </button>
+                            <button type="submit" formaction="/ce:history/bulk-delete"
+                                    class="btn btn-sm btn-outline-danger history-bulk-btn" disabled
+                                    onclick="return confirm('批量删除所选历史？')">
+                                <i class="bi bi-trash me-1"></i>批量删除
+                            </button>
+                            <span class="bulk-action-label" style="margin-left:auto;">|</span>
+                            {% set _failed_count = history | selectattr('status','equalto','failed') | list | length %}
+                            <!-- "一键清失败" 不依赖勾选；用 form= 关联到下方独立的 historyPurgeForm，
+                                 避免在 historyBulkForm 内嵌套 <form>（HTML 非法）。 -->
+                            <button type="submit" form="historyPurgeForm" class="btn btn-sm btn-warning"
+                                    {% if _failed_count == 0 %}disabled{% endif %}>
+                                <i class="bi bi-funnel me-1"></i>⚡ 一键清失败 ({{ _failed_count }})
+                            </button>
+                        </div>
+                        {# Lift platform-slug list outside the per-row loop:
+                           was rebuilt on every history item (~7 platforms ×
+                           N rows attribute walks). #}
+                        {% set _platform_slugs = platforms | map(attribute='slug') | list %}
+                        {% for item in history %}
+                        {% set s = item.status %}
+                        {% set norm_status =
+                            'unverified' if s in ('published_unverified', 'drafted_unverified')
+                            else ('published' if s in ('success', 'published')
+                                  else (s if s in ('drafted', 'failed') else 'other')) %}
+                        {% set norm_platform = item.platform if item.platform in _platform_slugs else 'other' %}
+                        <div class="history-item {% if s in ('success','published') %}success{% elif s in ('published_unverified','drafted_unverified') %}unverified{% elif s == 'failed' %}failed{% else %}pending{% endif %}"
+                             data-id="{{ item.id }}"
+                             data-status="{{ norm_status }}" data-platform="{{ norm_platform }}">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                <input class="form-check-input bulk-select history-bulk-select"
+                                       type="checkbox" name="ids" value="{{ item.id }}"
+                                       form="historyBulkForm" style="margin-top:6px;"
+                                       {% if not item.article_urls %}data-no-urls="1"{% endif %}>
+                                <div style="flex:1;min-width:0;">
+                                    <strong style="word-break:break-all;font-size:14px;">{{ item.target_url }}</strong>
+                                    <br><small style="color:var(--secondary);">{{ item.created_at }}
+                                    {% if item.platform %} · <i class="bi bi-broadcast"></i> {{ item.platform }}{% endif %}
+                                    {% if item.language %} · {{ item.language }}{% endif %}
+                                    {% if item.verified_at %} · <i class="bi bi-shield-check text-success"></i> {{ item.verified_at[:16] | replace('T',' ') }}{% endif %}
+                                    </small>
+                                </div>
+                                <span class="status-badge {% if s in ('success','published') %}success{% elif s in ('published_unverified','drafted_unverified') %}unverified{% elif s == 'drafted' %}pending{% elif s == 'failed' %}error{% else %}pending{% endif %}" style="flex-shrink:0;">
+                                    {% if s in ('success','published') %}<i class="bi bi-check-circle"></i> 已发布
+                                    {% elif s == 'published_unverified' %}<i class="bi bi-exclamation-triangle"></i> 已发布·未核实
+                                    {% elif s == 'drafted_unverified' %}<i class="bi bi-exclamation-triangle"></i> 草稿·未核实
+                                    {% elif s == 'drafted' %}<i class="bi bi-clock"></i> 草稿
+                                    {% elif s == 'failed' %}<i class="bi bi-x-circle"></i> 失败
+                                    {% else %}<i class="bi bi-clock"></i> {{ s }}{% endif %}
+                                </span>
+                            </div>
+                            {% if item.article_urls %}
+                            <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+                                {% for url in item.article_urls %}
+                                <a href="{{ url }}" target="_blank" rel="noopener"
+                                   style="font-size:12px;color:var(--primary);word-break:break-all;">
+                                    <i class="bi bi-box-arrow-up-right me-1"></i>{{ url }}
+                                </a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% if item.error %}
+                            <div style="margin-top:6px;font-size:12px;color:var(--danger);background:#fee2e2;padding:6px 10px;border-radius:6px;">
+                                <i class="bi bi-exclamation-triangle me-1"></i>{{ item.error[:200] }}
+                            </div>
+                            {% endif %}
+                            {% if item.verify_error %}
+                            <div style="margin-top:6px;font-size:12px;color:#92400e;background:#fef3c7;padding:6px 10px;border-radius:6px;">
+                                <i class="bi bi-shield-exclamation me-1"></i>核实失败：{{ item.verify_error[:200] }}
+                            </div>
+                            {% endif %}
+                            <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                                <form method="POST" action="/ce:history/reuse" style="margin:0;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="target_url" value="{{ item.target_url }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-arrow-repeat me-1"></i>重新外链
+                                    </button>
+                                </form>
+                                <form method="POST" action="/ce:history/recheck" style="margin:0;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning"
+                                            {% if not item.article_urls %}disabled title="此记录无文章 URL，无法核实"{% endif %}>
+                                        <i class="bi bi-shield-check me-1"></i>重新核实
+                                    </button>
+                                </form>
+                                <form method="POST" action="/ce:history/update-status" style="margin:0;display:flex;gap:4px;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <select name="status" class="form-select form-select-sm" style="width:100px;">
+                                        <option value="drafted" {% if s == 'drafted' %}selected{% endif %}
+                                            {% if not item.article_urls %}disabled title="无文章 URL 时不可设为草稿"{% endif %}>草稿</option>
+                                        <option value="published" {% if s in ('published','success') %}selected{% endif %}
+                                            {% if not item.article_urls %}disabled title="无文章 URL 时不可设为已发布"{% endif %}>已发布</option>
+                                        <option value="failed" {% if s == 'failed' %}selected{% endif %}>失败</option>
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></button>
+                                </form>
+                                <form method="POST" action="/ce:history/delete" style="margin:0;"
+                                      onsubmit="return confirm('确定删除此条记录？')">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input type="hidden" name="id" value="{{ item.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        </form>
+                        <!-- Out-of-band form for the purge-failed button (cannot nest in historyBulkForm) -->
+                        <form id="historyPurgeForm" method="POST" action="/ce:history/purge-failed"
+                              style="display:none;"
+                              onsubmit="return confirm('一键清除所有 status=failed 记录？\n（不影响“未核实”，那些需要批量重新核实判定）');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        </form>
+                        <div id="historyEmptyFiltered" style="display:none;">
+                            <i class="bi bi-funnel" style="font-size:48px;"></i>
+                            <p style="margin-top:10px;">当前筛选无匹配记录</p>
+                        </div>
+                        {% else %}
+                        <div style="text-align:center;padding:40px;color:var(--secondary);">
+                            <i class="bi bi-inbox" style="font-size:48px;"></i>
+                            <p>暂无历史记录</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>

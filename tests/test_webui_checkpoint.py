@@ -76,7 +76,7 @@ def test_load_incomplete_run_returns_none_on_exception():
 # ── banner rendering ───────────────────────────────────────────────────────────
 
 def test_banner_shown_when_incomplete_run(client):
-    with patch("webui_app.helpers._load_incomplete_run", return_value=_incomplete_run_fixture()):
+    with patch("webui_app.helpers.contexts._load_incomplete_run", return_value=_incomplete_run_fixture()):
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.data.decode()
@@ -86,7 +86,7 @@ def test_banner_shown_when_incomplete_run(client):
 
 
 def test_banner_absent_when_no_incomplete_run(client):
-    with patch("webui_app.helpers._load_incomplete_run", return_value=None):
+    with patch("webui_app.helpers.contexts._load_incomplete_run", return_value=None):
         resp = client.get("/")
         assert resp.status_code == 200
         body = resp.data.decode()

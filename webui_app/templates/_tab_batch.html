@@ -1,0 +1,84 @@
+            <!-- Batch Panel -->
+            <div class="tab-pane fade {% if batch_tab %}show active{% endif %}" id="batchPanel" role="tabpanel">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-stack me-2"></i>批量发布 — 多 URL 一键发布
+                    </div>
+                    <div class="card-body">
+                        {% if profiles %}
+                        <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+                            <i class="bi bi-bookmark me-1" style="color:var(--secondary);"></i>
+                            <span style="font-size:13px;color:var(--secondary);">快速载入：</span>
+                            <select class="form-select form-select-sm" style="width:200px;"
+                                    onchange="loadBatchProfile(this.value)">
+                                <option value="">— 选择配置 —</option>
+                                {% for p in profiles %}
+                                <option value="{{ loop.index0 }}">{{ p.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+                        <form method="POST" action="/ce:batch" id="batchForm">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <div class="mb-3">
+                                <label class="form-label">目标 URL 列表 <small class="text-muted">（每行一个）</small></label>
+                                <textarea name="batch_urls" class="form-control" rows="6"
+                                    placeholder="https://51acgs.com/category/acg&#10;https://51acgs.com/category/manga&#10;https://51acgs.com/page/about"
+                                    style="font-family:monospace;font-size:13px;">{{ batch_urls or '' }}</textarea>
+                            </div>
+                            {# Plan 013 U2 — shared 4-select partial; field name `target_language`
+                               (batch.py reads `target_language` with `language` as fallback). #}
+                            {% include '_shared_config_selects.html' %}
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-play-circle me-2"></i>开始批量发布
+                            </button>
+                            <small class="text-muted ms-3">每篇文章约需 30–60 秒，请耐心等候</small>
+                        </form>
+
+                        {% if batch_results %}
+                        <hr class="my-4">
+                        <h6><i class="bi bi-list-check me-2"></i>发布结果</h6>
+                        <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px;">
+                            {% for r in batch_results %}
+                            <div style="padding:12px 16px;border-radius:10px;
+                                background:{% if r.status == 'success' %}#f0fdf4{% else %}#fff1f2{% endif %};
+                                border-left:4px solid {% if r.status == 'success' %}var(--success){% else %}var(--danger){% endif %};">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="font-size:13px;font-weight:600;word-break:break-all;">{{ r.url }}</div>
+                                        {% if r.title %}
+                                        <div style="font-size:12px;color:#4b5563;margin-top:3px;">📄 {{ r.title }}</div>
+                                        {% endif %}
+                                        {% if r.error %}
+                                        <div style="font-size:12px;color:var(--danger);margin-top:4px;">{{ r.error[:150] }}</div>
+                                        {% endif %}
+                                    </div>
+                                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+                                        <span class="status-badge {% if r.status == 'success' %}success{% else %}error{% endif %}">
+                                            {% if r.status == 'success' %}✓ 成功{% else %}✗ 失败{% endif %}
+                                        </span>
+                                        {% if r.article_url %}
+                                        <a href="{{ r.article_url }}" target="_blank" rel="noopener"
+                                           class="btn btn-success btn-sm">
+                                            <i class="bi bi-box-arrow-up-right me-1"></i>查看文章
+                                        </a>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% if r.article_url %}
+                                <div style="margin-top:8px;font-size:11px;word-break:break-all;color:#6b7280;">
+                                    <i class="bi bi-link-45deg me-1"></i>{{ r.article_url }}
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                        <div style="margin-top:12px;font-size:13px;color:#6b7280;">
+                            共 {{ batch_results|length }} 篇 ·
+                            成功 {{ batch_results|selectattr('status','eq','success')|list|length }} 篇 ·
+                            失败 {{ batch_results|selectattr('status','eq','failed')|list|length }} 篇
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
