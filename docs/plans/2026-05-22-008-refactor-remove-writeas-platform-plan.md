@@ -3,6 +3,7 @@ title: "refactor: Remove write.as platform completely"
 type: refactor
 status: completed
 date: 2026-05-22
+claims: {}
 ---
 
 # refactor: Remove write.as platform completely
