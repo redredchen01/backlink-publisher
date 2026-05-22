@@ -1,7 +1,7 @@
 ---
 title: "feat: Add Korean (ko) to publishing language dropdown and content templates"
 type: feat
-status: active
+status: completed
 date: 2026-05-22
 claims: {}
 origin: docs/plans/2026-05-22-004-feat-korean-language-full-support-plan.md
