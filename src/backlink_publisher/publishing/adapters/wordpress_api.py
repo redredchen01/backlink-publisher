@@ -82,8 +82,10 @@ class WordPressAPIAdapter(Publisher):
             "status": "draft" if mode == "draft" else "publish",
         }
 
+        from backlink_publisher.http import post as http_post
+
         def _do_post() -> dict[str, Any]:
-            resp = _requests.post(url, headers=headers, json=body, timeout=30)
+            resp = http_post(url, headers=headers, json=body, timeout=30)
             if resp.status_code == 401:
                 raise AuthExpiredError(
                     channel="wordpress",

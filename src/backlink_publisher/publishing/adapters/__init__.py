@@ -44,16 +44,6 @@ from .writeas import WriteAsAPIAdapter
 from .wordpress_api import WordPressAPIAdapter
 from .tumblr_api import TumblrAPIAdapter
 
-# Import the Unit 4a velog browser recipe module so it can populate
-# RECIPES["velog"] before the registration line below references it.
-# Plan 2026-05-21-001 Unit 4a — registers as auth-missing fallback after
-# VelogGraphQLAdapter (DependencyError → fall through; ExternalServiceError
-# from API path propagates without fall-through, per registry contract).
-from ..browser_publish import BrowserPublishDispatcher
-from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
-from ..browser_publish.recipes import hashnode as _hashnode_recipe  # noqa: F401
-from ..browser_publish.recipes import devto as _devto_recipe  # noqa: F401
-from ..browser_publish.recipes import mastodon as _mastodon_recipe  # noqa: F401
 from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
 
 
@@ -94,39 +84,13 @@ register(
     dofollow=True,
 )
 register("telegraph", TelegraphAPIAdapter, dofollow=True)
-register(
-    "velog",
-    VelogGraphQLAdapter,
-    BrowserPublishDispatcher.for_channel("velog"),
-    dofollow=True,
-)
 register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
-register(
-    "hashnode",
-    HashnodeAPIAdapter,
-    BrowserPublishDispatcher.for_channel("hashnode"),
-    dofollow=False,
-    rationale=_R["hashnode"],
-)
 register("writeas", WriteAsAPIAdapter, dofollow=True)
-register(
-    "devto",
-    DevtoAPIAdapter,
-    BrowserPublishDispatcher.for_channel("devto"),
-    dofollow=False,
-    rationale=_R["devto"],
-)
 register(
     "notion",
     NotionAPIAdapter,
     dofollow=False,
     rationale=_R["notion"],
-)
-register(
-    "mastodon",
-    BrowserPublishDispatcher.for_channel("mastodon"),
-    dofollow=False,
-    rationale=_R["mastodon"],
 )
 register(
     "wordpress",
@@ -545,8 +509,10 @@ def _verify_velog_live(config: Config) -> VerifyResult:
             blockers=[str(e)],
         )
 
+    from backlink_publisher.http import post as http_post
+
     try:
-        resp = requests.post(
+        resp = http_post(
             _VELOG_GRAPHQL_ENDPOINT,
             json={"query": _VELOG_CURRENT_USER_QUERY},
             cookies=cookies,
@@ -869,14 +835,16 @@ def _verify_live_generic(
     if not token:
         return VerifyResult(ok=False, last_verify_result="never", blockers=[token_missing_msg])
 
+    from backlink_publisher.http import get as http_get, post as http_post
+
     url, json_data, headers = endpoint_builder(token)
     try:
         if json_data is None:
-            resp = requests.post(url, data=headers, timeout=timeout)
+            resp = http_post(url, data=headers, timeout=timeout)
         elif json_data:
-            resp = requests.post(url, json=json_data, headers=headers, timeout=timeout)
+            resp = http_post(url, json=json_data, headers=headers, timeout=timeout)
         else:
-            resp = requests.get(url, headers=headers, timeout=timeout)
+            resp = http_get(url, headers=headers, timeout=timeout)
     except requests.Timeout:
         return VerifyResult(ok=False, last_verify_result="timeout", blockers=[f"{platform} timed out after {timeout}s"])
     except requests.RequestException as e:
@@ -957,3 +925,36 @@ def _verify_dry_run(
         last_verify_result="unverifiable_live",
         blockers=["per-adapter dry-run not yet implemented (Unit 6 deliverable)"],
     )
+
+
+def _init_browser_dispatchers() -> None:
+    from ..browser_publish import BrowserPublishDispatcher
+    from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
+    from ..browser_publish.recipes import hashnode as _hashnode_recipe  # noqa: F401
+    from ..browser_publish.recipes import devto as _devto_recipe  # noqa: F401
+    from ..browser_publish.recipes import mastodon as _mastodon_recipe  # noqa: F401
+
+    register("velog", VelogGraphQLAdapter, BrowserPublishDispatcher.for_channel("velog"), dofollow=True)
+    register(
+        "hashnode",
+        HashnodeAPIAdapter,
+        BrowserPublishDispatcher.for_channel("hashnode"),
+        dofollow=False,
+        rationale=_R["hashnode"],
+    )
+    register(
+        "devto",
+        DevtoAPIAdapter,
+        BrowserPublishDispatcher.for_channel("devto"),
+        dofollow=False,
+        rationale=_R["devto"],
+    )
+    register(
+        "mastodon",
+        BrowserPublishDispatcher.for_channel("mastodon"),
+        dofollow=False,
+        rationale=_R["mastodon"],
+    )
+
+
+_init_browser_dispatchers()

@@ -111,23 +111,14 @@ _DEFAULT_SHORT_NAME = "backlink-publisher"
 def _token_path(config: Config) -> Path:
     """Canonical token file path (post-rename, no ``-phase0-`` infix)."""
     return config.config_dir / "telegraph-token.json"
-
-
 def _legacy_token_path(config: Config) -> Path:
     """Legacy ``-phase0-`` path written by ``scripts/telegraph_spike``.
 
     Read-only fallback for one-time migration.  Adapter NEVER writes here.
     """
     return config.config_dir / "telegraph-phase0-token.json"
-
-
 def _lock_path(token_path: Path) -> Path:
     return token_path.with_suffix(token_path.suffix + ".lock")
-
-
-# ── Token I/O ────────────────────────────────────────────────────────────────
-
-
 def _load_token(config: Config) -> dict[str, str]:
     """Load ``{access_token, short_name}`` from the token file.
 
@@ -191,8 +182,6 @@ def _load_token(config: Config) -> dict[str, str]:
             "telegraph-token.json missing or empty 'access_token' field"
         )
     return data
-
-
 def _write_token_atomic(path: Path, data: dict[str, str]) -> None:
     """Write ``data`` to ``path`` atomically with 0600 perms.
 
@@ -211,12 +200,6 @@ def _write_token_atomic(path: Path, data: dict[str, str]) -> None:
     mode = os.stat(path).st_mode & 0o777
     if mode != 0o600:
         os.chmod(path, 0o600)
-
-
-# ── Rotation lock ────────────────────────────────────────────────────────────
-
-
-@contextmanager
 def _token_lock(token_path: Path) -> Iterator[None]:
     """Advisory file lock around the rotate-write sequence.
 
@@ -254,8 +237,6 @@ def _token_lock(token_path: Path) -> Iterator[None]:
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
-
-
 def _archive_orphan_token(token_path: Path) -> Path | None:
     """Move ``token_path`` to ``<path>.orphaned-<UTC iso>``.
 
@@ -280,11 +261,6 @@ def _archive_orphan_token(token_path: Path) -> Path | None:
     os.replace(token_path, archive)
     os.chmod(archive, 0o600)
     return archive
-
-
-# ── Telegraph API helpers ────────────────────────────────────────────────────
-
-
 def _is_invalid_token_error(body: dict[str, Any]) -> bool:
     """Heuristic match for Telegraph's 401-equivalent response.
 
@@ -296,8 +272,6 @@ def _is_invalid_token_error(body: dict[str, Any]) -> bool:
         return False
     err = str(body.get("error", "")).upper()
     return any(marker in err for marker in _INVALID_TOKEN_MARKERS)
-
-
 def _create_account(short_name: str) -> str:
     """POST createAccount, return fresh access_token.
 
@@ -331,8 +305,6 @@ def _create_account(short_name: str) -> str:
             f"Telegraph createAccount returned malformed body: {body}"
         )
     return new_token
-
-
 def _create_page(
     access_token: str,
     title: str,
@@ -364,11 +336,6 @@ def _create_page(
         raise ExternalServiceError(
             f"Telegraph createPage network failure: {exc}"
         ) from exc
-
-
-# ── Adapter ──────────────────────────────────────────────────────────────────
-
-
 class TelegraphAPIAdapter(Publisher):
     """Single-path Telegraph publisher with in-adapter 401 recovery."""
 
@@ -614,35 +581,3 @@ class TelegraphAPIAdapter(Publisher):
                 archive_path,
             )
             return new_token
-
-
-# ── verify_adapter_setup hook (called from adapters/__init__.py) ────────────
-
-
-def verify_telegraph_setup(config: Config) -> None:
-    """Confirm we can either load an existing token or bootstrap one.
-
-    Per plan: do NOT probe createAccount endpoint reachability — that
-    couples adapter health to network state and breaks the "low-friction
-    anonymous" USP under captive portals / VPN gates.
-
-    Token-absent is OK (publish() will bootstrap on demand).  Token
-    present but corrupt / wrong perms is NOT OK — let the operator fix
-    it explicitly rather than silently minting a replacement account.
-    """
-    primary = _token_path(config)
-    legacy = _legacy_token_path(config)
-
-    if primary.exists() or legacy.exists():
-        # File exists — fully validate.  Any DependencyError propagates.
-        _load_token(config)
-        return
-
-    # No token at all → ensure we can write one when publish() bootstraps.
-    try:
-        primary.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise DependencyError(
-            f"Cannot create telegraph token directory "
-            f"{primary.parent}: {exc}"
-        ) from None

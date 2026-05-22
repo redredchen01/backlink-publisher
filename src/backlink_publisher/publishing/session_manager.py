@@ -97,6 +97,10 @@ class SessionManager:
     _playwright: Playwright | None = None
     _browser: Browser | None = None
     _refcount: int = 0
+    # Context pool: contexts that have been closed but whose resources are
+    # available for reuse. Reduces the overhead of creating fresh contexts.
+    _context_pool: list[BrowserContext] = []
+    _max_pool_size: int = 3
 
     @classmethod
     def available(cls) -> bool:
@@ -222,6 +226,13 @@ class SessionManager:
     @classmethod
     def close(cls) -> None:
         """Close browser and Playwright instance. Idempotent."""
+        # Close any pooled contexts first
+        for ctx in cls._context_pool:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+        cls._context_pool.clear()
         if cls._browser is not None:
             try:
                 cls._browser.close()

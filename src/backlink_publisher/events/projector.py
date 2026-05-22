@@ -40,9 +40,6 @@ _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _HISTORY_FILENAME = "publish-history.json"
 _DRAFTS_FILENAME = "draft-queue.json"
 
-#: Bounded retry for non-atomic JSON writers (publish-history.json).
-_JSON_READ_RETRIES: int = 5
-_JSON_READ_BACKOFF_S: float = 0.1
 
 
 class ProjectionError(RuntimeError):
@@ -170,31 +167,17 @@ def _split_local_naive(value: str) -> tuple[str, str]:
 # ── JSON read with retry (history is non-atomic) ──────────────────
 
 
-def _read_json_with_retry(
-    path: Path,
-    *,
-    sleep_fn: Callable[[float], None] = time.sleep,
-) -> Any | None:
-    """Read+parse ``path``; retry parse errors up to ``_JSON_READ_RETRIES``.
-
-    Returns ``None`` after the final retry so the reducer can WARN and
-    keep the cursor unchanged. ``FileNotFoundError`` bubbles to caller.
+def _read_json(path: Path) -> Any | None:
+    """Read+parse ``path``. Returns ``None`` on parse error.
+    
+    Since state writers now use atomic writes, retries are no longer needed.
+    ``FileNotFoundError`` bubbles to caller.
     """
-    last_exc: json.JSONDecodeError | None = None
-    for attempt in range(1, _JSON_READ_RETRIES + 1):
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            last_exc = exc
-            if attempt < _JSON_READ_RETRIES:
-                sleep_fn(_JSON_READ_BACKOFF_S)
-    _log.warning(
-        "projector: gave up parsing %s after %d retries: %s",
-        path,
-        _JSON_READ_RETRIES,
-        last_exc,
-    )
-    return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _log.warning("projector: failed to parse %s: %s", path, exc)
+        return None
 
 
 # ── Anchor extraction (matches cli/report_anchors.py:80) ──────────
@@ -439,14 +422,12 @@ def _article_payload(
 def _project_history(
     path: Path,
     store: EventStore,
-    *,
-    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> ProjectionResult:
     """Append-only history list: diff by ``id``, emit per row."""
     source = str(path)
-    rows = _read_json_with_retry(path, sleep_fn=sleep_fn)
+    rows = _read_json(path)
     if rows is None:
-        # Non-atomic writer mid-write; leave cursor untouched.
+        # Parse error; leave cursor untouched.
         return ProjectionResult()
     if not isinstance(rows, list):
         raise ProjectionError(f"history payload not a list: {path}")

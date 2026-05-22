@@ -107,8 +107,10 @@ class TumblrAPIAdapter(Publisher):
             "state": "draft" if mode == "draft" else "published",
         }
 
+        from backlink_publisher.http import post as http_post
+
         def _do_post() -> dict[str, Any]:
-            resp = _requests.post(url, auth=auth, headers=headers, data=body, timeout=30)
+            resp = http_post(url, auth=auth, headers=headers, data=body, timeout=30)
             if resp.status_code == 401:
                 raise AuthExpiredError(
                     channel="tumblr",

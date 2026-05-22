@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,17 +19,19 @@ from backlink_publisher._util.errors import (
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher._util.logger import publish_logger
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
-from backlink_publisher.publishing.registry import registered_platforms
 from .. import checkpoint, config_echo
 from ..schema import reject_unsupported_platform, supported_platforms, validate_publish_payload
 
 from ._publish_helpers import (
     _acquire_publish_leases,
     _build_failure_row,
+    _build_parser,
     _check_row_reachability,
     _check_token_drift,
     _do_verify,
     _error_class,
+    _handle_auth_expired,
+    _handle_checkpoint_ops,
     _load_throttle_config,
     _make_banner_emit,
     _maybe_emit_gate_banner,
@@ -40,138 +41,15 @@ from ._publish_helpers import (
 
 
 def main(argv: list[str] | None = None) -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="publish-backlinks",
-        description="Publish validated backlink payloads.",
-    )
-    parser.add_argument(
-        "--input", "-i",
-        type=argparse.FileType("r"),
-        default=None,
-        help="Input JSONL file (default: stdin)",
-    )
-    parser.add_argument(
-        "--platform",
-        choices=registered_platforms(),
-        default=None,
-        help="Target platform (overrides per-row platform)",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["draft", "publish"],
-        default="draft",
-        help="Publish mode (default: draft)",
-    )
-    parser.add_argument(
-        "--opencli-profile",
-        default=None,
-        help="Deprecated. Has no effect (OpenCLI removed).",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        default=False,
-        help="Print command plans without executing",
-    )
-    parser.add_argument(
-        "--keep-temp",
-        action="store_true",
-        default=False,
-        help="Deprecated. Has no effect.",
-    )
-    parser.add_argument(
-        "--log-level",
-        default="WARN",
-        choices=["DEBUG", "INFO", "WARN", "ERROR"],
-        help="Log verbosity (default: WARN)",
-    )
-    parser.add_argument(
-        "--resume",
-        default=None,
-        metavar="RUN_ID",
-        help="Resume an interrupted batch run from checkpoint",
-    )
-    parser.add_argument(
-        "--list-runs",
-        action="store_true",
-        default=False,
-        help="List incomplete checkpoint runs and exit",
-    )
-    parser.add_argument(
-        "--cleanup",
-        default=None,
-        metavar="RUN_ID",
-        help="Delete a specific checkpoint and exit",
-    )
-    parser.add_argument(
-        "--cleanup-all",
-        action="store_true",
-        default=False,
-        help="Delete all complete checkpoints and exit",
-    )
-    parser.add_argument(
-        "--no-verify",
-        action="store_true",
-        default=False,
-        help="Skip post-publish content verification (default: verify after each publish)",
-    )
-    parser.add_argument(
-        "--skip-publish-time-check",
-        action="store_true",
-        default=False,
-        help=(
-            "Skip publish-time URL reachability re-check (default: re-check "
-            "each row's target_url and links before dispatch). Per plan "
-            "2026-05-14-001 R10: this is independent of validate-time's "
-            "--no-validate-url-check; setting one does not affect the other."
-        ),
-    )
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     from backlink_publisher._util.logger import set_log_level
     set_log_level(args.log_level)
 
-    exclusive = [args.resume, args.list_runs, args.cleanup, args.cleanup_all]
-    if sum(bool(x) for x in exclusive) > 1:
-        emit_error(
-            "error: --resume, --list-runs, --cleanup, and --cleanup-all are mutually exclusive",
-            exit_code=2,
-        )
-
-    # ── Housekeeping short-circuits ───────────────────────────────────────
-
-    if args.list_runs:
-        runs = checkpoint.list_incomplete()
-        if not runs:
-            print("No incomplete runs.")
-        else:
-            print(f"{'RUN_ID':<32}  {'STARTED':<26}  {'PENDING':>7}  {'FAILED':>7}")
-            print("-" * 76)
-            for run in runs:
-                pending = sum(1 for i in run["items"] if i["status"] == "pending")
-                failed = sum(1 for i in run["items"] if i["status"] == "failed")
-                print(f"{run['run_id']:<32}  {run.get('started_at', ''):<26}  {pending:>7}  {failed:>7}")
-        raise SystemExit(0)
-
-    if args.cleanup:
-        try:
-            checkpoint.delete(args.cleanup)
-            print(f"Deleted checkpoint: {args.cleanup}")
-        except (ValueError, FileNotFoundError) as exc:
-            emit_error(str(exc), exit_code=2)
-        raise SystemExit(0)
-
-    if args.cleanup_all:
-        count = checkpoint.delete_complete()
-        print(f"Deleted {count} complete checkpoint(s).")
-        raise SystemExit(0)
-
-    # ── Resume path ───────────────────────────────────────────────────────
+    _handle_checkpoint_ops(args)
 
     if args.resume:
-        from ._resume import _run_resume
         _run_resume(args)
         return
 
@@ -328,27 +206,7 @@ def main(argv: list[str] | None = None) -> None:
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
-            try:
-                from webui_store.channel_status import mark_expired
-                mark_expired(exc.channel)
-            except Exception as flip_exc:
-                publish_logger.warning(
-                    f"mark_expired({exc.channel!r}) failed: {flip_exc}"
-                )
-            if run_id is not None:
-                try:
-                    checkpoint.update_item(
-                        run_id, row.get("id", ""), "failed",
-                        error=str(exc),
-                        error_class="auth_expired",
-                    )
-                except Exception as ckpt_exc:
-                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
-            publish_logger.error(
-                f"auth expired: {exc}",
-                extra={"id": row.get("id"), "platform": platform},
-            )
-            emit_error(str(exc), exit_code=3)
+            _handle_auth_expired(exc, run_id, row, publish_logger)
             return
         except BannerUploadError as exc:
             fail_count += 1
