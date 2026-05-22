@@ -394,6 +394,7 @@
             background: #f3f4f6;
             border-radius: 12px;
             margin-bottom: 12px;
+            border: 1px solid #e5e7eb;
         }
         .mode-toggle-btn {
             border: none;
@@ -401,18 +402,19 @@
             color: var(--secondary);
             padding: 8px 18px;
             border-radius: 9px;
-            font-weight: 500;
+            font-weight: 600;
             font-size: 14px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .mode-toggle-btn:hover {
             color: var(--primary);
+            background: rgba(79, 70, 229, 0.05);
         }
         .mode-toggle-btn.active {
             background: #fff;
             color: var(--primary);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
         }
 
         /* Plan 013 U3 — step-bar sticky scope: only sticky in single mode.
