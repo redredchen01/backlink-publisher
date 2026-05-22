@@ -90,16 +90,28 @@ def test_velog_appears_in_filter_chip_row(client):
 
 @pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_appears_in_js_counter_dict(client):
-    """JS initCounts must include velog so chip-count starts at a real number."""
+    """platform_slugs in window.__indexBootstrap must include velog for initCounts."""
+    import json, re
     html = _get_index_html(client)
-    assert "velog:" in html, "JS platform counter dict missing 'velog:' key"
+    # Plan B Unit 3: platform slugs are now in window.__indexBootstrap.platform_slugs
+    # (JSON array), not as inline JS object keys like "velog: 0".
+    m = re.search(r'window\.__indexBootstrap\s*=\s*(\{.*?\});', html, re.DOTALL)
+    assert m, "window.__indexBootstrap not found in page"
+    data = json.loads(m.group(1))
+    assert "velog" in data["platform_slugs"], (
+        "platform_slugs in window.__indexBootstrap missing 'velog'"
+    )
 
 
 @pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_in_norm_platform_tuple(client):
-    """norm_platform template tuple must accept velog (not funnel to 'other')."""
+    """velog must appear in window.__indexBootstrap.platform_slugs (norm_platform contract)."""
+    import json, re
     html = _get_index_html(client)
-    assert "velog:" in html  # piggybacks on JS counter assertion above
+    m = re.search(r'window\.__indexBootstrap\s*=\s*(\{.*?\});', html, re.DOTALL)
+    assert m, "window.__indexBootstrap not found in page"
+    data = json.loads(m.group(1))
+    assert "velog" in data["platform_slugs"]
 
 
 # ── Wordpress ghost option removal ──────────────────────────────────────────
@@ -192,8 +204,15 @@ def test_dummy_adapter_auto_appears_in_filter_chip(fake_platform_registered, cli
 
 
 def test_dummy_adapter_auto_appears_in_js_counter(fake_platform_registered, client):
+    """register("fake") → 'fake' in window.__indexBootstrap.platform_slugs (Plan B Unit 3)."""
+    import json, re
     html = _get_index_html(client)
-    assert "fake:" in html
+    m = re.search(r'window\.__indexBootstrap\s*=\s*(\{.*?\});', html, re.DOTALL)
+    assert m, "window.__indexBootstrap not found in page"
+    data = json.loads(m.group(1))
+    assert "fake" in data["platform_slugs"], (
+        "platform_slugs in window.__indexBootstrap missing 'fake' after register()"
+    )
 
 
 def test_dummy_adapter_disappears_after_fixture_teardown(client):
