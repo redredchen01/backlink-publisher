@@ -14,12 +14,12 @@
 # plan_backlinks.py was decomposed into a package (plan_backlinks/) in 2026-05-19.
 # Monitoring the largest sub-file (core.py) post-split.
 [files."src/backlink_publisher/cli/plan_backlinks/core.py"]
-ceiling = 570
-rationale = "Unit 3 monolith split (2026-05-20): link-building logic extracted to _links.py (~230 SLOC), template registry to _templates.py (~130 SLOC), banner runtime to _banners.py (~100 SLOC). core.py dropped from ~1112 to ~531 SLOC, now holds only _generate_payload, _dispatch_row, _resolve_article_anchors, and main(). Ceiling 570 = round_up_to_10(531+30) per policy."
+ceiling = 380
+rationale = "_generate_payload (210 lines) + _resolve_article_anchors (14 lines) extracted to _payload.py (2026-05-22). core.py dropped from 538 to 347 SLOC — holds _dispatch_row, _scheduler_enabled_for, and main() only. Ceiling 380 = round_up_to_10(347+30)."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 450
-rationale = "Slim refactoring (2026-05-22): resume/revalidate logic extracted to _resume.py (+ helpers _resume_lease.py, _resume_validator.py), throttle helpers to _publish_helpers.py. publish_backlinks.py dropped from 835 to 414 SLOC, now holds only main() + dry-run + output helpers. Ceiling 450 = round_up_to_10(414+30) per policy."
+ceiling = 444
+rationale = "Resume logic extracted to _resume.py (264 SLOC) + shared helpers to _publish_helpers.py (221 SLOC). publish_backlinks.py dropped from 845 to 414 SLOC — holds main() and the per-row publish loop. Ceiling 444 = round_up_to_10(414+30)."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 290
@@ -38,12 +38,12 @@ ceiling = 580
 rationale = "U4 read-side projector (SLOC 548 at seed): flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until U5 inline-flush seam reveals a real boundary. Re-evaluate when U7 bp-events-rebuild bootstrap reuses the reducer entry points."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
-ceiling = 750
-rationale = "P11 refactoring baseline was 519 SLOC; WordPress + Tumblr adapter implementations (Plan 2026-05-21-001 / Plan 003 Phase 2) brought live.verify + token-loading + dofollow registration stubs to 717 (+198). Ceiling raised 550 → 750 = round_up_to_10(717+30). Decomposition target remains: extract per-channel nofollow rationale strings to _rationales.py when adapter count stabilises."
+ceiling = 720
+rationale = "Registry + re-export hub. Nofollow rationale strings extracted to _nofollow_rationales.py (2026-05-22), dropping from 726 to 691 SLOC. Ceiling lowered 750→720 = round_up_to_10(691+30). New nofollow adapters add a one-line _R['key'] reference here and a string entry in _nofollow_rationales.py; bump ceiling in the same PR."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
-ceiling = 750
-rationale = "Phase 0 seal CLI (SLOC 720): 7 subcommands (init, show, verify, reseal, verify-seal-hooks, bootstrap, runbook), allowlist parsing, XDG-helper plumbing, worktree-policy lib call. Post-G1 refactor will split runbook and CI-helper into sub-modules; ceiling 750 holds 30-SLOC headroom until then."
+ceiling = 465
+rationale = "_handle_init (173 lines) + its exclusive helpers (_build_routine_verdict_ref, _build_manual_verdict_ref, _get_main_sha, _post_push_verify, _InitError, _NotesPushDidNotLand) extracted to _seal_init.py (2026-05-22). phase0_seal.py dropped from 720 to 449 SLOC — 7 subcommand dispatch layer + _handle_{show,verify,reseal,verify_hook} + shared helpers remain. Ceiling 465 = round_up_to_10(435+30)."
 
 [files."src/backlink_publisher/cli/plan_check.py"]
 ceiling = 620

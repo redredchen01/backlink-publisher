@@ -31,11 +31,20 @@ def get_session() -> requests.Session:
     return session
 
 
-def get(url: str, **kwargs: Any) -> requests.Response:
+def request(method: str, url: str, **kwargs: Any) -> requests.Response:
     timeout = kwargs.pop("timeout", DEFAULT_TIMEOUT)
-    return get_session().get(url, timeout=timeout, **kwargs)
+    return get_session().request(method, url, timeout=timeout, **kwargs)
+
+
+def get(url: str, **kwargs: Any) -> requests.Response:
+    return request("GET", url, **kwargs)
 
 
 def post(url: str, data: Any = None, json: Any = None, **kwargs: Any) -> requests.Response:
-    timeout = kwargs.pop("timeout", DEFAULT_TIMEOUT)
-    return get_session().post(url, data=data, json=json, timeout=timeout, **kwargs)
+    kwargs["json"] = json
+    return request("POST", url, data=data, **kwargs)
+
+
+def put(url: str, data: Any = None, json: Any = None, **kwargs: Any) -> requests.Response:
+    kwargs["json"] = json
+    return request("PUT", url, data=data, **kwargs)

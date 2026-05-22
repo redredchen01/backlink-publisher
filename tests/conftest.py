@@ -39,9 +39,10 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
     os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
     os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(cache_dir)
 
-    # Note: ``webui_store`` singletons are now ``_LazyStore`` proxies
-    # (Plan 2026-05-22 P7 C1) so they resolve their path from the env
-    # var on first access.  No ``_refresh_paths()`` call is needed.
+    # Note: ``webui_store`` singletons are now ``_LazyStore`` proxies so
+    # they resolve their path from ``BACKLINK_PUBLISHER_CONFIG_DIR`` on
+    # first access.  No ``_refresh_paths()`` call is needed.
+    # (Plan C — webui-store-lazy-init)
 
     yield
     if previous_config is None:
@@ -56,7 +57,7 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(autouse=True)
 def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch ``linkcheck.http.check_url`` at the definition site.
+    """Patch ``publish_backlinks.check_url`` at the consumer reference.
 
     Per ``feedback_test-autouse-verify-mock`` + the
     ``ci-test-isolation-failures-medium-brave-sleep-timeout-2026-05-13``
@@ -66,8 +67,10 @@ def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
     Default behavior: every URL is considered reachable. Tests that need to
     drive specific failure paths can re-patch within their own scope.
     """
+    # check_url promoted to module-level in _publish_helpers.py;
+    # patch at the consumer reference per feedback_test-autouse-verify-mock.
     monkeypatch.setattr(
-        "backlink_publisher.linkcheck.http.check_url",
+        "backlink_publisher.cli._publish_helpers.check_url",
         lambda _url: (True, None),
         raising=True,
     )

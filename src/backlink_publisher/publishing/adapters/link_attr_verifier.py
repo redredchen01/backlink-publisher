@@ -56,8 +56,8 @@ def verify_link_attributes(
     are NOT expected to fail the publish over it.
     """
     try:
-        import requests  # noqa: PLC0415
-        resp = requests.get(
+        from backlink_publisher.http import get as http_get
+        resp = http_get(
             url,
             timeout=timeout,
             headers={"User-Agent": "backlink-publisher-verifier/0.1"},

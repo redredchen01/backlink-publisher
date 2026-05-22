@@ -38,6 +38,7 @@ from typing import Any
 import requests
 
 from backlink_publisher.config import Config, load_ghpages_token
+from backlink_publisher.http import get as http_get, put as http_put
 from backlink_publisher._util.errors import (
     BannerUploadError,
     DependencyError,
@@ -154,7 +155,7 @@ def _get_existing_sha(repo: str, branch: str, path: str, token: str) -> str | No
     Used only on the 422 retry path. 404 here is the *happy* outcome
     (file is new); any other error is propagated so the caller can decide.
     """
-    resp = requests.get(
+    resp = http_get(
         f"{GITHUB_API}/repos/{repo}/contents/{path}",
         headers=_required_headers(token),
         params={"ref": branch},
@@ -192,7 +193,7 @@ def _put_contents(
     if sha is not None:
         body["sha"] = sha
 
-    resp = requests.put(
+    resp = http_put(
         f"{GITHUB_API}/repos/{repo}/contents/{path}",
         headers=_required_headers(token),
         json=body,
@@ -286,7 +287,7 @@ def _put_binary_contents(
     if sha is not None:
         body["sha"] = sha
 
-    resp = requests.put(
+    resp = http_put(
         f"{GITHUB_API}/repos/{repo}/contents/{path}",
         headers=_required_headers(token),
         json=body,

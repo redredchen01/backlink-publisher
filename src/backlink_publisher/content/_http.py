@@ -5,6 +5,7 @@ import socket
 from urllib.parse import urlparse
 
 import requests
+from backlink_publisher.http import get as http_get
 
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
 from backlink_publisher._util.logger import plan_logger
@@ -77,7 +78,7 @@ def _safe_get(
     _block_if_private(normalized)
 
     def _call() -> tuple[requests.Response, bytes]:
-        resp = requests.get(
+        resp = http_get(
             normalized,
             timeout=timeout,
             verify=not insecure_tls,

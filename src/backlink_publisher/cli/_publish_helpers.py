@@ -17,6 +17,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from backlink_publisher._util.logger import publish_logger
+from backlink_publisher.linkcheck.verify import verify_published
+from backlink_publisher.linkcheck.http import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
 
 _HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 
@@ -79,7 +81,6 @@ def _maybe_emit_gate_banner(skip_flag: bool) -> None:
 
 
 def _check_row_reachability(row: dict[str, Any]) -> tuple[bool, str | None]:
-    from backlink_publisher.linkcheck.http import MAX_CONCURRENT as _LINKCHECK_MAX_CONCURRENT, check_url
 
     urls = [row.get("target_url", "")]
     for link in row.get("links", []):
@@ -158,7 +159,6 @@ def _do_verify(
     result: Any,
     row: dict[str, Any],
 ) -> tuple[bool, str]:
-    from backlink_publisher.linkcheck.verify import verify_published
 
     if no_verify or dry_run:
         return True, ""

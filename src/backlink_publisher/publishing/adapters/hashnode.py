@@ -36,6 +36,7 @@ from typing import Any
 import requests
 
 from pathlib import Path
+from backlink_publisher.http import post as http_post
 
 from backlink_publisher.config import Config, load_hashnode_token
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
@@ -170,7 +171,7 @@ def _graphql_post(
               ``retry_transient_call`` (status appears in RETRYABLE set)
       - other non-200 → ExternalServiceError with status + first 200 chars
     """
-    resp = requests.post(
+    resp = http_post(
         HASHNODE_API,
         headers=_required_headers(token),
         json={"query": query, "variables": variables or {}},
@@ -229,7 +230,7 @@ def _probe_hashnode_paywall(token: str) -> str | None:
             return result
 
     try:
-        resp = requests.post(
+        resp = http_post(
             HASHNODE_API,
             headers=_required_headers(token),
             json={"query": _PUBLICATION_PROBE_QUERY},
