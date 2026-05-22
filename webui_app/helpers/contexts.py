@@ -31,6 +31,7 @@ from webui_store import (
 )
 
 from .security import _FLASK_PORT, _ensure_csrf_token, _oauth_callback_uri
+from ._request_cache import _g_cache
 
 
 from .channel_probes import (
@@ -104,7 +105,7 @@ def _persist_three_tier_config(
 
 def _load_schedule_settings() -> dict:
     defaults = {'min_interval_hours': 4, 'jitter_minutes': 30}
-    loaded = _schedule_store.load()
+    loaded = _g_cache('schedule', _schedule_store.load)
     if isinstance(loaded, dict):
         defaults.update(loaded)
     return defaults
@@ -121,7 +122,7 @@ def _calc_next_available(requested_dt: datetime) -> datetime:
     jitter_mins = settings.get('jitter_minutes', 30)
 
     last_published = None
-    for item in _drafts_store.load():
+    for item in _g_cache('drafts', _drafts_store.load):
         if item.get('status') in ('published', 'scheduled'):
             ts = item.get('published_at') or item.get('scheduled_at')
             if ts:
@@ -133,7 +134,7 @@ def _calc_next_available(requested_dt: datetime) -> datetime:
                 except ValueError:
                     plan_logger.warn("_calc_next_available: bad date in drafts_store", ts=ts)
 
-    for item in _history_store.load():
+    for item in _g_cache('history', _history_store.load):
         ts = item.get('created_at')
         if ts and item.get('status') in ('drafted', 'published'):
             try:
@@ -245,7 +246,7 @@ def _settings_context(flash=None):
     from webui_store.channel_status import list_all as _channel_list_all
     from ..services.bind_job import BIND_ERROR_MESSAGES
 
-    cfg = load_config()
+    cfg = _g_cache('config', load_config)
     token_data = load_blogger_token(cfg.blogger_token_path)
     medium_token_data = load_medium_token()
 
@@ -318,7 +319,7 @@ def _settings_context(flash=None):
         token_path=str(cfg.blogger_token_path),
         port=_FLASK_PORT,
         callback_uri=_oauth_callback_uri(),
-        profiles=_profiles_store.load(),
+        profiles=_g_cache('profiles', _profiles_store.load),
         plans_list=[],
         schedule_settings=_load_schedule_settings(),
         llm_settings=_load_llm_settings(),
@@ -356,16 +357,16 @@ def _render(template_name: str, **kwargs):
         now_iso, suggested_next, incomplete_run
     """
     if 'history' not in kwargs:
-        kwargs['history'] = _history_store.load()
+        kwargs['history'] = _g_cache('history', _history_store.load)
     if 'blogger_token_status' not in kwargs:
         kwargs['blogger_token_status'] = _get_blogger_token_status()
     if 'profiles' not in kwargs:
-        kwargs['profiles'] = _profiles_store.load()
+        kwargs['profiles'] = _g_cache('profiles', _profiles_store.load)
     if 'draft_queue' not in kwargs:
-        kwargs['draft_queue'] = _drafts_store.load()
+        kwargs['draft_queue'] = _g_cache('drafts', _drafts_store.load)
     if 'tasks' not in kwargs:
         try:
-            kwargs['tasks'] = _queue_store.load()
+            kwargs['tasks'] = _g_cache('tasks', _queue_store.load)
         except Exception:
             kwargs['tasks'] = []
     if 'now_iso' not in kwargs:
