@@ -11,7 +11,7 @@ from backlink_publisher._util.logger import plan_logger
 from flask import Blueprint, request, session
 
 from ..helpers.contexts import _persist_three_tier_config, _render, _get_velog_status
-from ..helpers.cli_runner import run_pipe
+from ..helpers.cli_runner import run_pipe, strip_cli_diagnostic_banner
 from ..helpers.history import (
     _parse_publish_results,
     _push_history_per_row,
@@ -258,14 +258,14 @@ def ce_publish():
         published = result['stdout']
         stderr = result.get('stderr', '') or ''
     except Exception as exc:
-        msg = str(exc)
+        msg = strip_cli_diagnostic_banner(str(exc)) or str(exc)
         _push_history_single_failure(
             target_url=target_url, platform=platform, language=language, error=msg,
         )
         plan_logger.warn(
             "webui_publish_result",
             state="all_failed", platform=platform, publish_mode=publish_mode,
-            n_ok=0, n_failed=0, stderr_preview=msg[:200],
+            n_ok=0, n_failed=0, stderr_preview=msg[:500],
         )
         return _render('index.html',
             publish_state='all_failed', publish_error=f"发布失败: {msg}",
@@ -275,7 +275,8 @@ def ce_publish():
     if not publish_results:
         # CLI exited 0 with stdout that did not parse into rows — treat as
         # failure rather than silently masking the lack of usable output.
-        diagnostic = stderr.strip() or "publish-backlinks returned no parseable rows"
+        cleaned = strip_cli_diagnostic_banner(stderr)
+        diagnostic = cleaned or "publish-backlinks returned no parseable rows"
         _push_history_single_failure(
             target_url=target_url, platform=platform, language=language,
             error=diagnostic,
@@ -283,7 +284,7 @@ def ce_publish():
         plan_logger.warn(
             "webui_publish_result",
             state="all_failed", platform=platform, publish_mode=publish_mode,
-            n_ok=0, n_failed=0, stderr_preview=diagnostic[:200],
+            n_ok=0, n_failed=0, stderr_preview=diagnostic[:500],
         )
         return _render('index.html',
             publish_state='all_failed', publish_error=diagnostic,

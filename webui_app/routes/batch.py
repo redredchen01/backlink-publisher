@@ -11,7 +11,7 @@ from flask import Blueprint, request, session
 from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
 
 from ..helpers.contexts import _render
-from ..helpers.cli_runner import _REPO_ROOT, _rewrite_cli_cmd, run_pipe
+from ..helpers.cli_runner import _REPO_ROOT, _rewrite_cli_cmd, run_pipe, strip_cli_diagnostic_banner
 from ..helpers.history import (
     _parse_publish_results,
     _push_history_per_row,
@@ -185,12 +185,13 @@ def ce_publish_real():
             history=history, history_active=True)
 
     except Exception as e:
+        msg = strip_cli_diagnostic_banner(str(e)) or str(e)
         history = _push_history_single_failure(
             target_url=config.get('target_url', 'unknown'),
             platform=platform,
             language=config.get('target_language', 'zh-CN'),
-            error=str(e),
+            error=msg,
         )
 
-        return _render('index.html', error=f"发布失败: {str(e)}",
+        return _render('index.html', error=f"发布失败: {msg}",
             config=config, history=history, history_active=True)

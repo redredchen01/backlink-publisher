@@ -12,7 +12,7 @@ from webui_store import drafts_store as _drafts_store
 from webui_store import history_store as _history_store
 from webui_store import queue_store as _queue_store
 
-from .helpers.cli_runner import run_pipe
+from .helpers.cli_runner import run_pipe, strip_cli_diagnostic_banner
 from .helpers.history import (
     _parse_publish_results,
     _push_history_per_row,
@@ -162,12 +162,13 @@ def _publish_draft_job(item_id: str) -> None:
             language_fallback=item.get('language', 'zh-CN'),
         )
     except Exception as exc:
-        _drafts_store.update_item(item_id, status='failed', error=str(exc))
+        msg = strip_cli_diagnostic_banner(str(exc)) or str(exc)
+        _drafts_store.update_item(item_id, status='failed', error=msg)
         _push_history_single_failure(
             target_url=item.get('target_url', 'unknown'),
             platform=platform,
             language=item.get('language', 'zh-CN'),
-            error=str(exc),
+            error=msg,
         )
 
 
