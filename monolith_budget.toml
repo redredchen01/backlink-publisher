@@ -34,8 +34,8 @@ ceiling = 240
 rationale = "Post-split: body templates (9 functions, ~130 SLOC) extracted to _body_templates.py in 2026-05-19. markdown.py now holds render+link+zh_short utilities at 210 SLOC; ceiling 240 provides 30-SLOC headroom for minor accretion."
 
 [files."src/backlink_publisher/events/projector.py"]
-ceiling = 580
-rationale = "U4 read-side projector (SLOC 548 at seed): flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until U5 inline-flush seam reveals a real boundary. Re-evaluate when U7 bp-events-rebuild bootstrap reuses the reducer entry points."
+ceiling = 560
+rationale = "U4 read-side projector (SLOC 548 at seed): flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until U5 inline-flush seam reveals a real boundary. Re-evaluate when U7 bp-events-rebuild bootstrap reuses the reducer entry points. Ceiling tightened 580→560 on 2026-05-22: branch trimmed SLOC from 548→528 while ceiling was inherited unchanged from main; ceiling = round_up_to_10(528+30) = 560."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
 ceiling = 720

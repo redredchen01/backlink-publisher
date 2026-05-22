@@ -151,7 +151,7 @@ def test_banner_none_when_use_image_gen_false(isolated, tmp_path):
     out = tmp_path / "out.jsonl"
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
     ) as mock_post:
         _run_plan_backlinks(seeds, out)
 
@@ -173,7 +173,7 @@ def test_banner_dict_emitted_on_success(isolated, tmp_path):
 
     b64 = base64.b64encode(_PNG).decode()
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=_post_ok({"data": [{"b64_json": b64}]}),
     ):
         _run_plan_backlinks(seeds, out)
@@ -213,10 +213,10 @@ def test_banner_source_url_emitted_for_url_mode_response(isolated, tmp_path):
     # returning the URL, and requests.get against that URL
     # returning the PNG bytes.
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=_post_ok({"data": [{"url": upstream_url}]}),
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=_get_ok_bytes(_PNG, "image/png"),
     ):
         _run_plan_backlinks(seeds, out)
@@ -236,7 +236,7 @@ def test_banner_does_not_alter_body(isolated, tmp_path):
 
     b64 = base64.b64encode(_PNG).decode()
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=_post_ok({"data": [{"b64_json": b64}]}),
     ):
         _run_plan_backlinks(seeds, out)
@@ -260,7 +260,7 @@ def test_banner_status_capped_per_run(isolated, tmp_path):
     out = tmp_path / "out.jsonl"
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
     ) as mock_post:
         _run_plan_backlinks(seeds, out)
 
@@ -286,7 +286,7 @@ def test_banner_status_auth_failed_on_401(isolated, tmp_path):
     bad.raise_for_status = MagicMock(side_effect=requests.HTTPError("401"))
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=bad,
     ):
         _run_plan_backlinks(seeds, out)
@@ -311,7 +311,7 @@ def test_banner_none_when_token_file_missing(isolated, tmp_path):
     out = tmp_path / "out.jsonl"
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
     ) as mock_post:
         _run_plan_backlinks(seeds, out)
 
