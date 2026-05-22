@@ -63,12 +63,12 @@ def clear_paywall_cache():
 
 class TestProbeHashnodePaywall:
     def test_pro_tier_returns_none(self):
-        with patch("requests.post", return_value=_mock_pro_tier_response()):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_pro_tier_response()):
             result = _probe_hashnode_paywall("pro_token")
         assert result is None
 
     def test_free_tier_returns_error_message(self):
-        with patch("requests.post", return_value=_mock_free_tier_response()):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_free_tier_response()):
             result = _probe_hashnode_paywall("free_token")
         assert result is not None
         assert "Pro plan" in result
@@ -77,21 +77,21 @@ class TestProbeHashnodePaywall:
 
     def test_network_error_returns_none(self):
         import requests as _r
-        with patch("requests.post", side_effect=_r.ConnectionError("timeout")):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", side_effect=_r.ConnectionError("timeout")):
             result = _probe_hashnode_paywall("any_token")
         assert result is None
 
     def test_non_200_returns_none(self):
         resp = MagicMock()
         resp.status_code = 401
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=resp):
             result = _probe_hashnode_paywall("bad_token")
         assert result is None
 
     def test_5xx_returns_none(self):
         resp = MagicMock()
         resp.status_code = 503
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=resp):
             result = _probe_hashnode_paywall("token")
         assert result is None
 
@@ -99,18 +99,18 @@ class TestProbeHashnodePaywall:
         resp = MagicMock()
         resp.status_code = 200
         resp.json.side_effect = ValueError("bad json")
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=resp):
             result = _probe_hashnode_paywall("token")
         assert result is None
 
     def test_cache_hit_no_second_request(self):
-        with patch("requests.post", return_value=_mock_pro_tier_response()) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_pro_tier_response()) as mock_post:
             _probe_hashnode_paywall("cached_token")
             _probe_hashnode_paywall("cached_token")
         assert mock_post.call_count == 1
 
     def test_cache_ttl_expired_re_probes(self):
-        with patch("requests.post", return_value=_mock_pro_tier_response()) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_pro_tier_response()) as mock_post:
             _probe_hashnode_paywall("ttl_token")
 
         import hashlib
@@ -119,12 +119,12 @@ class TestProbeHashnodePaywall:
         result, _ = _paywall_cache[token_hash]
         _paywall_cache[token_hash] = (result, time.monotonic() - 400)
 
-        with patch("requests.post", return_value=_mock_pro_tier_response()) as mock_post2:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_pro_tier_response()) as mock_post2:
             _probe_hashnode_paywall("ttl_token")
         assert mock_post2.call_count == 1
 
     def test_different_tokens_probe_separately(self):
-        with patch("requests.post", return_value=_mock_pro_tier_response()) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_pro_tier_response()) as mock_post:
             _probe_hashnode_paywall("token_a")
             _probe_hashnode_paywall("token_b")
         assert mock_post.call_count == 2
@@ -133,7 +133,7 @@ class TestProbeHashnodePaywall:
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"data": {}}
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=resp):
             result = _probe_hashnode_paywall("token")
         assert result is None
 
@@ -143,7 +143,7 @@ class TestProbeHashnodePaywall:
         resp.json.return_value = {
             "errors": [{"message": "Unauthorized"}]
         }
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=resp):
             result = _probe_hashnode_paywall("token")
         assert result is None
 
@@ -180,7 +180,7 @@ class TestHashnodePublishPaywallIntegration:
     def test_pro_tier_publish_succeeds(self, config):
         adapter = HashnodeAPIAdapter()
         # First call = paywall probe (pro tier), second = publishPost mutation
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post") as mock_post:
             mock_post.side_effect = [
                 _mock_pro_tier_response(),
                 self._mock_publish_response(),
@@ -195,7 +195,7 @@ class TestHashnodePublishPaywallIntegration:
 
     def test_free_tier_raises_external_service_error(self, config):
         adapter = HashnodeAPIAdapter()
-        with patch("requests.post", return_value=_mock_free_tier_response()):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_mock_free_tier_response()):
             with pytest.raises(ExternalServiceError) as exc_info:
                 adapter.publish(
                     {"title": "Test"},
@@ -214,7 +214,7 @@ class TestHashnodePublishPaywallIntegration:
             post_calls.append(query)
             return _mock_free_tier_response()
 
-        with patch("requests.post", side_effect=mock_post):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", side_effect=mock_post):
             with pytest.raises(ExternalServiceError):
                 adapter.publish(
                     {"title": "Test"},
@@ -228,7 +228,7 @@ class TestHashnodePublishPaywallIntegration:
 
     def test_draft_mode_skips_paywall_probe(self, config):
         adapter = HashnodeAPIAdapter()
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post") as mock_post:
             result = adapter.publish(
                 {"title": "Draft"},
                 mode="draft",
@@ -249,7 +249,7 @@ class TestHashnodePublishPaywallIntegration:
                 return _mock_pro_tier_response()
             return self._mock_publish_response()
 
-        with patch("requests.post", side_effect=mock_post):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", side_effect=mock_post):
             adapter.publish({"title": "Row 1"}, mode="live", config=config)
             # Second publish with same token — probe should be cached
             adapter.publish({"title": "Row 2"}, mode="live", config=config)
@@ -272,7 +272,7 @@ class TestHashnodePublishPaywallIntegration:
                 raise _r.ConnectionError("probe timeout")
             return self._mock_publish_response()
 
-        with patch("requests.post", side_effect=mock_post):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", side_effect=mock_post):
             result = adapter.publish(
                 {"title": "Should succeed"},
                 mode="live",
