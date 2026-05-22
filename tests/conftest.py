@@ -67,8 +67,10 @@ def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
     Default behavior: every URL is considered reachable. Tests that need to
     drive specific failure paths can re-patch within their own scope.
     """
+    # check_url promoted to module-level in _publish_helpers.py;
+    # patch at the consumer reference per feedback_test-autouse-verify-mock.
     monkeypatch.setattr(
-        "backlink_publisher.cli.publish_backlinks.check_url",
+        "backlink_publisher.cli._publish_helpers.check_url",
         lambda _url: (True, None),
         raising=True,
     )

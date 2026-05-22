@@ -45,8 +45,8 @@ def test_token_drift_aborts_mid_run(tmp_path, monkeypatch):
         from backlink_publisher.publishing.adapters import AdapterResult
         return AdapterResult(status="drafted", adapter="blogger-api", platform="blogger")
 
-    with patch("backlink_publisher.cli.publish_backlinks.adapter_publish", side_effect=fake_publish):
-        with patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup"):
+    with patch("backlink_publisher.cli._resume.adapter_publish", side_effect=fake_publish):
+        with patch("backlink_publisher.cli._resume.verify_adapter_setup"):
             with patch("backlink_publisher.checkpoint.load_checkpoint", return_value=ckpt):
                 with patch("backlink_publisher.cli.publish_backlinks._acquire_publish_leases"):
                     with patch("backlink_publisher.checkpoint.update_item"):

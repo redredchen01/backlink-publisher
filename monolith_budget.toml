@@ -18,8 +18,8 @@ ceiling = 570
 rationale = "Unit 3 monolith split (2026-05-20): link-building logic extracted to _links.py (~230 SLOC), template registry to _templates.py (~130 SLOC), banner runtime to _banners.py (~100 SLOC). core.py dropped from ~1112 to ~531 SLOC, now holds only _generate_payload, _dispatch_row, _resolve_article_anchors, and main(). Ceiling 570 = round_up_to_10(531+30) per policy."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 870
-rationale = "Pipeline stage 3 SLOC 835 after stacking concurrency-lease extraction + atexit handlers (from main, baseline raise to 784) AND Plan 2026-05-20-004 Unit 1 banner-embed dispatcher wiring (+51 SLOC): _make_banner_emit helper (~22 SLOC for EventStore lazy-construct + logger fanout), banner_emit kwarg threaded through 2 of the 3 adapter_publish callsites (resume + normal; dry-run skipped because dispatch short-circuits), and a BannerUploadError catch ahead of the generic DependencyError catch at both callsites (~24 SLOC across resume + main). F5 ThrottleClock + AuthExpiredError-handler extraction will still drop ~70 SLOC; lower ceiling then. New ceiling 870 per policy (round_up_to_10(835 + 30) = 870)."
+ceiling = 444
+rationale = "Resume logic extracted to _resume.py (264 SLOC) + shared helpers to _publish_helpers.py (221 SLOC). publish_backlinks.py dropped from 845 to 414 SLOC — holds main() and the per-row publish loop. Ceiling 444 = round_up_to_10(414+30)."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 290

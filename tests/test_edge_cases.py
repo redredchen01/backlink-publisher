@@ -20,7 +20,7 @@ from backlink_publisher.linkcheck.verify import VerificationResult
 @pytest.fixture(autouse=True)
 def _mock_verify_pass(mocker):
     mocker.patch(
-        "backlink_publisher.cli.publish_backlinks.verify_published",
+        "backlink_publisher.cli._publish_helpers.verify_published",
         return_value=VerificationResult(ok=True, reason=""),
     )
 
