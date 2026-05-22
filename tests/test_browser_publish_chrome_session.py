@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backlink_publisher._util.errors import DependencyError
+import backlink_publisher.publishing.browser_publish._chrome_session_impl as _cs_impl
+
 from backlink_publisher.publishing.browser_publish import (
     BrowserPublishRecipe,
     ChromeAttachSession,
@@ -109,15 +111,15 @@ class TestListenerIdentity:
             f"--user-data-dir={profile} about:blank"
         )
         with (
-            patch.object(cs, "_lsof_listener_pid", return_value=12345),
-            patch.object(cs, "_ps_command", return_value=cmdline),
+            patch.object(_cs_impl, "_lsof_listener_pid", return_value=12345),
+            patch.object(_cs_impl, "_ps_command", return_value=cmdline),
         ):
             verified, reason = cs._verify_listener_is_chrome(9222, chrome_bin, profile)
         assert verified is True
         assert reason == "ok"
 
     def test_unverified_when_no_listener(self):
-        with patch.object(cs, "_lsof_listener_pid", return_value=None):
+        with patch.object(_cs_impl, "_lsof_listener_pid", return_value=None):
             verified, reason = cs._verify_listener_is_chrome(
                 9222, "/x/chrome", Path("/tmp/p")
             )
@@ -126,8 +128,8 @@ class TestListenerIdentity:
 
     def test_unverified_when_chrome_bin_absent_from_cmdline(self):
         with (
-            patch.object(cs, "_lsof_listener_pid", return_value=12345),
-            patch.object(cs, "_ps_command", return_value="/usr/bin/python imposter.py"),
+            patch.object(_cs_impl, "_lsof_listener_pid", return_value=12345),
+            patch.object(_cs_impl, "_ps_command", return_value="/usr/bin/python imposter.py"),
         ):
             verified, reason = cs._verify_listener_is_chrome(
                 9222, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", Path("/tmp/p")
@@ -139,8 +141,8 @@ class TestListenerIdentity:
         chrome_bin = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         cmdline = f"{chrome_bin} --remote-debugging-port=9222 --user-data-dir=/other/profile about:blank"
         with (
-            patch.object(cs, "_lsof_listener_pid", return_value=12345),
-            patch.object(cs, "_ps_command", return_value=cmdline),
+            patch.object(_cs_impl, "_lsof_listener_pid", return_value=12345),
+            patch.object(_cs_impl, "_ps_command", return_value=cmdline),
         ):
             verified, reason = cs._verify_listener_is_chrome(
                 9222, chrome_bin, Path("/tmp/spike-profile")
@@ -172,7 +174,7 @@ class TestEnsureProfilePerms:
     def test_raises_chrome_profile_unsafe_perms_when_owner_mismatch(self, tmp_path):
         profile = tmp_path / "profile"
         profile.mkdir()
-        with patch.object(cs.os, "geteuid", return_value=os.geteuid() + 1):
+        with patch.object(_cs_impl.os, "geteuid", return_value=os.geteuid() + 1):
             with pytest.raises(ChromeSessionError, match="chrome_profile_unsafe_perms"):
                 cs._ensure_profile_perms(profile)
 
@@ -222,7 +224,7 @@ class TestReapOrphan:
         def fake_kill(pid, sig):
             raise ProcessLookupError()
 
-        with patch.object(cs.os, "kill", side_effect=fake_kill):
+        with patch.object(_cs_impl.os, "kill", side_effect=fake_kill):
             result = cs.reap_orphan_publish_chrome()
         assert result["action"] == "cleaned_stale"
         assert result["reason"] == "pid_gone"
@@ -240,9 +242,9 @@ class TestReapOrphan:
             kills.append((pid, sig))
 
         with (
-            patch.object(cs.os, "kill", side_effect=fake_kill),
-            patch.object(cs, "_chrome_binary", return_value="/x/chrome"),
-            patch.object(cs, "_ps_command", return_value="/usr/bin/python imposter.py"),
+            patch.object(_cs_impl.os, "kill", side_effect=fake_kill),
+            patch.object(_cs_impl, "_chrome_binary", return_value="/x/chrome"),
+            patch.object(_cs_impl, "_ps_command", return_value="/usr/bin/python imposter.py"),
         ):
             result = cs.reap_orphan_publish_chrome()
         assert result["action"] == "cleaned_stale"
@@ -267,9 +269,9 @@ class TestReapOrphan:
             signaled.append((pid, sig))
 
         with (
-            patch.object(cs.os, "kill", side_effect=fake_kill),
-            patch.object(cs, "_chrome_binary", return_value=chrome_bin),
-            patch.object(cs, "_ps_command", return_value=cmdline),
+            patch.object(_cs_impl.os, "kill", side_effect=fake_kill),
+            patch.object(_cs_impl, "_chrome_binary", return_value=chrome_bin),
+            patch.object(_cs_impl, "_ps_command", return_value=cmdline),
         ):
             result = cs.reap_orphan_publish_chrome()
         assert result["action"] == "reaped"

@@ -892,7 +892,7 @@ def test_from_sitemap_generates_payloads():
     mock_resp.content = sitemap_xml
     mock_resp.raise_for_status = MagicMock()
 
-    with patch("requests.get", return_value=mock_resp):
+    with patch("backlink_publisher.http.get", return_value=mock_resp):
         stdout, stderr, code = _run_plan(
             "", argv=["--from-sitemap=https://site.com/sitemap.xml"]
         )
@@ -908,7 +908,7 @@ def test_from_sitemap_generates_payloads():
 def test_from_sitemap_network_error_exits_2():
     """--from-sitemap with network error → exit 2."""
     from unittest.mock import patch
-    with patch("requests.get", side_effect=ConnectionError("offline")):
+    with patch("backlink_publisher.http.get", side_effect=ConnectionError("offline")):
         stdout, stderr, code = _run_plan(
             "", argv=["--from-sitemap=https://example.com/sitemap.xml"]
         )

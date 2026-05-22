@@ -92,7 +92,7 @@ class TestVelogLiveVerifyHappyPath:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response("graphql-user")):
+        with patch("backlink_publisher.http.post", return_value=_ok_response("graphql-user")):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert isinstance(result, VerifyResult)
@@ -111,7 +111,7 @@ class TestVelogLiveVerifyHappyPath:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response()) as mock_post:
+        with patch("backlink_publisher.http.post", return_value=_ok_response()) as mock_post:
             verify_adapter_setup("velog", cfg, mode="live")
 
         assert mock_post.call_count == 1
@@ -139,7 +139,7 @@ class TestVelogLiveVerifyTokenExpired:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_null_user_response()):
+        with patch("backlink_publisher.http.post", return_value=_null_user_response()):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -157,7 +157,7 @@ class TestVelogLiveVerifyNetworkFailures:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", side_effect=requests.Timeout("slow")):
+        with patch("backlink_publisher.http.post", side_effect=requests.Timeout("slow")):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -169,7 +169,7 @@ class TestVelogLiveVerifyNetworkFailures:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", side_effect=requests.ConnectionError("dns")):
+        with patch("backlink_publisher.http.post", side_effect=requests.ConnectionError("dns")):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -182,7 +182,7 @@ class TestVelogLiveVerifyNetworkFailures:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_http_status_response(status)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(status)):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -198,7 +198,7 @@ class TestVelogLiveVerifyNetworkFailures:
         resp.status_code = 200
         resp.json.side_effect = ValueError("not json")
 
-        with patch("requests.post", return_value=resp):
+        with patch("backlink_publisher.http.post", return_value=resp):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -214,7 +214,7 @@ class TestVelogLiveVerifyNever:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.http.post") as mock_post:
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.ok is False
@@ -238,7 +238,7 @@ class TestVelogLiveVerifyReadOnly:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response()):
+        with patch("backlink_publisher.http.post", return_value=_ok_response()):
             verify_adapter_setup("velog", cfg, mode="live")
 
         assert cookies.stat().st_mtime == mtime_before, (
@@ -255,7 +255,7 @@ class TestVelogLiveVerifyReadOnly:
         cfg = _config_with_velog(cookies)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_null_user_response()):
+        with patch("backlink_publisher.http.post", return_value=_null_user_response()):
             result = verify_adapter_setup("velog", cfg, mode="live")
 
         assert result.last_verify_result == "token_expired"

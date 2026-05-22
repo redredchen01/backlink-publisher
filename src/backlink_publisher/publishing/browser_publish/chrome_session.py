@@ -63,6 +63,12 @@ from ._chrome_session_impl import (
     _verify_listener_is_chrome,
     _ensure_profile_perms,
     reap_orphan_publish_chrome,
+    _pid_file_path,
+    _read_pid_file,
+    _write_pid_file,
+    _unlink_pid_file,
+    _ps_command,
+    signal_SIGTERM,
 )
 
 

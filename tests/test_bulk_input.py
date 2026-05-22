@@ -113,7 +113,7 @@ def _mock_response(content: bytes, status_code: int = 200):
 
 
 def test_parse_sitemap_simple():
-    with patch("requests.get", return_value=_mock_response(_SIMPLE_SITEMAP)):
+    with patch("backlink_publisher.http.get", return_value=_mock_response(_SIMPLE_SITEMAP)):
         urls = parse_sitemap("https://example.com/sitemap.xml")
     assert urls == [
         "https://example.com/page1",
@@ -128,7 +128,7 @@ def test_parse_sitemap_index_fetches_sub_sitemaps():
             return _mock_response(_SITEMAP_INDEX)
         return _mock_response(_SUB_SITEMAP)
 
-    with patch("requests.get", side_effect=_get):
+    with patch("backlink_publisher.http.get", side_effect=_get):
         urls = parse_sitemap("https://example.com/sitemap.xml")
 
     assert "https://example.com/sub/a" in urls
@@ -141,19 +141,19 @@ def test_parse_sitemap_deduplicates():
   <url><loc>https://example.com/page1</loc></url>
   <url><loc>https://example.com/page1</loc></url>
 </urlset>"""
-    with patch("requests.get", return_value=_mock_response(dup_sitemap)):
+    with patch("backlink_publisher.http.get", return_value=_mock_response(dup_sitemap)):
         urls = parse_sitemap("https://example.com/sitemap.xml")
     assert urls.count("https://example.com/page1") == 1
 
 
 def test_parse_sitemap_raises_on_network_error():
-    with patch("requests.get", side_effect=ConnectionError("offline")):
+    with patch("backlink_publisher.http.get", side_effect=ConnectionError("offline")):
         with pytest.raises(RuntimeError, match="Failed to fetch sitemap"):
             parse_sitemap("https://example.com/sitemap.xml")
 
 
 def test_parse_sitemap_raises_on_invalid_xml():
-    with patch("requests.get", return_value=_mock_response(b"not xml at all")):
+    with patch("backlink_publisher.http.get", return_value=_mock_response(b"not xml at all")):
         with pytest.raises(RuntimeError, match="Failed to parse sitemap XML"):
             parse_sitemap("https://example.com/sitemap.xml")
 
@@ -163,7 +163,7 @@ def test_parse_sitemap_no_namespace():
 <urlset>
   <url><loc>https://example.com/x</loc></url>
 </urlset>"""
-    with patch("requests.get", return_value=_mock_response(no_ns)):
+    with patch("backlink_publisher.http.get", return_value=_mock_response(no_ns)):
         urls = parse_sitemap("https://example.com/sitemap.xml")
     assert "https://example.com/x" in urls
 

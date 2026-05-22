@@ -291,7 +291,7 @@ def signal_SIGTERM() -> int:
     import signal as _signal
 
     return _signal.SIGTERM
-@dataclass
+@dataclass(frozen=True)
 class BrowserPublishRecipe:
     """One channel's browser-publish flow.
 

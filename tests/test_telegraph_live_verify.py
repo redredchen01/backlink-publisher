@@ -61,7 +61,7 @@ class TestTelegraphLiveVerifyHappyPath:
         _seed_telegraph_token(tmp_path, short_name="my-channel")
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response("my-channel")):
+        with patch("backlink_publisher.http.post", return_value=_ok_response("my-channel")):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert isinstance(result, VerifyResult)
@@ -78,7 +78,7 @@ class TestTelegraphLiveVerifyHappyPath:
         _seed_telegraph_token(tmp_path, access_token="SECRET_TOKEN_123")
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response()) as mock_post:
+        with patch("backlink_publisher.http.post", return_value=_ok_response()) as mock_post:
             verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert mock_post.call_count == 1
@@ -106,7 +106,7 @@ class TestTelegraphLiveVerifyTokenExpired:
         _seed_telegraph_token(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_err_response(error_str)):
+        with patch("backlink_publisher.http.post", return_value=_err_response(error_str)):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.ok is False
@@ -120,7 +120,7 @@ class TestTelegraphLiveVerifyTokenExpired:
         _seed_telegraph_token(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_err_response("RATE_LIMITED")):
+        with patch("backlink_publisher.http.post", return_value=_err_response("RATE_LIMITED")):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.ok is False
@@ -134,7 +134,7 @@ class TestTelegraphLiveVerifyTimeout:
         _seed_telegraph_token(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", side_effect=requests.Timeout("slow")):
+        with patch("backlink_publisher.http.post", side_effect=requests.Timeout("slow")):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.ok is False
@@ -146,7 +146,7 @@ class TestTelegraphLiveVerifyTimeout:
         _seed_telegraph_token(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", side_effect=requests.ConnectionError("dns")):
+        with patch("backlink_publisher.http.post", side_effect=requests.ConnectionError("dns")):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.ok is False
@@ -161,7 +161,7 @@ class TestTelegraphLiveVerifyNever:
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.http.post") as mock_post:
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.ok is False
@@ -179,7 +179,7 @@ class TestTelegraphLiveVerifyReadOnly:
         contents_before = token_file.read_text()
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_ok_response()):
+        with patch("backlink_publisher.http.post", return_value=_ok_response()):
             verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert token_file.stat().st_mtime == mtime_before, (
@@ -197,7 +197,7 @@ class TestTelegraphLiveVerifyReadOnly:
         contents_before = token_file.read_text()
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.post", return_value=_err_response("ACCESS_TOKEN_INVALID")):
+        with patch("backlink_publisher.http.post", return_value=_err_response("ACCESS_TOKEN_INVALID")):
             result = verify_adapter_setup("telegraph", Config(), mode="live")
 
         assert result.last_verify_result == "token_expired"
