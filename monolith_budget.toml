@@ -18,8 +18,8 @@ ceiling = 380
 rationale = "_generate_payload (210 lines) + _resolve_article_anchors (14 lines) extracted to _payload.py (2026-05-22). core.py dropped from 538 to 347 SLOC — holds _dispatch_row, _scheduler_enabled_for, and main() only. Ceiling 380 = round_up_to_10(347+30)."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 444
-rationale = "Resume logic extracted to _resume.py (264 SLOC) + shared helpers to _publish_helpers.py (221 SLOC). publish_backlinks.py dropped from 845 to 414 SLOC — holds main() and the per-row publish loop. Ceiling 444 = round_up_to_10(414+30)."
+ceiling = 310
+rationale = "Arg parser, checkpoint ops, and AuthExpiredError handler extracted to _publish_helpers.py (2026-05-22). publish_backlinks.py dropped from 414 to 280 SLOC — holds main() and the per-row publish loop only. Ceiling 310 = round_up_to_10(280+30)."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 290

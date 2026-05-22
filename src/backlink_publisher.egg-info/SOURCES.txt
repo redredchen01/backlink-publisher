@@ -6,6 +6,7 @@ src/backlink_publisher/checkpoint.py
 src/backlink_publisher/config_echo.py
 src/backlink_publisher/footprint.py
 src/backlink_publisher/footprint_corpus.py
+src/backlink_publisher/http.py
 src/backlink_publisher/schema.py
 src/backlink_publisher.egg-info/PKG-INFO
 src/backlink_publisher.egg-info/SOURCES.txt
@@ -47,6 +48,7 @@ src/backlink_publisher/cli/report_anchors.py
 src/backlink_publisher/cli/validate_backlinks.py
 src/backlink_publisher/cli/velog_login.py
 src/backlink_publisher/cli/_bind/__init__.py
+src/backlink_publisher/cli/_bind/_driver_impl.py
 src/backlink_publisher/cli/_bind/chrome_backend.py
 src/backlink_publisher/cli/_bind/driver.py
 src/backlink_publisher/cli/_bind/channels/__init__.py
@@ -59,6 +61,7 @@ src/backlink_publisher/cli/plan_backlinks/__init__.py
 src/backlink_publisher/cli/plan_backlinks/__main__.py
 src/backlink_publisher/cli/plan_backlinks/_banners.py
 src/backlink_publisher/cli/plan_backlinks/_links.py
+src/backlink_publisher/cli/plan_backlinks/_payload.py
 src/backlink_publisher/cli/plan_backlinks/_templates.py
 src/backlink_publisher/cli/plan_backlinks/_work_themed.py
 src/backlink_publisher/cli/plan_backlinks/_zh_short.py
@@ -105,7 +108,11 @@ src/backlink_publisher/publishing/registry.py
 src/backlink_publisher/publishing/session_manager.py
 src/backlink_publisher/publishing/throttle.py
 src/backlink_publisher/publishing/adapters/__init__.py
+src/backlink_publisher/publishing/adapters/_ghpages_impl.py
 src/backlink_publisher/publishing/adapters/_medium_selectors.py
+src/backlink_publisher/publishing/adapters/_nofollow_rationales.py
+src/backlink_publisher/publishing/adapters/_telegraph_api_impl.py
+src/backlink_publisher/publishing/adapters/_velog_graphql_impl.py
 src/backlink_publisher/publishing/adapters/base.py
 src/backlink_publisher/publishing/adapters/blogger_api.py
 src/backlink_publisher/publishing/adapters/debug_artifacts.py
@@ -133,6 +140,7 @@ src/backlink_publisher/publishing/adapters/image_gen/caps.py
 src/backlink_publisher/publishing/adapters/image_gen/storage.py
 src/backlink_publisher/publishing/adapters/image_gen/types.py
 src/backlink_publisher/publishing/browser_publish/__init__.py
+src/backlink_publisher/publishing/browser_publish/_chrome_session_impl.py
 src/backlink_publisher/publishing/browser_publish/chrome_session.py
 src/backlink_publisher/publishing/browser_publish/dispatcher.py
 src/backlink_publisher/publishing/browser_publish/recipes/__init__.py

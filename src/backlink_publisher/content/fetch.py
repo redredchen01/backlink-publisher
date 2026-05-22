@@ -29,6 +29,7 @@ plan-backlinks invocation. Operators must either restart the process or call
 
 from __future__ import annotations
 
+import os
 import re
 import socket  # noqa: F401 — kept for test patch backward compat
 import ssl
@@ -101,6 +102,28 @@ CheckResult = tuple[bool, Optional[str], Optional[str]]
 #: existing callers rely on.
 _CacheEntry = tuple[CheckResult, float]
 _CACHE: dict[str, _CacheEntry] = {}
+
+#: Maximum cache entries (LRU eviction). Prevents unbounded growth in
+#: long-running processes like the WebUI daemon. Set via
+#: ``BACKLINK_FETCH_CACHE_MAX_ENTRIES`` (default 256).
+_MAX_CACHE_ENTRIES: int = 256
+
+
+def _evict_lru() -> None:
+    """Evict oldest cache entries when size limit is exceeded."""
+    if len(_CACHE) <= _MAX_CACHE_ENTRIES:
+        return
+    # Remove oldest 25% of entries (simple FIFO, not true LRU)
+    to_remove = len(_CACHE) - (_MAX_CACHE_ENTRIES - _MAX_CACHE_ENTRIES // 4)
+    for _ in range(to_remove):
+        _CACHE.pop(next(iter(_CACHE)), None)
+
+
+# Initialize max cache entries from environment (allows tuning without code change)
+try:
+    _MAX_CACHE_ENTRIES = int(os.environ.get("BACKLINK_FETCH_CACHE_MAX_ENTRIES", "256"))
+except (ValueError, TypeError):
+    pass  # Keep default if env var is malformed
 
 #: Process-wide default TTL for cache entries (seconds). ``None`` means "never
 #: expire" (CLI default — process is short-lived). Webui startup sets this to
@@ -479,6 +502,7 @@ def verify_url_has_content(
     _STATS["total_latency_ms"] += elapsed_ms
     _record_reason(last_result[1], ok=last_result[0])
     _CACHE[url] = (last_result, time.monotonic())
+    _evict_lru()
     return last_result
 
 

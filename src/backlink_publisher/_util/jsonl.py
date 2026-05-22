@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
+from io import StringIO
+from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from backlink_publisher._util.errors import emit_error
+from backlink_publisher.persistence.safe_write import atomic_write
 
 MAX_LINE_LENGTH = 65536  # 64 KB per line
 
@@ -81,3 +84,14 @@ def write_jsonl(rows: Iterable[dict[str, Any]], dest: Any = None) -> None:
     for row in rows:
         dest.write(json.dumps(row, ensure_ascii=False) + "\n")
     dest.flush()
+
+
+def atomic_write_jsonl(rows: Iterable[dict[str, Any]], path: Path, mode: int = 0o600) -> None:
+    """Write JSONL to path atomically via a sibling .tmp/.new file and replace.
+
+    Ensures readers see either the old file or the fully written new one,
+    never a partially written or torn file.
+    """
+    buffer = StringIO()
+    write_jsonl(rows, buffer)
+    atomic_write(path, buffer.getvalue(), mode)

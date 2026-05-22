@@ -99,7 +99,7 @@ _HTML_FULL = (
 
 class TestFetchWorkMetadataHappyPath:
     def test_extracts_title_description_h1(self):
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=_HTML_FULL)
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert isinstance(meta, WorkMetadata)
@@ -109,7 +109,7 @@ class TestFetchWorkMetadataHappyPath:
 
     def test_title_only_returns_partial_metadata(self):
         html = b"<html><head><title>Solo Title</title></head><body></body></html>"
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=html)
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is not None
@@ -123,7 +123,7 @@ class TestFetchWorkMetadataHappyPath:
             b"<meta name='description' content='  spaced out  '>"
             b"</head><body><h1>\n  wrapped\n  </h1></body></html>"
         )
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=html)
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta.title == "Padded"
@@ -135,7 +135,7 @@ class TestFetchWorkMetadataHappyPath:
         body = "<html><head><title>热门动漫推荐</title></head><body></body></html>".encode(
             "gbk"
         )
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(
                 body=body,
                 content_type="text/html",  # no charset → apparent_encoding kicks in
@@ -154,7 +154,7 @@ class TestFetchWorkMetadataHappyPath:
             f"<meta name='description' content='{long_desc}'>"
             f"</head><body><h1>{long_h1}</h1></body></html>"
         ).encode("utf-8")
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=html)
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is not None
@@ -166,7 +166,7 @@ class TestFetchWorkMetadataHappyPath:
 class TestFetchWorkMetadataEmptySignals:
     def test_no_title_meta_or_h1_returns_none(self):
         html = b"<html><head></head><body><p>nothing useful</p></body></html>"
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=html)
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None
@@ -175,7 +175,7 @@ class TestFetchWorkMetadataEmptySignals:
 class TestFetchWorkMetadataRetryAndStatus:
     def test_5xx_does_not_retry_and_returns_none(self):
         resp_500 = _make_response(status=500, body=b"oops")
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = resp_500
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None
@@ -184,7 +184,7 @@ class TestFetchWorkMetadataRetryAndStatus:
     def test_429_retries_until_success(self):
         resp_429 = _make_response(status=429, body=b"slow down")
         resp_200 = _make_response(body=_HTML_FULL)
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.side_effect = [resp_429, resp_429, resp_200]
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is not None
@@ -193,7 +193,7 @@ class TestFetchWorkMetadataRetryAndStatus:
 
     def test_connection_error_retries_then_fail_continue_returns_none(self):
         err = requests.exceptions.ConnectionError("boom")
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.side_effect = [err, err, err]
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None
@@ -201,7 +201,7 @@ class TestFetchWorkMetadataRetryAndStatus:
 
     def test_429_persists_then_returns_none(self):
         resp_429 = _make_response(status=429, body=b"")
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.side_effect = [resp_429, resp_429, resp_429]
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None
@@ -224,7 +224,7 @@ class TestFetchWorkMetadataSecuritySSRF:
     )
     def test_private_or_loopback_ip_raises_input_validation(self, ip):
         with patch.object(scraper_http, "_resolve_addresses", return_value=[ip]):
-            with patch.object(scraper_http.requests, "get") as mock_get:
+            with patch("backlink_publisher.content._http.http_get") as mock_get:
                 with pytest.raises(InputValidationError, match="disallowed"):
                     fetch_work_metadata("https://internal.example.com/work/1")
                 mock_get.assert_not_called()
@@ -235,7 +235,7 @@ class TestFetchWorkMetadataSecuritySSRF:
             "_resolve_addresses",
             return_value=["93.184.216.34", "10.0.0.5"],  # mixed
         ):
-            with patch.object(scraper_http.requests, "get") as mock_get:
+            with patch("backlink_publisher.content._http.http_get") as mock_get:
                 with pytest.raises(InputValidationError):
                     fetch_work_metadata("https://target.example.com/work/1")
                 mock_get.assert_not_called()
@@ -247,7 +247,7 @@ class TestFetchWorkMetadataSecuritySize:
     def test_content_length_header_oversize_aborts_early(self):
         oversize = scraper_http._MAX_RESPONSE_BYTES + 1
         resp = _make_response(content_length=oversize, body=b"")
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = resp
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None  # fail-continue on oversize
@@ -261,7 +261,7 @@ class TestFetchWorkMetadataSecuritySize:
         resp = _make_response(
             content_length=None, body=b"", iter_chunks=chunks
         )
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = resp
             meta = fetch_work_metadata("https://target.example.com/work/1")
         assert meta is None
@@ -270,14 +270,14 @@ class TestFetchWorkMetadataSecuritySize:
 
 class TestFetchWorkMetadataInsecureTLS:
     def test_default_verify_true(self):
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=_HTML_FULL)
             fetch_work_metadata("https://target.example.com/work/1")
         kwargs = mock_get.call_args.kwargs
         assert kwargs.get("verify") is True
 
     def test_insecure_tls_opt_in_sets_verify_false(self):
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             mock_get.return_value = _make_response(body=_HTML_FULL)
             fetch_work_metadata(
                 "https://target.example.com/work/1", insecure_tls=True
@@ -288,7 +288,7 @@ class TestFetchWorkMetadataInsecureTLS:
 
 class TestFetchWorkMetadataBadInputs:
     def test_non_https_url_raises_input_validation(self):
-        with patch.object(scraper_http.requests, "get") as mock_get:
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
             with pytest.raises(InputValidationError):
                 fetch_work_metadata("http://target.example.com/work/1")
             mock_get.assert_not_called()
@@ -348,7 +348,7 @@ class TestFetchUrlsSitemap:
                 return _xml_resp(sitemap_body)
             return _make_response(status=404, body=b"")
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -368,7 +368,7 @@ class TestFetchUrlsSitemap:
                 return _xml_resp(sitemap_body)
             return _make_response(status=404, body=b"")
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -394,7 +394,7 @@ class TestFetchUrlsSitemap:
                 return _xml_resp(_sitemap_urlset(urls_b))
             return _make_response(status=404, body=b"")
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -414,7 +414,7 @@ class TestFetchUrlsSitemap:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -431,7 +431,7 @@ class TestFetchUrlsSitemap:
                 return _xml_resp(body)
             return _make_response(status=404, body=b"")
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -471,7 +471,7 @@ class TestFetchUrlsHtmlFallback:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -492,7 +492,7 @@ class TestFetchUrlsHtmlFallback:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -514,7 +514,7 @@ class TestFetchUrlsHtmlFallback:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -539,7 +539,7 @@ class TestFetchUrlsHtmlFallback:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -560,7 +560,7 @@ class TestFetchUrlsHtmlFallback:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -586,7 +586,7 @@ class TestFetchUrlsFailureSemantics:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -604,7 +604,7 @@ class TestFetchUrlsFailureSemantics:
                 return _make_response(status=404, body=b"")
             return _html_resp(html)
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             result = fetch_work_urls_from_list(
                 "https://target.example.com/list",
                 main_url="https://target.example.com/",
@@ -615,7 +615,7 @@ class TestFetchUrlsFailureSemantics:
         """All sitemap + list HTML calls fail with ConnectionError → ExternalServiceError."""
 
         err = requests.exceptions.ConnectionError("network down")
-        with patch.object(scraper_http.requests, "get", side_effect=err):
+        with patch("backlink_publisher.content._http.http_get", side_effect=err):
             with pytest.raises(ExternalServiceError):
                 fetch_work_urls_from_list(
                     "https://target.example.com/list",
@@ -630,7 +630,7 @@ class TestFetchUrlsFailureSemantics:
                 return _make_response(status=404, body=b"")
             return _make_response(status=503, body=b"")
 
-        with patch.object(scraper_http.requests, "get", side_effect=_side_effect):
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
             with pytest.raises(ExternalServiceError):
                 fetch_work_urls_from_list(
                     "https://target.example.com/list",
@@ -641,7 +641,7 @@ class TestFetchUrlsFailureSemantics:
 class TestFetchUrlsSecurity:
     def test_private_ip_on_list_url_blocks_http(self):
         with patch.object(scraper_http, "_resolve_addresses", return_value=["10.0.0.5"]):
-            with patch.object(scraper_http.requests, "get") as mock_get:
+            with patch("backlink_publisher.content._http.http_get") as mock_get:
                 with pytest.raises(InputValidationError):
                     fetch_work_urls_from_list(
                         "https://internal.example.com/list",

@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
+from backlink_publisher.http import post as http_post
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from .retry import retry_transient_call
@@ -209,7 +210,7 @@ class OpenAICompatibleProvider:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        resp = requests.post(url, json=body, headers=headers, timeout=self.timeout_s)
+        resp = http_post(url, json=body, headers=headers, timeout=self.timeout_s)
         if resp.status_code == 429:
             # Surface as a transient error so retry_transient_call retries.
             raise _TransientHTTPError(429, _redact_for_log(resp.text))

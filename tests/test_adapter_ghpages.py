@@ -207,7 +207,7 @@ class TestGhpagesPublishHappy:
         cfg = _config_with_ghpages(tmp_path, repo="me/blog")
         from backlink_publisher.publishing.adapters.ghpages import GitHubPagesAPIAdapter
 
-        with patch("requests.put", return_value=_ok_put_response(201)) as mock_put:
+        with patch("backlink_publisher.publishing.adapters.ghpages.http_put", return_value=_ok_put_response(201)) as mock_put:
             result = GitHubPagesAPIAdapter().publish(
                 {"title": "Hello", "content_markdown": "# Hi\n\nbody",
                  "tags": ["a"], "slug": "hello"},
@@ -242,7 +242,7 @@ class TestGhpagesPublishHappy:
         cfg = _config_with_ghpages(tmp_path, repo="me/blog")
         from backlink_publisher.publishing.adapters.ghpages import GitHubPagesAPIAdapter
 
-        with patch("requests.put") as mock_put:
+        with patch("backlink_publisher.publishing.adapters.ghpages.http_put") as mock_put:
             result = GitHubPagesAPIAdapter().publish(
                 {"title": "Draft thing", "slug": "drafty"},
                 mode="draft",
@@ -268,8 +268,8 @@ class TestGhpagesPublishHappy:
         get_resp = MagicMock(status_code=200)
         get_resp.json.return_value = {"sha": "existing-sha-789"}
 
-        with patch("requests.put", side_effect=put_responses) as mock_put, \
-             patch("requests.get", return_value=get_resp) as mock_get:
+        with patch("backlink_publisher.publishing.adapters.ghpages.http_put", side_effect=put_responses) as mock_put, \
+             patch("backlink_publisher.publishing.adapters.ghpages.http_get", return_value=get_resp) as mock_get:
             result = GitHubPagesAPIAdapter().publish(
                 {"title": "Update", "content_markdown": "v2", "slug": "updated"},
                 mode="published",
@@ -318,7 +318,7 @@ class TestGhpagesPublishErrors:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters.ghpages import GitHubPagesAPIAdapter
 
-        with patch("requests.put", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.publishing.adapters.ghpages.http_put", return_value=_http_status_response(401)):
             with pytest.raises(ExternalServiceError, match="re-bind"):
                 GitHubPagesAPIAdapter().publish(
                     {"title": "x", "slug": "x"}, mode="published", config=cfg,
@@ -332,7 +332,7 @@ class TestGhpagesPublishErrors:
         from backlink_publisher.publishing.adapters.ghpages import GitHubPagesAPIAdapter
 
         resp = _http_status_response(403, headers={"retry-after": "60"})
-        with patch("requests.put", return_value=resp):
+        with patch("backlink_publisher.publishing.adapters.ghpages.http_put", return_value=resp):
             with pytest.raises(ExternalServiceError) as exc:
                 GitHubPagesAPIAdapter().publish(
                     {"title": "x", "slug": "x"}, mode="published", config=cfg,
@@ -387,7 +387,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_get_user_response("dex")):
+        with patch("backlink_publisher.http.get", return_value=_ok_get_user_response("dex")):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert isinstance(result, VerifyResult)
@@ -406,7 +406,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_get_user_response()) as mock_get:
+        with patch("backlink_publisher.http.get", return_value=_ok_get_user_response()) as mock_get:
             verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert mock_get.call_count == 1
@@ -422,7 +422,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.http.get", return_value=_http_status_response(401)):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.ok is False
@@ -437,7 +437,7 @@ class TestGhpagesLiveVerify:
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
         resp = _http_status_response(403, headers={"retry-after": "120"})
-        with patch("requests.get", return_value=resp):
+        with patch("backlink_publisher.http.get", return_value=resp):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.ok is False
@@ -450,7 +450,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", side_effect=requests.Timeout("slow")):
+        with patch("backlink_publisher.http.get", side_effect=requests.Timeout("slow")):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.ok is False
@@ -462,7 +462,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", side_effect=requests.ConnectionError("dns")):
+        with patch("backlink_publisher.http.get", side_effect=requests.ConnectionError("dns")):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.ok is False
@@ -473,7 +473,7 @@ class TestGhpagesLiveVerify:
         cfg = _config_with_ghpages(tmp_path)  # no token seeded
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get") as mock_get:
+        with patch("backlink_publisher.http.get") as mock_get:
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.ok is False
@@ -492,7 +492,7 @@ class TestGhpagesLiveVerifyReadOnly:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_get_user_response()):
+        with patch("backlink_publisher.http.get", return_value=_ok_get_user_response()):
             verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert token_file.stat().st_mtime == mtime_before
@@ -505,7 +505,7 @@ class TestGhpagesLiveVerifyReadOnly:
         cfg = _config_with_ghpages(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.http.get", return_value=_http_status_response(401)):
             result = verify_adapter_setup("ghpages", cfg, mode="live")
 
         assert result.last_verify_result == "token_expired"
