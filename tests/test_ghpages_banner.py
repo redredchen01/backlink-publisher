@@ -118,10 +118,10 @@ class TestEmbedBannerHappyPath:
         expected_sha16 = hashlib.sha256(payload).hexdigest()[:16]
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ) as mock_get, patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_ok_put(201),
         ) as mock_put:
             url = GitHubPagesAPIAdapter().embed_banner(artifact, "Test Alt")
@@ -151,10 +151,10 @@ class TestEmbedBannerHappyPath:
         expected_sha16 = hashlib.sha256(payload).hexdigest()[:16]
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_ok_get("existing-sha-on-server"),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
         ) as mock_put:
             url = GitHubPagesAPIAdapter().embed_banner(artifact, "Test Alt")
 
@@ -173,10 +173,10 @@ class TestEmbedBannerHappyPath:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_ok_put(),
         ):
             url = GitHubPagesAPIAdapter().embed_banner(artifact, "alt")
@@ -193,10 +193,10 @@ class TestEmbedBannerHappyPath:
         expected_sha16 = hashlib.sha256(payload).hexdigest()[:16]
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_ok_put(),
         ):
             url = GitHubPagesAPIAdapter().embed_banner(artifact, "alt")
@@ -208,10 +208,10 @@ class TestEmbedBannerHappyPath:
         artifact = _write_banner(tmp_path, "abcdef0123", b"\x89PNG")
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_ok_put(),
         ):
             url = GitHubPagesAPIAdapter().embed_banner(artifact, "alt")
@@ -254,7 +254,7 @@ class TestEmbedBannerErrorPaths:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_err_response(500, "internal"),
         ):
             with pytest.raises(BannerUploadError, match="probe failed.*500"):
@@ -265,10 +265,10 @@ class TestEmbedBannerErrorPaths:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_err_response(500, "internal"),
         ):
             with pytest.raises(BannerUploadError, match="PUT returned HTTP 500"):
@@ -279,10 +279,10 @@ class TestEmbedBannerErrorPaths:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_err_response(422, "sha required"),
         ):
             with pytest.raises(BannerUploadError, match="eventual-consistency race"):
@@ -293,10 +293,10 @@ class TestEmbedBannerErrorPaths:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             side_effect=requests.Timeout("timed out"),
         ):
             with pytest.raises(BannerUploadError, match="network"):
@@ -316,7 +316,7 @@ class TestEmbedBannerDoesNotFlipChannelStatus:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_err_response(401, "Bad credentials"),
         ):
             with pytest.raises(BannerUploadError) as exc_info:
@@ -329,10 +329,10 @@ class TestEmbedBannerDoesNotFlipChannelStatus:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_err_response(401, "Bad credentials"),
         ):
             with pytest.raises(BannerUploadError) as exc_info:
@@ -355,10 +355,10 @@ class TestEmbedBannerThroughDispatcher:
         emitted: list[tuple[str, dict]] = []
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_missing_get(),
         ), patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.put",
+            "backlink_publisher.publishing.adapters.ghpages.http_put",
             return_value=_ok_put(),
         ):
             body = banner_dispatcher.apply(
@@ -391,7 +391,7 @@ class TestEmbedBannerThroughDispatcher:
         artifact = _write_banner(tmp_path)
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_err_response(500, "boom"),
         ):
             with pytest.raises(BannerUploadError):
@@ -417,7 +417,7 @@ class TestEmbedBannerThroughDispatcher:
         emitted: list[tuple[str, dict]] = []
 
         with patch(
-            "backlink_publisher.publishing.adapters.ghpages.requests.get",
+            "backlink_publisher.publishing.adapters.ghpages.http_get",
             return_value=_err_response(500, "boom"),
         ):
             body = banner_dispatcher.apply(
