@@ -258,21 +258,22 @@ class TestGetRoutes:
         assert "mode-batch" in body, "mode-batch CSS scope missing"
 
     def test_sticky_step_bar_css_in_template_source(self):
-        """Plan 013 U3 — index.html source contains scoped step-bar rules."""
+        """Plan 013 U3 — scoped step-bar rules present in extracted CSS file (Plan B Unit 1)."""
         from pathlib import Path
+        # CSS extracted to static file by Plan B Unit 1; check index.css not index.html
         src = (
             Path(__file__).resolve().parents[1]
-            / "webui_app" / "templates" / "index.html"
+            / "webui_app" / "static" / "css" / "index.css"
         ).read_text(encoding="utf-8")
         # Both mode-scoped rules must be present
         assert "body.mode-single .step-bar" in src, (
-            "mode-single step-bar sticky rule missing from template"
+            "mode-single step-bar sticky rule missing from index.css"
         )
         assert "body.mode-batch .step-bar" in src, (
-            "mode-batch step-bar static rule missing from template"
+            "mode-batch step-bar static rule missing from index.css"
         )
         assert "hide-history-nav" in src, (
-            "hide-history-nav CSS rule missing from template"
+            "hide-history-nav CSS rule missing from index.css"
         )
 
     def test_root_does_not_crash_with_missing_state_files(self, client, tmp_path):
@@ -625,16 +626,19 @@ class TestPipelineRoutes:
         body = resp.data.decode("utf-8", errors="ignore")
         assert 'name="target_language"' in body, "batch form missing target_language"
 
-        # 2. Template source uses the shared include in both form contexts
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "webui_app" / "templates" / "index.html"
+        # 2. Template source uses the shared include in both form contexts.
+        # Plan B Unit 2 moved the tab panes to _tab_*.html partials, so
+        # _shared_config_selects.html now appears in _tab_new.html and
+        # _tab_batch.html rather than index.html directly.
+        templates_dir = Path(__file__).resolve().parents[1] / "webui_app" / "templates"
+        all_template_src = "".join(
+            p.read_text(encoding="utf-8")
+            for p in templates_dir.glob("*.html")
         )
-        src = template_path.read_text(encoding="utf-8")
-        # count include statements — must appear exactly twice
-        assert src.count("_shared_config_selects.html") == 2, (
-            "expected 2 includes of _shared_config_selects.html, got "
-            + str(src.count("_shared_config_selects.html"))
+        count = all_template_src.count("_shared_config_selects.html")
+        assert count == 2, (
+            "expected 2 includes of _shared_config_selects.html across templates, got "
+            + str(count)
         )
 
         # 3. The partial itself is on disk
