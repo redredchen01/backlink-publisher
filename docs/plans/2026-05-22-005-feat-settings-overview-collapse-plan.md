@@ -3,6 +3,7 @@ title: "feat(settings): 渠道綁定總覽 可折叠面板"
 type: feat
 status: completed
 date: 2026-05-22
+claims: {}
 ---
 
 # feat(settings): 渠道綁定總覽 可折叠面板
