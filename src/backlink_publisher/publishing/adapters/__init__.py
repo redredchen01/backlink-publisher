@@ -889,6 +889,7 @@ def _verify_writeas_live(config: Config) -> VerifyResult:
       - other (4xx/5xx/connection/parse) → ``never``
     """
     import requests
+    from backlink_publisher.http import get as http_get
     from .writeas import _load_token, _required_headers, DEFAULT_API_BASE
 
     try:
@@ -904,7 +905,7 @@ def _verify_writeas_live(config: Config) -> VerifyResult:
     api_base = (wa_cfg.api_base if wa_cfg else DEFAULT_API_BASE) or DEFAULT_API_BASE
 
     try:
-        resp = requests.get(
+        resp = http_get(
             f"{api_base.rstrip('/')}/me",
             headers=_required_headers(token),
             timeout=_WRITEAS_VERIFY_TIMEOUT_S,
