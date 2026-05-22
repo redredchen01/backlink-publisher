@@ -7,11 +7,9 @@ have ever logged into — banking, email, SSO IdPs, ad networks. All of
 those would land in ``<config_dir>/<channel>-storage-state.json``
 (mode 0600 but still readable by any process running as the operator).
 
-Spike report (`docs/spike-notes/2026-05-20-hashnode-bind-discovery.md`)
-documents capturing 101 cookies during a Hashnode bind attempt, of
-which only 9 were on hashnode.com apex — 92 cross-domain trackers
-(googleadservices, criteo, doubleclick, youtube, immersivetranslate,
-wallethighlighter, stackadapt, etc.) leaked in.
+A prior audit of a Chrome bind session found 101 cookies captured, of
+which only 9 were on the target apex — 92 cross-domain trackers
+(googleadservices, criteo, doubleclick, youtube, etc.) leaked in.
 
 This module's tests exercise:
   - Filter applied correctly (positive case): only host-matching cookies persist.

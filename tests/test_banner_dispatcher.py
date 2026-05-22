@@ -107,7 +107,7 @@ class TestEmbedSuccess:
             adapter,
             banner=_banner(alt="Custom Alt Override"),
             body=_ORIGINAL_BODY,
-            platform="hashnode",
+            platform="devto",
             strict=False,
             emit=emit,
         )
@@ -269,14 +269,14 @@ class TestNoBanner:
 
 class TestBannerUploadError:
     def test_strict_false_swallows_emits_failed_body_unchanged(self):
-        adapter = _AdapterWithEmbed(BannerUploadError("hashnode 4xx"))
+        adapter = _AdapterWithEmbed(BannerUploadError("devto 4xx"))
         emit = _EmitCapture()
 
         result = apply(
             adapter,
             banner=_banner(),
             body=_ORIGINAL_BODY,
-            platform="hashnode",
+            platform="devto",
             strict=False,
             emit=emit,
         )
@@ -285,19 +285,19 @@ class TestBannerUploadError:
         assert len(emit.events) == 1
         kind, payload = emit.events[0]
         assert kind == "banner.failed"
-        assert payload["platform"] == "hashnode"
-        assert "hashnode 4xx" in payload["reason"]
+        assert payload["platform"] == "devto"
+        assert "devto 4xx" in payload["reason"]
 
     def test_strict_true_propagates(self):
-        adapter = _AdapterWithEmbed(BannerUploadError("hashnode 4xx"))
+        adapter = _AdapterWithEmbed(BannerUploadError("devto 4xx"))
         emit = _EmitCapture()
 
-        with pytest.raises(BannerUploadError, match="hashnode 4xx"):
+        with pytest.raises(BannerUploadError, match="devto 4xx"):
             apply(
                 adapter,
                 banner=_banner(),
                 body=_ORIGINAL_BODY,
-                platform="hashnode",
+                platform="devto",
                 strict=True,
                 emit=emit,
             )

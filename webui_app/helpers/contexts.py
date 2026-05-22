@@ -206,7 +206,7 @@ def _token_paste_status_notion(cfg, load_fn) -> dict:
     """Status dict for the Notion token-paste card.
 
     Notion's token file has two fields (integration_token + database_id)
-    rather than the single 'token' field used by ghpages/hashnode/devto.
+    rather than the single 'token' field used by ghpages/devto.
     """
     from backlink_publisher.publishing.registry import dofollow_status
     try:
@@ -238,7 +238,6 @@ def _settings_context(flash=None):
     from backlink_publisher.config import (
         load_devto_token,
         load_ghpages_token,
-        load_hashnode_token,
         load_medium_token,
         load_notion_token,
     )
@@ -251,14 +250,10 @@ def _settings_context(flash=None):
     medium_token_data = load_medium_token()
 
     ghpages_status = _token_paste_status(cfg, "ghpages", load_ghpages_token)
-    hashnode_status = _token_paste_status(cfg, "hashnode", load_hashnode_token)
     ghpages_config_summary = [
         ("repo", cfg.ghpages.repo if cfg.ghpages else ""),
         ("branch", cfg.ghpages.branch if cfg.ghpages else "gh-pages"),
         ("path_template", cfg.ghpages.path_template if cfg.ghpages else "_posts/{date}-{slug}.md"),
-    ]
-    hashnode_config_summary = [
-        ("publication_id", cfg.hashnode.publication_id if cfg.hashnode else ""),
     ]
 
     notion_status = _token_paste_status_notion(cfg, load_notion_token)
@@ -333,8 +328,6 @@ def _settings_context(flash=None):
         velog_cookies_path=velog_status.get('cookies_path', ''),
         ghpages_status=ghpages_status,
         ghpages_config_summary=ghpages_config_summary,
-        hashnode_status=hashnode_status,
-        hashnode_config_summary=hashnode_config_summary,
         notion_status=notion_status,
         notion_config_summary=notion_config_summary,
         devto_status=devto_status,

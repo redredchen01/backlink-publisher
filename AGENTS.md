@@ -86,7 +86,7 @@ Plan 2026-05-20-006 deleted the legacy `sys.meta_path` bridge. The old flat name
 | `backlink_publisher.content.*` | `fetch`, `scraper`, `themed_gen`, `body` |
 | `backlink_publisher.linkcheck.*` | `http`, `language`, `verify` |
 | `backlink_publisher._util.*` | `errors`, `io`, `jsonl`, `logger`, `markdown`, `url`, `net_safety`, `secrets`, `url_derive` |
-| `backlink_publisher.publishing.adapters.*` | All publisher adapters (blogger, medium, telegraph, ghpages, hashnode, …) |
+| `backlink_publisher.publishing.adapters.*` | All publisher adapters (blogger, medium, telegraph, ghpages, devto, notion, mastodon, velog, …) |
 
 Note: `from backlink_publisher.linkcheck import check_url` still works — `linkcheck` is a real package whose `__init__.py` does `from .http import *`, independent of the deleted bridge.
 
@@ -343,7 +343,6 @@ Adapters that don't define `embed_banner` are handled by the same dispatcher: `s
 
 Per-platform upload contract:
 - **telegraph**: `POST https://telegra.ph/upload` with raw bytes; returns `telegra.ph/file/<sha>.<ext>` URL.
-- **hashnode**: `uploadMedia` GraphQL mutation (the existing hashnode adapter already maintains a GraphQL client).
 - **velog**: `image_upload_url` GraphQL mutation returns a presigned URL → PUT bytes.
 - **ghpages**: commit the file to `<repo>/assets/banners/<sha>.<ext>` and return the `raw.githubusercontent.com` URL.
 

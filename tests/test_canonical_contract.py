@@ -26,7 +26,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backlink_publisher.publishing.adapters.ghpages import _build_markdown_body
-from backlink_publisher.publishing.adapters.hashnode import _build_publish_input
 
 
 _CANONICAL = "https://example.com/article-original"
@@ -58,23 +57,6 @@ def _payload_with_canonical(canonical: str | None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Hashnode — GraphQL ``input.originalArticleURL`` variable                    #
 # --------------------------------------------------------------------------- #
-
-
-class TestHashnodeCanonical:
-    def test_with_canonical_emits_original_article_url(self):
-        payload = _payload_with_canonical(_CANONICAL)
-        variables = _build_publish_input(payload, "pub-id-xyz")
-        assert variables.get("originalArticleURL") == _CANONICAL
-
-    def test_without_seo_omits_field(self):
-        payload = _payload_with_canonical(None)
-        variables = _build_publish_input(payload, "pub-id-xyz")
-        assert "originalArticleURL" not in variables
-
-    def test_empty_canonical_omits_field(self):
-        payload = _payload_with_canonical("")
-        variables = _build_publish_input(payload, "pub-id-xyz")
-        assert "originalArticleURL" not in variables
 
 
 # --------------------------------------------------------------------------- #
@@ -185,12 +167,6 @@ class TestBloggerCanonical:
 )
 class TestForwarderVerbatim:
     """Schema-validated URLs flow through every adapter unchanged."""
-
-    def test_hashnode_forwards_verbatim(self, url_with_query: str):
-        variables = _build_publish_input(
-            _payload_with_canonical(url_with_query), "pub-id-xyz"
-        )
-        assert variables["originalArticleURL"] == url_with_query
 
     def test_ghpages_forwards_verbatim(self, url_with_query: str):
         rendered = _build_markdown_body(_payload_with_canonical(url_with_query))

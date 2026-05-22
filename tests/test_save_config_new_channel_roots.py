@@ -31,7 +31,6 @@ import pytest
 from backlink_publisher.config import (
     Config,
     GhpagesConfig,
-    HashnodeConfig,
     load_config,
     save_config,
 )
@@ -66,28 +65,6 @@ def test_ghpages_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
     assert 'operator/site-repo' in text
     assert '"main"' in text
     assert '"blog/{date}-{slug}.md"' in text
-
-
-def test_hashnode_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
-    """Same regression guard as ghpages — [hashnode] must round-trip without
-    requiring an explicit kwarg."""
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        '[blogger]\n'
-        '"https://example.com" = "111"\n'
-        '\n'
-        '[hashnode]\n'
-        'publication_id = "abc-123-pub-id"\n'
-        'host = "blog.example.com"\n',
-        encoding="utf-8",
-    )
-    cfg = load_config(config_path)
-    save_config(cfg, path=config_path)
-
-    text = config_path.read_text(encoding="utf-8")
-    assert "[hashnode]" in text, "A.2 regression: [hashnode] dropped on save"
-    assert "abc-123-pub-id" in text
-    assert "blog.example.com" in text
 
 
 def test_ghpages_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
@@ -231,10 +208,6 @@ def test_round_trip_is_idempotent_for_all_three_channels(tmp_path: Path) -> None
         'branch = "main"\n'
         'path_template = "_posts/{date}-{slug}.md"\n'
         '\n'
-        '[hashnode]\n'
-        'publication_id = "pub-xyz"\n'
-        'host = ""\n'
-        '\n'
         'collection_alias = "feed"\n'
         'api_base = "https://write.as/api"\n',
         encoding="utf-8",
@@ -298,19 +271,17 @@ def test_emitted_channel_blocks_carry_only_routing_fields(tmp_path: Path) -> Non
         Config(),
         path=config_path,
         ghpages_config=GhpagesConfig(repo="o/r"),
-        hashnode_config=HashnodeConfig(publication_id="pub"),
     )
 
     text = config_path.read_text(encoding="utf-8")
 
     # Sections present
     assert "[ghpages]" in text
-    assert "[hashnode]" in text
 
     # Field allow-list per channel — no credentials anywhere
     forbidden_field_names = ("pat", "token", "api_key", "client_secret",
                               "access_token", "refresh_token")
-    for chan in ("[ghpages]", "[hashnode]"):
+    for chan in ("[ghpages]",):
         # Extract the block body until the next heading
         idx = text.find(chan)
         nxt = text.find("\n[", idx + 1)

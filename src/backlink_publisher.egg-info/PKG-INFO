@@ -9,9 +9,11 @@ Requires-Dist: google-auth-oauthlib>=1.0
 Requires-Dist: google-auth-httplib2>=0.2
 Requires-Dist: playwright>=1.40
 Requires-Dist: requests>=2.28
+Requires-Dist: websocket-client>=1.6
 Requires-Dist: beautifulsoup4>=4.12
 Requires-Dist: flask>=2.0
 Requires-Dist: apscheduler>=3.10
+Requires-Dist: pyyaml>=6.0
 Requires-Dist: tomli>=2.0; python_version < "3.11"
 Provides-Extra: dev
 Requires-Dist: pytest>=7; extra == "dev"

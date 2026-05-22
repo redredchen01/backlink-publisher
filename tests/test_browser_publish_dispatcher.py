@@ -143,22 +143,22 @@ class TestPublish:
     def test_happy_path_returns_published_result(
         self, fake_config, stubbed_session, stubbed_verify
     ):
-        recipe = _make_recipe("hashnode")
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
+        recipe = _make_recipe("devto")
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
 
         result = dispatcher.publish({"target_url": "https://t.example"}, "publish", fake_config)
 
         assert isinstance(result, AdapterResult)
         assert result.status == "published"
-        assert result.adapter == "hashnode-browser-attach"
-        assert result.platform == "hashnode"
+        assert result.adapter == "devto-browser-attach"
+        assert result.platform == "devto"
         assert result.published_url == "https://stub.example/p/123"
         assert result._provider_meta == {
             "link_attr_verification": {"verification": "ok", "url": "https://stub.example/p/123"}
         }
         # ChromeAttachSession received the channel slug.
-        assert stubbed_session["captured"]["channel"] == "hashnode"
+        assert stubbed_session["captured"]["channel"] == "devto"
 
     def test_signin_url_raises_auth_expired_for_bind_known_channel(
         self, fake_config, stubbed_session
@@ -177,11 +177,11 @@ class TestPublish:
     def test_signin_url_raises_dependency_error_for_publish_only_channel(
         self, fake_config, stubbed_session
     ):
-        """Publish-only channel (hashnode not in CHANNELS) → DependencyError, no mark_expired."""
-        stubbed_session["page"].url = "https://hashnode.com/signin?return_to=/new"
-        recipe = _make_recipe("hashnode")
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
+        """Publish-only channel (devto not in CHANNELS) → DependencyError, no mark_expired."""
+        stubbed_session["page"].url = "https://dev.to/sign-in"
+        recipe = _make_recipe("devto")
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
 
         with patch("webui_store.channel_status.mark_expired") as mark:
             with pytest.raises(DependencyError, match="signin URL"):
@@ -208,40 +208,40 @@ class TestPublish:
         def flow(page, payload):
             raise DependencyError("missing creds")
 
-        recipe = _make_recipe("hashnode", publish_flow=flow)
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
+        recipe = _make_recipe("devto", publish_flow=flow)
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
         with pytest.raises(DependencyError, match="missing creds"):
             dispatcher.publish({}, "publish", fake_config)
 
     def test_external_service_error_propagates(self, fake_config, stubbed_session):
         def flow(page, payload):
-            raise ExternalServiceError("hashnode 500")
+            raise ExternalServiceError("devto 500")
 
-        recipe = _make_recipe("hashnode", publish_flow=flow)
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
-        with pytest.raises(ExternalServiceError, match="hashnode 500"):
+        recipe = _make_recipe("devto", publish_flow=flow)
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
+        with pytest.raises(ExternalServiceError, match="devto 500"):
             dispatcher.publish({}, "publish", fake_config)
 
     def test_recipe_arbitrary_exception_wrapped_as_external_service_error(
         self, fake_config, stubbed_session
     ):
         def flow(page, payload):
-            raise RuntimeError("hashnode DOM changed")
+            raise RuntimeError("devto DOM changed")
 
-        recipe = _make_recipe("hashnode", publish_flow=flow)
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
-        with pytest.raises(ExternalServiceError, match="hashnode browser publish failed"):
+        recipe = _make_recipe("devto", publish_flow=flow)
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
+        with pytest.raises(ExternalServiceError, match="devto browser publish failed"):
             dispatcher.publish({}, "publish", fake_config)
 
     def test_published_result_without_target_url_omits_verification(
         self, fake_config, stubbed_session, stubbed_verify
     ):
-        recipe = _make_recipe("hashnode")
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
+        recipe = _make_recipe("devto")
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
         result = dispatcher.publish({}, "publish", fake_config)
         # verify_link_attributes still runs even without target_url —
         # it only needs final_url. _provider_meta gets populated.
@@ -254,9 +254,9 @@ class TestPublish:
             disp_mod, "verify_link_attributes",
             lambda url: (_ for _ in ()).throw(RuntimeError("net fail")),
         )
-        recipe = _make_recipe("hashnode")
-        RECIPES["hashnode"] = recipe
-        dispatcher = BrowserPublishDispatcher.for_channel("hashnode")
+        recipe = _make_recipe("devto")
+        RECIPES["devto"] = recipe
+        dispatcher = BrowserPublishDispatcher.for_channel("devto")
         result = dispatcher.publish({"target_url": "https://t.example"}, "publish", fake_config)
         assert result.status == "published"
         assert result._provider_meta is None

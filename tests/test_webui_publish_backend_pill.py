@@ -42,7 +42,6 @@ class TestPublishBackendClassification:
             ("ghpages", "api"),       # single API entry
             ("medium", "api"),        # 3 API entries
             ("velog", "api+chrome"),  # API primary + chrome fallback
-            ("hashnode", "api+chrome"),  # paywalled API + chrome bypass
             ("devto", "api+chrome"),   # Plan 003 Phase 2 Unit 7: DevtoAPIAdapter primary + Chrome fallback
             ("mastodon", "chrome"),   # browser only
         ],

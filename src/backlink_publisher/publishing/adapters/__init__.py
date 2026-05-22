@@ -32,7 +32,6 @@ from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
 from .devto_api import DevtoAPIAdapter
-from .hashnode import HashnodeAPIAdapter
 from .instant_web import TelegraphCdpAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
@@ -48,7 +47,6 @@ from .velog_graphql import VelogGraphQLAdapter
 # from API path propagates without fall-through, per registry contract).
 from ..browser_publish import BrowserPublishDispatcher
 from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
-from ..browser_publish.recipes import hashnode as _hashnode_recipe  # noqa: F401
 from ..browser_publish.recipes import devto as _devto_recipe  # noqa: F401
 from ..browser_publish.recipes import mastodon as _mastodon_recipe  # noqa: F401
 from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
@@ -80,13 +78,6 @@ register(
     dofollow=True,
 )
 register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
-register(
-    "hashnode",
-    HashnodeAPIAdapter,
-    BrowserPublishDispatcher.for_channel("hashnode"),
-    dofollow=False,
-    rationale=_R["hashnode"],
-)
 register(
     "devto",
     DevtoAPIAdapter,
@@ -227,20 +218,6 @@ def verify_adapter_setup(
             )
         return
 
-    if platform == "hashnode":
-        if config.hashnode is None or not config.hashnode.publication_id:
-            raise DependencyError(
-                "Hashnode config missing. Add [hashnode] publication_id=\"<id>\" "
-                "to ~/.config/backlink-publisher/config.toml"
-            )
-        if not config.hashnode_token_path.exists():
-            raise DependencyError(
-                "Hashnode PAT not stored. Write "
-                f"{{\"token\": \"<pat>\"}} to {config.hashnode_token_path} "
-                "(chmod 600). Generate at hashnode.com/settings/developer."
-            )
-        return
-
     if platform == "notion":
         if not NotionAPIAdapter.available(config):
             raise DependencyError(
@@ -299,9 +276,6 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
 
     if platform == "velog":
         return _verify_velog_live(config)
-
-    if platform == "hashnode":
-        return _verify_hashnode_live(config)
 
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
     # than fake-green. Per-adapter live impls (Medium /me) land in follow-up PRs.
@@ -715,117 +689,6 @@ def _verify_velog_live(config: Config) -> VerifyResult:
         )
 
     identity = current_user.get("username") or current_user.get("display_name")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
-    )
-
-
-_HASHNODE_VERIFY_TIMEOUT_S = 5
-
-
-def _verify_hashnode_live(config: Config) -> VerifyResult:
-    """POST ``query { me { ... } }`` to confirm the PAT is still valid.
-
-    Plan 2026-05-19-006 Unit 8 — first-class live verify built in with
-    the adapter (same model as ghpages Unit 7).
-
-    Strict read-only: ``hashnode-token.json`` is never mutated. The PAT
-    is bearer-equivalent (server-side rotation only) so the adapter has
-    nothing to write back. Token rotation is the operator's job
-    (regenerate at hashnode.com/settings/developer).
-
-    Status mapping:
-      - 200 + ``data.me`` non-null → ``ok``, identity = username, dofollow=True
-        (Hashnode is confirmed dofollow on canonical post URLs)
-      - 200 + ``errors`` only       → ``token_expired`` when the message
-        mentions auth/unauthorized; otherwise ``never``
-      - 401                          → ``token_expired``
-      - ``requests.Timeout``         → ``timeout``
-      - other (4xx/5xx/connection/parse) → ``never`` with blocker text
-    """
-    import requests
-    from .hashnode import HASHNODE_API, ME_QUERY, _required_headers, _load_token
-
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
-
-    try:
-        resp = requests.post(
-            HASHNODE_API,
-            headers=_required_headers(token),
-            json={"query": ME_QUERY},
-            timeout=_HASHNODE_VERIFY_TIMEOUT_S,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"hashnode /me timed out after {_HASHNODE_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"hashnode network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "Hashnode PAT rejected (HTTP 401) — regenerate at "
-                "hashnode.com/settings/developer and re-save to hashnode-token.json"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode /me returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Hashnode returned non-JSON response"],
-        )
-
-    me = ((body or {}).get("data") or {}).get("me")
-    if me is None:
-        # GraphQL errors-only response. Classify by message content.
-        errors = body.get("errors") or []
-        msg = (errors[0].get("message") if errors else "") or "unknown"
-        lowered = msg.lower()
-        if any(k in lowered for k in ("unauthorized", "auth", "invalid token")):
-            return VerifyResult(
-                ok=False,
-                last_verify_result="token_expired",
-                blockers=[f"Hashnode auth error: {msg}"],
-            )
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode GraphQL error: {msg}"],
-        )
-
-    identity = me.get("username") or me.get("name")
     return VerifyResult(
         ok=True,
         identity=identity,
