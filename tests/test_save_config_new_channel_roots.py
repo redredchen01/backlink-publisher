@@ -1,6 +1,5 @@
 """Tests for save_config's three new managed roots — Plan 2026-05-20-003 Unit A.2.
 
-Locks the round-trip semantics for ``[ghpages]`` / ``[hashnode]`` / ``[writeas]``
 after they join ``[blogger]`` / ``[medium]`` / ``[targets]`` as managed roots
 in ``_SAVE_CONFIG_KNOWN_ROOTS``. Three behaviors are non-negotiable:
 
@@ -33,7 +32,6 @@ from backlink_publisher.config import (
     Config,
     GhpagesConfig,
     HashnodeConfig,
-    WriteAsConfig,
     load_config,
     save_config,
 )
@@ -92,30 +90,7 @@ def test_hashnode_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
     assert "blog.example.com" in text
 
 
-def test_writeas_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
-    """Same regression guard — [writeas] must round-trip."""
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        '[blogger]\n'
-        '"https://example.com" = "111"\n'
-        '\n'
-        '[writeas]\n'
-        'collection_alias = "operator-handle"\n'
-        'api_base = "https://write.as/api"\n',
-        encoding="utf-8",
-    )
-    cfg = load_config(config_path)
-    save_config(cfg, path=config_path)
-
-    text = config_path.read_text(encoding="utf-8")
-    assert "[writeas]" in text, "A.2 regression: [writeas] dropped on save"
-    assert "operator-handle" in text
-
-
-# ─── Channel kwargs overwrite cfg.<channel> ─────────────────────────────────
-
-
-def test_ghpages_config_kwarg_overrides_existing(tmp_path: Path) -> None:
+def test_ghpages_block_survives_save_when_only_on_disk(tmp_path: Path) -> None:
     """save_config(cfg, ghpages_config=GhpagesConfig(repo='new')) replaces
     the on-disk [ghpages] block with the kwarg-supplied content. Mirrors the
     medium_token / blogger_client_id three-state pattern."""
@@ -260,7 +235,6 @@ def test_round_trip_is_idempotent_for_all_three_channels(tmp_path: Path) -> None
         'publication_id = "pub-xyz"\n'
         'host = ""\n'
         '\n'
-        '[writeas]\n'
         'collection_alias = "feed"\n'
         'api_base = "https://write.as/api"\n',
         encoding="utf-8",
@@ -325,7 +299,6 @@ def test_emitted_channel_blocks_carry_only_routing_fields(tmp_path: Path) -> Non
         path=config_path,
         ghpages_config=GhpagesConfig(repo="o/r"),
         hashnode_config=HashnodeConfig(publication_id="pub"),
-        writeas_config=WriteAsConfig(collection_alias="c"),
     )
 
     text = config_path.read_text(encoding="utf-8")
@@ -333,12 +306,11 @@ def test_emitted_channel_blocks_carry_only_routing_fields(tmp_path: Path) -> Non
     # Sections present
     assert "[ghpages]" in text
     assert "[hashnode]" in text
-    assert "[writeas]" in text
 
     # Field allow-list per channel — no credentials anywhere
     forbidden_field_names = ("pat", "token", "api_key", "client_secret",
                               "access_token", "refresh_token")
-    for chan in ("[ghpages]", "[hashnode]", "[writeas]"):
+    for chan in ("[ghpages]", "[hashnode]"):
         # Extract the block body until the next heading
         idx = text.find(chan)
         nxt = text.find("\n[", idx + 1)

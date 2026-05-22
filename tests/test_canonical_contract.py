@@ -27,7 +27,6 @@ import pytest
 
 from backlink_publisher.publishing.adapters.ghpages import _build_markdown_body
 from backlink_publisher.publishing.adapters.hashnode import _build_publish_input
-from backlink_publisher.publishing.adapters.writeas import _build_post_body
 
 
 _CANONICAL = "https://example.com/article-original"
@@ -101,40 +100,12 @@ class TestGhpagesCanonical:
 
 
 # --------------------------------------------------------------------------- #
-# Writeas — body-prepended ``<link rel=canonical>``                            #
-# --------------------------------------------------------------------------- #
-
-
-class TestWriteasCanonical:
-    def test_with_canonical_prepends_link_tag(self):
-        payload = _payload_with_canonical(_CANONICAL)
-        body = _build_post_body(payload)
-        assert f'<link rel="canonical" href="{_CANONICAL}">' in body["body"]
-        # Original content survives.
-        assert "Body with" in body["body"]
-
-    def test_without_seo_omits_link_tag(self):
-        payload = _payload_with_canonical(None)
-        body = _build_post_body(payload)
-        assert "canonical" not in body["body"].lower()
-
-    def test_empty_canonical_omits_link_tag(self):
-        payload = _payload_with_canonical("")
-        body = _build_post_body(payload)
-        assert "canonical" not in body["body"].lower()
-
-
-# --------------------------------------------------------------------------- #
 # Blogger — HTML body prepended ``<link rel=canonical>``                      #
 # --------------------------------------------------------------------------- #
 
 
 def _capture_blogger_body(payload: dict[str, Any]) -> dict[str, Any]:
-    """Capture the body passed to ``service.posts().insert()``.
-
-    Mirrors the mock pattern in
-    ``tests/test_adapter_blogger_api_xss_contract.py``.
-    """
+    """Capture the body passed to ``service.posts().insert()``."""
     from backlink_publisher.config import BloggerOAuthConfig, Config
     from backlink_publisher.publishing.adapters.blogger_api import BloggerAPIAdapter
 
@@ -148,8 +119,6 @@ def _capture_blogger_body(payload: dict[str, Any]) -> dict[str, Any]:
         {
             "main_domain": "https://example.com",
             "publish_mode": "draft",
-            # blogger uses content_html as tier-(a) source; supply both so
-            # extract_publish_html prefers content_html.
             "content_html": "<p>Body content</p>",
         }
     )
@@ -228,6 +197,3 @@ class TestForwarderVerbatim:
         # json.dumps wraps in double-quotes; URL itself unchanged.
         assert f'"{url_with_query}"' in rendered
 
-    def test_writeas_forwards_verbatim(self, url_with_query: str):
-        body = _build_post_body(_payload_with_canonical(url_with_query))
-        assert f'href="{url_with_query}"' in body["body"]

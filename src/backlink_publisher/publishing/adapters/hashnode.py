@@ -290,9 +290,9 @@ class HashnodeAPIAdapter(Publisher):
         mutation name would land dead code that emits
         ``BannerUploadError`` on every row in non-strict mode — strictly
         worse than the explicit ``None`` opt-in to the source_url
-        fallback the dispatcher already wires for writeas.
+        fallback the dispatcher already wires for Telegraph.
 
-        Returning ``None`` is the writeas-style "considered but can't"
+        Returning ``None`` is the explicit "considered but can't"
         signal (distinct from Medium's not-implementing).  Dispatcher
         prepends ``![alt](source_url)`` from ``banner.source_url`` and
         emits ``banner.source_url_fallback`` with ``reason=

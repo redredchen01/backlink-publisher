@@ -10,7 +10,7 @@ import re
 
 
 _SAVE_CONFIG_KNOWN_ROOTS: frozenset[str] = frozenset(
-    {"blogger", "medium", "targets", "ghpages", "hashnode", "writeas", "mastodon"}
+    {"blogger", "medium", "targets", "ghpages", "hashnode", "mastodon"}
 )
 
 _TOML_HEADING_RE = re.compile(
