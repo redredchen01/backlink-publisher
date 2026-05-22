@@ -172,7 +172,7 @@ class TestNotionAPIAdapterPublish:
         mock_resp = _mock_notion_success_response(
             page_id="page_abc", url="https://www.notion.so/pageabc"
         )
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post", return_value=mock_resp):
             result = adapter.publish(
                 {"title": "Test Article", "content": "Body"},
                 mode="live",
@@ -184,7 +184,7 @@ class TestNotionAPIAdapterPublish:
 
     def test_draft_mode_returns_drafted_without_api_call(self, config_with_token):
         adapter = NotionAPIAdapter()
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post") as mock_post:
             result = adapter.publish(
                 {"title": "Draft Article"},
                 mode="draft",
@@ -196,7 +196,7 @@ class TestNotionAPIAdapterPublish:
     def test_canonical_url_in_request_body(self, config_with_token):
         adapter = NotionAPIAdapter()
         mock_resp = _mock_notion_success_response()
-        with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post", return_value=mock_resp) as mock_post:
             adapter.publish(
                 {
                     "title": "Test",
@@ -215,7 +215,7 @@ class TestNotionAPIAdapterPublish:
     def test_no_seo_no_canonical_in_body(self, config_with_token):
         adapter = NotionAPIAdapter()
         mock_resp = _mock_notion_success_response()
-        with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post", return_value=mock_resp) as mock_post:
             adapter.publish(
                 {"title": "Pure backlink"},
                 mode="live",
@@ -230,7 +230,7 @@ class TestNotionAPIAdapterPublish:
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.text = "Unauthorized"
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post", return_value=mock_resp):
             with pytest.raises(ExternalServiceError, match="401"):
                 adapter.publish(
                     {"title": "Test"},
@@ -257,7 +257,7 @@ class TestNotionAPIAdapterPublish:
             "url": "",
         }
         mock_resp.text = ""
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.notion_api.http_post", return_value=mock_resp):
             result = adapter.publish(
                 {"title": "Test"},
                 mode="live",

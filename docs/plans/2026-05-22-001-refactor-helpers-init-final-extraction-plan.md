@@ -6,6 +6,7 @@ date: 2026-05-22
 deepened: 2026-05-22
 obsoleted_at: 2026-05-22
 origin: docs/plans/2026-05-21-006-refactor-webui-comprehensive-optimization-plan.md
+claims: {}
 ---
 
 > **OBSOLETE 2026-05-22**: Plan 2026-05-21-007 Unit 5 shipped as PR #180 (commit `ceac466`) **the same day this plan was written**. Origin/main `0413f65` shows `helpers/__init__.py` at 11 SLOC (docstring only, no re-export hub) and a new `helpers/contexts.py` (612 LOC / 499 SLOC) holding the remaining 8 concerns in a single file — master plan F2's ≤120-SLOC goal already over-achieved.

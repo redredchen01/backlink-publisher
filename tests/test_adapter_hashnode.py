@@ -216,7 +216,7 @@ class TestPublish:
         cfg = _config_with_hashnode(tmp_path, publication_id="pub_z")
 
         adapter = HashnodeAPIAdapter()
-        with patch.object(requests, "post", return_value=_ok_publish_response("https://op.hashnode.dev/x")) as mock:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_ok_publish_response("https://op.hashnode.dev/x")) as mock:
             result = adapter.publish(
                 {"title": "Hi", "content_markdown": "body", "tags": ["seo"]},
                 mode="publish",
@@ -239,7 +239,7 @@ class TestPublish:
         cfg = _config_with_hashnode(tmp_path, publication_id="pub_z")
 
         adapter = HashnodeAPIAdapter()
-        with patch.object(requests, "post") as mock:
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post") as mock:
             result = adapter.publish(
                 {"title": "Hi", "content_markdown": "body"},
                 mode="draft",
@@ -279,7 +279,7 @@ class TestPublish:
         cfg = _config_with_hashnode(tmp_path, publication_id="pub_z")
 
         adapter = HashnodeAPIAdapter()
-        with patch.object(requests, "post", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=_http_status_response(401)):
             with pytest.raises(ExternalServiceError, match="HTTP 401"):
                 adapter.publish({"title": "x", "content_markdown": "y"}, "publish", cfg)
 
@@ -292,7 +292,7 @@ class TestPublish:
 
         err_resp = _http_status_response(200, {"errors": [{"message": "tag slug invalid"}]})
         adapter = HashnodeAPIAdapter()
-        with patch.object(requests, "post", return_value=err_resp):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=err_resp):
             with pytest.raises(ExternalServiceError, match="tag slug invalid"):
                 adapter.publish({"title": "x", "content_markdown": "y"}, "publish", cfg)
 
@@ -306,7 +306,7 @@ class TestPublish:
 
         missing_url = _http_status_response(200, {"data": {"publishPost": {"post": {"slug": "x"}}}})
         adapter = HashnodeAPIAdapter()
-        with patch.object(requests, "post", return_value=missing_url):
+        with patch("backlink_publisher.publishing.adapters.hashnode.http_post", return_value=missing_url):
             with pytest.raises(ExternalServiceError, match="no URL"):
                 adapter.publish({"title": "x", "content_markdown": "y"}, "publish", cfg)
 
@@ -347,7 +347,7 @@ class TestLiveVerify:
         # No token file → live verify must not call HTTP
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
         cfg = Config(hashnode=HashnodeConfig(publication_id="pub_x"))
-        with patch.object(requests, "post") as mock:
+        with patch("backlink_publisher.http.post") as mock:
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         mock.assert_not_called()
         assert result.ok is False
@@ -355,7 +355,7 @@ class TestLiveVerify:
 
     def test_happy_path_returns_ok_with_username(self, tmp_path, monkeypatch):
         cfg = self._setup_bound(tmp_path, monkeypatch)
-        with patch.object(requests, "post", return_value=_ok_me_response("opx")) as mock:
+        with patch("backlink_publisher.http.post", return_value=_ok_me_response("opx")) as mock:
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.ok is True
         assert result.identity == "opx"
@@ -369,7 +369,7 @@ class TestLiveVerify:
 
     def test_401_returns_token_expired(self, tmp_path, monkeypatch):
         cfg = self._setup_bound(tmp_path, monkeypatch)
-        with patch.object(requests, "post", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(401)):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.ok is False
         assert result.last_verify_result == "token_expired"
@@ -378,33 +378,33 @@ class TestLiveVerify:
         """Hashnode sometimes returns 200 + errors: [{message: 'Unauthorized'}]."""
         cfg = self._setup_bound(tmp_path, monkeypatch)
         body = {"errors": [{"message": "Unauthorized — invalid token"}]}
-        with patch.object(requests, "post", return_value=_http_status_response(200, body)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(200, body)):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "token_expired"
 
     def test_graphql_generic_error_returns_never(self, tmp_path, monkeypatch):
         cfg = self._setup_bound(tmp_path, monkeypatch)
         body = {"errors": [{"message": "rate limited"}]}
-        with patch.object(requests, "post", return_value=_http_status_response(200, body)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(200, body)):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "never"
 
     @pytest.mark.parametrize("status", [403, 500, 502, 503])
     def test_non_200_returns_never_not_token_expired(self, tmp_path, monkeypatch, status):
         cfg = self._setup_bound(tmp_path, monkeypatch)
-        with patch.object(requests, "post", return_value=_http_status_response(status)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(status)):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "never"
 
     def test_timeout_returns_timeout(self, tmp_path, monkeypatch):
         cfg = self._setup_bound(tmp_path, monkeypatch)
-        with patch.object(requests, "post", side_effect=requests.Timeout("slow")):
+        with patch("backlink_publisher.http.post", side_effect=requests.Timeout("slow")):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "timeout"
 
     def test_connection_error_returns_never(self, tmp_path, monkeypatch):
         cfg = self._setup_bound(tmp_path, monkeypatch)
-        with patch.object(requests, "post", side_effect=requests.ConnectionError("dead")):
+        with patch("backlink_publisher.http.post", side_effect=requests.ConnectionError("dead")):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "never"
 
@@ -414,7 +414,7 @@ class TestLiveVerify:
         resp.status_code = 200
         resp.headers = {}
         resp.json.side_effect = ValueError("nope")
-        with patch.object(requests, "post", return_value=resp):
+        with patch("backlink_publisher.http.post", return_value=resp):
             result = verify_adapter_setup("hashnode", cfg, mode="live")
         assert result.last_verify_result == "never"
 
@@ -432,7 +432,7 @@ class TestReadOnlyInvariant:
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
         path, mtime_before, content_before = self._snapshot_token(tmp_path)
         cfg = Config(hashnode=HashnodeConfig(publication_id="pub_x"))
-        with patch.object(requests, "post", return_value=_ok_me_response()):
+        with patch("backlink_publisher.http.post", return_value=_ok_me_response()):
             verify_adapter_setup("hashnode", cfg, mode="live")
         assert path.stat().st_mtime_ns == mtime_before
         assert path.read_text() == content_before
@@ -441,7 +441,7 @@ class TestReadOnlyInvariant:
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
         path, mtime_before, content_before = self._snapshot_token(tmp_path)
         cfg = Config(hashnode=HashnodeConfig(publication_id="pub_x"))
-        with patch.object(requests, "post", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.http.post", return_value=_http_status_response(401)):
             verify_adapter_setup("hashnode", cfg, mode="live")
         assert path.stat().st_mtime_ns == mtime_before
         assert path.read_text() == content_before

@@ -36,7 +36,7 @@ def test_all_anchors_have_blank_target():
         '<a href="https://b.com" target="_blank">link2</a>',
         '<a href="https://c.com" target="_blank">link3</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
 
     assert result["verification"] == "ok"
@@ -52,7 +52,7 @@ def test_half_anchors_have_blank_target():
         '<a href="https://c.com">link3</a>',
         '<a href="https://d.com">link4</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
 
     assert result["verification"] == "ok"
@@ -60,7 +60,7 @@ def test_half_anchors_have_blank_target():
 
 
 def test_no_anchors_in_html():
-    with patch("requests.get", return_value=_mock_resp("<html><body>no links</body></html>")):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp("<html><body>no links</body></html>")):
         result = verify_link_attributes("https://example.com")
 
     assert result["verification"] == "ok"
@@ -70,14 +70,14 @@ def test_no_anchors_in_html():
 
 def test_single_quote_target_matches():
     html = _html("<a href='https://a.com' target='_blank'>link</a>")
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["blank_anchors"] == 1
 
 
 def test_uppercase_target_matches():
     html = _html('<a href="https://a.com" TARGET="_BLANK">link</a>')
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["blank_anchors"] == 1
 
@@ -88,34 +88,34 @@ def test_uppercase_target_matches():
 
 def test_connection_error_returns_skipped():
     import requests as req_lib
-    with patch("requests.get", side_effect=req_lib.ConnectionError("refused")):
+    with patch("backlink_publisher.http.get", side_effect=req_lib.ConnectionError("refused")):
         result = verify_link_attributes("http://127.0.0.1:19999/nonexistent", timeout=0.1)
     assert result["verification"] == "skipped"
     assert "reason" in result
 
 
 def test_http_5xx_returns_skipped():
-    with patch("requests.get", return_value=_mock_resp("", status_code=503)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp("", status_code=503)):
         result = verify_link_attributes("https://example.com")
     assert result["verification"] == "skipped"
     assert "503" in result["reason"]
 
 
 def test_http_4xx_returns_skipped():
-    with patch("requests.get", return_value=_mock_resp("", status_code=404)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp("", status_code=404)):
         result = verify_link_attributes("https://example.com")
     assert result["verification"] == "skipped"
 
 
 def test_timeout_returns_skipped():
     import requests as req_lib
-    with patch("requests.get", side_effect=req_lib.Timeout("timed out")):
+    with patch("backlink_publisher.http.get", side_effect=req_lib.Timeout("timed out")):
         result = verify_link_attributes("https://example.com", timeout=0.001)
     assert result["verification"] == "skipped"
 
 
 def test_non_html_response_does_not_crash():
-    with patch("requests.get", return_value=_mock_resp('{"not": "html"}')):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp('{"not": "html"}')):
         result = verify_link_attributes("https://example.com")
     assert result["verification"] == "ok"
     assert result["total_anchors"] == 0
@@ -135,7 +135,7 @@ def test_nofollow_clean_html_flags_nothing():
     html = _html(
         '<a href="https://a.com" target="_blank" rel="noopener">link</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["verification"] == "ok"
     assert result["nofollow_detected"] is False
@@ -147,7 +147,7 @@ def test_nofollow_injected_by_platform_is_detected():
     html = _html(
         '<a href="https://a.com" target="_blank" rel="nofollow noopener">link</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["verification"] == "ok"
     assert result["nofollow_detected"] is True
@@ -160,7 +160,7 @@ def test_sponsored_rel_is_not_misclassified_as_nofollow():
     html = _html(
         '<a href="https://a.com" target="_blank" rel="sponsored noopener">link</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["nofollow_detected"] is False
     assert result["nofollow_anchors"] == 0
@@ -173,7 +173,7 @@ def test_any_single_nofollow_anchor_flips_detection():
         '<a href="https://b.com" target="_blank" rel="noopener">link b</a>',
         '<a href="https://c.com" target="_blank" rel="nofollow noopener">link c</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["nofollow_detected"] is True
     assert result["nofollow_anchors"] == 1
@@ -193,7 +193,7 @@ def test_nofollow_substring_match_does_not_falsely_trigger():
         # alert.
         '<a href="https://c.com" rel="nofollowed">link c</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["nofollow_detected"] is False
     assert result["nofollow_anchors"] == 0
@@ -204,7 +204,7 @@ def test_uppercase_rel_attribute_still_matches():
     html = _html(
         '<a href="https://a.com" REL="NOFOLLOW NOOPENER">link</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["nofollow_detected"] is True
     assert result["nofollow_anchors"] == 1
@@ -216,7 +216,7 @@ def test_multiple_nofollow_anchors_count_correctly():
         '<a href="https://b.com" rel="nofollow noopener">b</a>',
         '<a href="https://c.com" rel="noopener">c</a>',
     )
-    with patch("requests.get", return_value=_mock_resp(html)):
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
         result = verify_link_attributes("https://example.com")
     assert result["nofollow_detected"] is True
     assert result["nofollow_anchors"] == 2
@@ -227,7 +227,7 @@ def test_skipped_result_has_no_nofollow_keys():
     be present — callers reading meta['nofollow_detected'] must check the
     verification status first."""
     import requests as req_lib
-    with patch("requests.get", side_effect=req_lib.ConnectionError("refused")):
+    with patch("backlink_publisher.http.get", side_effect=req_lib.ConnectionError("refused")):
         result = verify_link_attributes("http://127.0.0.1:1/x", timeout=0.1)
     assert result["verification"] == "skipped"
     assert "nofollow_detected" not in result
@@ -284,8 +284,9 @@ def test_medium_api_publish_hook_wires_meta():
     cfg = Config(medium_integration_token="dummy-token")
     adapter = MediumAPIAdapter()
 
-    with patch("requests.get", side_effect=_requests_get), \
-         patch("requests.post", return_value=api_resp):
+    with patch("backlink_publisher.publishing.adapters.medium_api.http_get", side_effect=_requests_get), \
+         patch("backlink_publisher.http.get", side_effect=_requests_get), \
+         patch("backlink_publisher.publishing.adapters.medium_api.http_post", return_value=api_resp):
         result = adapter.publish(_make_payload("publish"), mode="publish", config=cfg)
 
     assert result.status == "published"
@@ -312,8 +313,8 @@ def test_medium_api_draft_mode_skips_verifier():
     cfg = Config(medium_integration_token="dummy-token")
     adapter = MediumAPIAdapter()
 
-    with patch("requests.get", return_value=me_resp), \
-         patch("requests.post", return_value=api_resp), \
+    with patch("backlink_publisher.publishing.adapters.medium_api.http_get", return_value=me_resp), \
+         patch("backlink_publisher.publishing.adapters.medium_api.http_post", return_value=api_resp), \
          patch(
              "backlink_publisher.publishing.adapters.medium_api.verify_link_attributes"
          ) as mock_verify:
@@ -342,8 +343,8 @@ def test_verifier_skipped_result_no_warn(caplog):
     cfg = Config(medium_integration_token="dummy-token")
     adapter = MediumAPIAdapter()
 
-    with patch("requests.get", return_value=me_resp), \
-         patch("requests.post", return_value=api_resp), \
+    with patch("backlink_publisher.publishing.adapters.medium_api.http_get", return_value=me_resp), \
+         patch("backlink_publisher.publishing.adapters.medium_api.http_post", return_value=api_resp), \
          patch(
              "backlink_publisher.publishing.adapters.medium_api.verify_link_attributes",
              return_value=skipped,

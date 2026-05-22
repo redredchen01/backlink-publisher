@@ -4,6 +4,7 @@ type: refactor
 status: active
 date: 2026-05-21
 deepened: 2026-05-21
+claims: {}
 ---
 
 # WebUI Comprehensive Optimization — Audit Findings & Phased Roadmap

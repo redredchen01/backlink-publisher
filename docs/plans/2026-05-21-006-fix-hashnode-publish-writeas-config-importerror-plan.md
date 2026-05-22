@@ -3,6 +3,7 @@ title: "fix: WriteAsConfig ImportError + half-finished Write.as retirement clean
 type: fix
 status: active
 date: 2026-05-21
+claims: {}
 ---
 
 # fix: WriteAsConfig ImportError + half-finished Write.as retirement cleanup

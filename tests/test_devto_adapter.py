@@ -137,7 +137,7 @@ class TestDevtoAPIAdapterPublish:
     def test_happy_path_returns_published_result(self, config_with_token):
         adapter = DevtoAPIAdapter()
         mock_resp = _mock_devto_success_response()
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp):
             result = adapter.publish(
                 {"title": "Test Article", "content": "Body text"},
                 mode="live",
@@ -150,7 +150,7 @@ class TestDevtoAPIAdapterPublish:
     def test_canonical_url_in_request_body(self, config_with_token):
         adapter = DevtoAPIAdapter()
         mock_resp = _mock_devto_success_response()
-        with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp) as mock_post:
             adapter.publish(
                 {
                     "title": "Test",
@@ -165,7 +165,7 @@ class TestDevtoAPIAdapterPublish:
     def test_no_seo_no_canonical_in_request(self, config_with_token):
         adapter = DevtoAPIAdapter()
         mock_resp = _mock_devto_success_response()
-        with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp) as mock_post:
             adapter.publish(
                 {"title": "Pure backlink article"},
                 mode="live",
@@ -176,7 +176,7 @@ class TestDevtoAPIAdapterPublish:
 
     def test_draft_mode_no_api_call(self, config_with_token):
         adapter = DevtoAPIAdapter()
-        with patch("requests.post") as mock_post:
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post") as mock_post:
             result = adapter.publish(
                 {"title": "Draft"},
                 mode="draft",
@@ -190,7 +190,7 @@ class TestDevtoAPIAdapterPublish:
         mock_resp = MagicMock()
         mock_resp.status_code = 401
         mock_resp.text = "Unauthorized"
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp):
             with pytest.raises(ExternalServiceError, match="401"):
                 adapter.publish(
                     {"title": "Test"},
@@ -204,7 +204,7 @@ class TestDevtoAPIAdapterPublish:
         mock_resp.status_code = 422
         mock_resp.json.return_value = {"error": "Title too short"}
         mock_resp.text = ""
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp):
             with pytest.raises(ExternalServiceError, match="422"):
                 adapter.publish(
                     {"title": "x"},
@@ -232,7 +232,7 @@ class TestDevtoAPIAdapterPublish:
             "user": {"username": "myuser"},
         }
         mock_resp.text = ""
-        with patch("requests.post", return_value=mock_resp):
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp):
             result = adapter.publish(
                 {"title": "Test"},
                 mode="live",
@@ -243,7 +243,7 @@ class TestDevtoAPIAdapterPublish:
     def test_api_key_header_used_not_authorization(self, config_with_token):
         adapter = DevtoAPIAdapter()
         mock_resp = _mock_devto_success_response()
-        with patch("requests.post", return_value=mock_resp) as mock_post:
+        with patch("backlink_publisher.publishing.adapters.devto_api.http_post", return_value=mock_resp) as mock_post:
             adapter.publish(
                 {"title": "Test"},
                 mode="live",
