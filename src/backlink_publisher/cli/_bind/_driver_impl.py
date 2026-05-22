@@ -83,6 +83,7 @@ class ChromeLaunchError(RuntimeError):
     def __init__(self, error_code: str = "chrome_not_available") -> None:
         super().__init__(error_code)
         self.error_code = error_code
+@dataclass
 class BindResult:
     """Terminal outcome of ``run_bind``. Consumed by the CLI's ``main`` to
     decide exit code and final event payload.

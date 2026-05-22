@@ -99,7 +99,7 @@ def test_happy_path_no_self_heal(seeded_token):
     """Valid token → createPage succeeds first try → no rotation."""
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.return_value = _create_page_success(url="https://telegra.ph/x-01-01")
 
         adapter = TelegraphAPIAdapter()
@@ -128,7 +128,7 @@ def test_401_access_token_invalid_triggers_self_heal(seeded_token, caplog):
         _create_page_success(url="https://telegra.ph/healed-01-01"),  # retry createPage
     ]
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.side_effect = call_sequence
 
         adapter = TelegraphAPIAdapter()
@@ -164,7 +164,7 @@ def test_401_invalid_access_token_variant_also_triggers_self_heal(seeded_token):
         _create_page_success(url="https://telegra.ph/variant-01-01"),
     ]
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.side_effect = call_sequence
 
         adapter = TelegraphAPIAdapter()
@@ -187,7 +187,7 @@ def test_second_401_after_rotation_raises_external_service_error(seeded_token):
         _401_invalid_token(),                          # retry also 401
     ]
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.side_effect = call_sequence
 
         adapter = TelegraphAPIAdapter()
@@ -212,7 +212,7 @@ def test_atomic_write_preserves_0600_perms(seeded_token):
         _create_page_success(),
     ]
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.side_effect = call_sequence
         # Loosen-perms file shouldn't even pass _load_token; that's an
         # independent test in test_adapter_telegraph_api.py.  Here we
@@ -235,7 +235,7 @@ def test_orphan_archive_filename_includes_iso_timestamp(seeded_token):
         _create_page_success(),
     ]
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as mock_post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as mock_post:
         mock_post.side_effect = call_sequence
         adapter = TelegraphAPIAdapter()
         adapter.publish(PAYLOAD, mode="publish", config=Config())
@@ -290,7 +290,7 @@ def test_concurrent_bootstrap_creates_only_one_account(isolated_config_dir):
             errors.append(exc)
 
     with patch(
-        "backlink_publisher.publishing.adapters.telegraph_api.requests.post",
+        "backlink_publisher.publishing.adapters.telegraph_api.http_post",
         side_effect=_post_router,
     ):
         threads = [threading.Thread(target=worker) for _ in range(4)]
