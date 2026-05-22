@@ -63,7 +63,7 @@ def _open_new_story_in_brave(wait_secs: int = 12) -> tuple[str, str, str]:
 
     IDs are kept as strings — Brave's AppleScript `id` property returns TEXT,
     not integer. Comparing a text id with an integer literal always evaluates
-    to false, which caused _resolve_tab to fail even when the tab existed.
+    to false, which caused id-based tab lookups to fail even when the tab existed.
     """
     script = f"""
 tell application "Brave Browser"
@@ -98,75 +98,111 @@ end tell
     return parts[0], parts[1], parts[2]
 
 
-def _resolve_tab(win_id: str, tab_id: str) -> tuple[int, int]:
-    """Resolve stable (win_id, tab_id) → current positional (win_idx, tab_idx).
+_TAB_GONE_SENTINEL = "__BP_TAB_GONE__"
 
-    Compares IDs as strings — Brave returns TEXT from id properties, so
-    `id of w is {int}` always fails with type mismatch. Must use string cast.
-    """
-    script = f"""
+
+def _tab_gone_error(win_id: str, tab_id: str) -> ExternalServiceError:
+    return ExternalServiceError(
+        f"Tab (win_id={win_id}, tab_id={tab_id}) no longer exists in Brave."
+    )
+
+
+def _get_tab_url(win_id: str, tab_id: str) -> str:
+    """Read URL of (win_id, tab_id) atomically — no positional index, no race."""
+    script = f'''
 tell application "Brave Browser"
-    set wIdx to 0
+    set theURL to "{_TAB_GONE_SENTINEL}"
     repeat with w in windows
-        set wIdx to wIdx + 1
+        if (id of w as string) is "{win_id}" then
+            repeat with t in tabs of w
+                if (id of t as string) is "{tab_id}" then
+                    set theURL to URL of t
+                    exit repeat
+                end if
+            end repeat
+            exit repeat
+        end if
+    end repeat
+    return theURL
+end tell
+'''
+    result = _run_applescript(script, timeout=10)
+    if result == _TAB_GONE_SENTINEL:
+        raise _tab_gone_error(win_id, tab_id)
+    return result
+
+
+def _focus_tab(win_id: str, tab_id: str) -> None:
+    """Bring Brave + our window forward and activate our tab — atomic resolve+act.
+
+    The previous implementation resolved (win_id, tab_id) → positional
+    (win_idx, tab_idx) in one AppleScript call, then issued a *second*
+    AppleScript using those positions. Any tab opening/closing between the
+    two calls shifted indices and triggered errAEIllegalIndex (-1719). Now
+    the resolve and the action happen inside a single `tell` block, so
+    Brave's AppleScript engine evaluates them against one consistent
+    snapshot of the tab list.
+    """
+    script = f'''
+tell application "Brave Browser"
+    activate
+    set foundIdx to 0
+    set foundWin to missing value
+    repeat with w in windows
         if (id of w as string) is "{win_id}" then
             set tIdx to 0
             repeat with t in tabs of w
                 set tIdx to tIdx + 1
                 if (id of t as string) is "{tab_id}" then
-                    return (wIdx as string) & "," & (tIdx as string)
+                    set foundIdx to tIdx
+                    set foundWin to w
+                    exit repeat
                 end if
             end repeat
+            exit repeat
         end if
     end repeat
-    return ""
-end tell
-"""
-    result = _run_applescript(script, timeout=10)
-    if not result or "," not in result:
-        raise ExternalServiceError(
-            f"Tab (win_id={win_id}, tab_id={tab_id}) no longer exists in Brave."
-        )
-    parts = result.split(",")
-    return int(parts[0]), int(parts[1])
-
-
-def _get_tab_url(win_id: str, tab_id: str) -> str:
-    win_idx, tab_idx = _resolve_tab(win_id, tab_id)
-    script = f"""
-tell application "Brave Browser"
-    return URL of tab {tab_idx} of window {win_idx}
-end tell
-"""
-    return _run_applescript(script, timeout=10)
-
-
-def _focus_tab(win_id: str, tab_id: str) -> None:
-    """Bring Brave forward, put our window in front, make our tab active."""
-    win_idx, tab_idx = _resolve_tab(win_id, tab_id)
-    script = f"""
-tell application "Brave Browser"
-    activate
-    set targetWin to window {win_idx}
-    set index of targetWin to 1
-    set active tab index of targetWin to {tab_idx}
+    if foundIdx is 0 then return "{_TAB_GONE_SENTINEL}"
+    set index of foundWin to 1
+    set active tab index of foundWin to foundIdx
+    return "OK"
 end tell
 delay 0.3
-"""
-    _run_applescript(script, timeout=10)
+'''
+    result = _run_applescript(script, timeout=10)
+    if result == _TAB_GONE_SENTINEL:
+        raise _tab_gone_error(win_id, tab_id)
 
 
 def _tab_js(win_id: str, tab_id: str, js: str) -> str:
-    """Execute JavaScript in our specific tab."""
-    win_idx, tab_idx = _resolve_tab(win_id, tab_id)
+    """Execute JS in (win_id, tab_id) atomically.
+
+    `tab whose id is X` filters by stable id inside the same `tell` block,
+    so there is no window between resolution and execution where another
+    tab can open/close and shift positional indices.
+    """
     escaped = js.replace("\\", "\\\\").replace('"', '\\"')
     script = f'''
 tell application "Brave Browser"
-    set result to execute (tab {tab_idx} of window {win_idx}) javascript "{escaped}"
-    return result
+    set theResult to "{_TAB_GONE_SENTINEL}"
+    repeat with w in windows
+        if (id of w as string) is "{win_id}" then
+            repeat with t in tabs of w
+                if (id of t as string) is "{tab_id}" then
+                    set theResult to (execute t javascript "{escaped}")
+                    exit repeat
+                end if
+            end repeat
+            exit repeat
+        end if
+    end repeat
+    return theResult
 end tell
 '''
-    return _run_applescript(script, timeout=30)
+    result = _run_applescript(script, timeout=30)
+    if result == _TAB_GONE_SENTINEL:
+        raise _tab_gone_error(win_id, tab_id)
+    return result
 
 
 def _set_clipboard(text: str) -> None:
