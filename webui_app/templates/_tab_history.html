@@ -68,7 +68,7 @@
 
                             {% if item.error %}
                             <div style="margin-top:6px;font-size:12px;color:var(--danger);background:#fee2e2;padding:6px 10px;border-radius:6px;">
-                                <i class="bi bi-exclamation-triangle me-1"></i>{{ item.error[:200] }}
+                                <i class="bi bi-exclamation-triangle me-1"></i><span style="white-space:pre-wrap;">{{ item.error[:800] }}</span>
                             </div>
                             {% endif %}
                             {% if item.get('error_class') == 'content_rejected' %}
@@ -252,7 +252,7 @@
                             {% endif %}
                             {% if item.error %}
                             <div style="margin-top:6px;font-size:12px;color:var(--danger);background:#fee2e2;padding:6px 10px;border-radius:6px;">
-                                <i class="bi bi-exclamation-triangle me-1"></i>{{ item.error[:200] }}
+                                <i class="bi bi-exclamation-triangle me-1"></i><span style="white-space:pre-wrap;">{{ item.error[:800] }}</span>
                             </div>
                             {% endif %}
                             {% if item.get('error_class') == 'content_rejected' %}

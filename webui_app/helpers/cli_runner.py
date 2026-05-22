@@ -4,12 +4,57 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
 from backlink_publisher.content import fetch as content_fetch
 
 from .url_meta import _is_fetch_verify_disabled
+
+
+# Matches the 5-line config_echo banner emitted by every CLI entrypoint:
+#   [<cli>] effective config:
+#     config:    <path>
+#     env:       <names or (none)>
+#     platforms: <names or (none)>
+#     sha:       <16hex>
+# Followed optionally by `<cli>: run_id=<id>`. Removing both unmasks the real
+# diagnostic line, which would otherwise be hidden by [:200] truncation in
+# downstream displays (banner + run_id ≈ 210 chars on a typical config).
+_BANNER_RE = re.compile(
+    r"^\[[a-z0-9_-]+\]\s+effective\s+config:\s*\n"
+    r"\s*config:\s+\S.*\n"
+    r"\s*env:\s+\S.*\n"
+    r"\s*platforms:\s+\S.*\n"
+    r"\s*sha:\s+\S.*\n"
+    r"(?:[a-z0-9_-]+:\s+run_id=\S+\s*\n)?",
+    re.MULTILINE,
+)
+
+
+def strip_cli_diagnostic_banner(stderr: str) -> str:
+    """Remove the config_echo banner + optional ``run_id`` line from stderr.
+
+    The banner is diagnostic, not an error — but when stderr gets repurposed
+    as an "error message" in publish-history or the WebUI red div, the banner
+    eats the first ~200 chars of the [:200] preview and hides the real cause.
+    Strip it so the actual ImportError / AuthExpiredError / etc. surfaces.
+
+    Returns the cleaned stderr. If the banner WAS the entire stderr (no real
+    error followed), returns a brief explicit sentinel so the operator knows
+    the CLI exited without a diagnostic line — rather than the misleading
+    full-banner echo that looked like an error.
+    """
+    if not stderr:
+        return stderr
+    cleaned, n = _BANNER_RE.subn("", stderr, count=1)
+    cleaned = cleaned.lstrip("\n").rstrip()
+    if n and not cleaned:
+        return "(CLI exited without an error message; check the WebUI log file for the full diagnostic)"
+    if cleaned:
+        return cleaned
+    return stderr.strip()
 
 
 def _parse_lines(raw: str) -> list[str]:
