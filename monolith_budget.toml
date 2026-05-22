@@ -48,3 +48,7 @@ rationale = "_handle_init (173 lines) + its exclusive helpers (_build_routine_ve
 [files."src/backlink_publisher/cli/plan_check.py"]
 ceiling = 620
 rationale = "Plan-claims drift gate CLI (Plan 2026-05-19-009). SLOC 572 at seed across three layers landed across Units 1-3: schema (frontmatter parser, 4 named exceptions, SHA format check, R11b filename-date lock), git resolution (FETCH_HEAD freshness + path/sha checks with stderr classification), and CLI wiring (argparse, exit-code dispatch 0/2/7/8, --json + human formatters, RECON log lines). D1 chose a flat single-file CLI mirroring report_anchors.py + footprint.py precedent; package split is YAGNI until a second consumer emerges. Ceiling 620 gives 48-SLOC headroom for minor accretion (e.g., a future --strict-fetch flag or symbols claim type)."
+
+[files."src/backlink_publisher/cli/validate_backlinks.py"]
+ceiling = 200
+rationale = "_enhance_payload (101 lines) + its exclusive helpers (_HrefCollector, _extract_hrefs_from_html, _check_main_domain_in_html, _resolve_branded_pool, _nfc_normalize_in_place, _detect_row_body_language) extracted to _validate_payload.py (2026-05-22). validate_backlinks.py dropped from 323 to 168 SLOC — holds _row_field_text, re-exports from _validate_payload, and main() only. Ceiling 200 = round_up_to_10(168+30)."
