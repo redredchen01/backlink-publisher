@@ -14,10 +14,8 @@ from .types import (
     MediumOAuthConfig,
     ThreeUrlConfig,
     GhpagesConfig,
-    HashnodeConfig,
     MastodonConfig,
     VelogConfig,
-    WriteAsConfig,
 )
 
 if sys.version_info >= (3, 11):
@@ -180,24 +178,6 @@ def load_config(path: Path | None = None) -> Config:
             ),
         )
 
-    hashnode_section = data.get("hashnode")
-    hashnode: HashnodeConfig | None = None
-    if hashnode_section is not None:
-        # PAT lives in hashnode-token.json (SEC-3) — only routing fields here.
-        hashnode = HashnodeConfig(
-            publication_id=str(hashnode_section.get("publication_id", "")),
-            host=str(hashnode_section.get("host", "")),
-        )
-
-    writeas_section = data.get("writeas")
-    writeas: WriteAsConfig | None = None
-    if writeas_section is not None:
-        # Login-issued token lives in writeas-token.json (SEC-3).
-        writeas = WriteAsConfig(
-            collection_alias=str(writeas_section.get("collection_alias", "")),
-            api_base=str(writeas_section.get("api_base", "https://write.as/api")),
-        )
-
     mastodon_section = data.get("mastodon")
     mastodon: MastodonConfig | None = None
     if mastodon_section is not None:
@@ -222,8 +202,6 @@ def load_config(path: Path | None = None) -> Config:
         anchor_alarm=anchor_alarm,
         velog=velog,
         ghpages=ghpages,
-        hashnode=hashnode,
-        writeas=writeas,
         mastodon=mastodon,
         image_gen=image_gen,
     )

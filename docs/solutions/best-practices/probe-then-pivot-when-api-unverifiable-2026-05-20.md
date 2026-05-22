@@ -47,18 +47,17 @@ Before writing the upload logic, probe the API:
 5. **Add a regression guard**: `test_<adapter>_has_embed_banner_attribute` that asserts the method exists AND returns `None` for the dummy artifact. This locks in the pivot decision against accidental flips back to upload mode.
 
 ```python
-# publishing/adapters/hashnode.py (illustrative, post-pivot shape)
+# publishing/adapters/<adapter>.py (illustrative, post-pivot shape)
 def embed_banner(self, artifact_path: str, alt: str) -> str | None:
-    # Probe history (2026-05-20): introspection 200 + schema enumerated,
-    # no upload mutation. Pro-only Storyblok integration paywalled
-    # 2026-05-13. Pivoted to dispatcher source_url fallback.
+    # Probe history: introspection 200 + schema enumerated,
+    # no upload mutation found. Pivoted to dispatcher source_url fallback.
     return None
 ```
 
 ```python
-# tests/test_hashnode_adapter.py
-def test_hashnode_has_embed_banner_attribute():
-    adapter = HashnodeAdapter(...)
+# tests/test_<adapter>.py
+def test_adapter_has_embed_banner_attribute():
+    adapter = <Adapter>(...)
     assert hasattr(adapter, "embed_banner")
     assert adapter.embed_banner("/tmp/x.png", "alt") is None
 ```

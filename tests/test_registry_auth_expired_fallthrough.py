@@ -27,8 +27,6 @@ Channels NOT covered here:
     not in CHANNELS, so ``AuthExpiredError(channel='telegraph')``
     would itself raise UsageError. The fix still benefits any future
     re-introduction.
-  - hashnode: browser adapter ships in plan-016 Unit 3, not yet
-    in the chain at the time of this PR.
 """
 
 from __future__ import annotations

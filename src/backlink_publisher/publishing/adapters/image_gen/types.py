@@ -16,7 +16,7 @@ class BannerArtifact:
     ``source_url`` is the provider-hosted URL when the endpoint
     returned one (``data[].url`` mode), else ``None`` (``data[].b64_json``
     mode).  Carriers without their own media-upload API (e.g.
-    ``writeas``) can fall back to embedding ``source_url`` as a hot
+    ``telegraph``) can fall back to embedding ``source_url`` as a hot
     link with the caveat that the upstream CDN's TTL may rot the
     older backlinks.
 

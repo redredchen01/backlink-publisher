@@ -200,7 +200,7 @@ def test_banner_source_url_emitted_for_url_mode_response(isolated, tmp_path):
     """R12 (Plan 2026-05-20-004 Unit 1): when the image-gen provider
     returns a ``url`` (not ``b64_json``), that URL flows through to
     the JSONL ``banner.source_url`` field so the publish-time
-    dispatcher can use it as a Medium-/writeas-style fallback."""
+    dispatcher can use it as a Medium-style fallback."""
     _seed_config_with_image_gen(isolated)
     _seed_token(isolated)
     seeds = _seed_input(tmp_path)

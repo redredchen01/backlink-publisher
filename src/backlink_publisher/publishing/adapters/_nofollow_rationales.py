@@ -11,17 +11,6 @@ not adapters/__init__.py.
 from __future__ import annotations
 
 NOFOLLOW_RATIONALES: dict[str, str] = {
-    "hashnode": (
-        "Hashnode GraphQL API moved behind a paid subscription on "
-        "2026-05-13 — HashnodeAPIAdapter therefore raises DependencyError "
-        "for free-tier operators and the chain falls through to "
-        "BrowserPublishDispatcher (Plan 2026-05-21-001 Unit 3), which "
-        "drives the Web editor at hashnode.com/new and bypasses the "
-        "paywall. dofollow stays False pending live link_attr_verifier "
-        "measurement — Hashnode injects rel=nofollow on outbound links "
-        "for unverified accounts. Pro-account operators retain the API "
-        "path without code changes."
-    ),
     "devto": (
         "Dev.to applies rel=\"nofollow ugc\" to outbound links since "
         "~2022 per platform policy; every external <a> is decorated "

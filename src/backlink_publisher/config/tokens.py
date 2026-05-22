@@ -26,8 +26,6 @@ def snapshot_token_revs() -> dict[str, int]:
         ("blogger", "blogger-token.json"),
         ("medium", "medium-token.json"),
         ("ghpages", "ghpages-token.json"),
-        ("hashnode", "hashnode-token.json"),
-        ("writeas", "writeas-token.json"),
         ("notion", "notion-token.json"),
         ("devto", "devto-token.json"),
     ]:
@@ -92,25 +90,6 @@ def save_ghpages_token(data: dict[str, Any], path: Path | None = None) -> None:
     """Save GitHub Pages PAT dict to JSON file with mode 0600."""
     _save_token(data, path, "ghpages-token.json")
 
-
-def load_hashnode_token(path: Path | None = None) -> dict[str, Any] | None:
-    """Load Hashnode PAT JSON ({token: "..."}). Returns None if missing."""
-    return _load_token(path, "hashnode-token.json")
-
-
-def save_hashnode_token(data: dict[str, Any], path: Path | None = None) -> None:
-    """Save Hashnode PAT dict to JSON file with mode 0600."""
-    _save_token(data, path, "hashnode-token.json")
-
-
-def load_writeas_token(path: Path | None = None) -> dict[str, Any] | None:
-    """Load Write.as login-issued token JSON ({token: "..."})."""
-    return _load_token(path, "writeas-token.json")
-
-
-def save_writeas_token(data: dict[str, Any], path: Path | None = None) -> None:
-    """Save Write.as token dict to JSON file with mode 0600."""
-    _save_token(data, path, "writeas-token.json")
 
 
 def load_notion_token(path: Path | None = None) -> dict[str, Any] | None:

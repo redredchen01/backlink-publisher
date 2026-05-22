@@ -156,13 +156,11 @@ class TestSettingsRenderWithCards:
     def test_settings_chrome_publish_channels_exposed_after_unit4c(self, client):
         # Units 4b/4c shipped devto + mastodon as chrome-publish channels —
         # both must appear in the binding dashboard. wpcom permanently rejected;
-        # writeas retired to HIDDEN_FROM_UI — both must stay absent.
+        # All retired channels absent from token paste page.
         resp = client.get("/settings")
         assert b'channel-devto' in resp.data
         assert b'channel-mastodon' in resp.data
         assert b'channel-wpcom' not in resp.data
-        assert b'channel-writeas' not in resp.data
-        assert b'token-paste-writeas' not in resp.data
 
     def test_settings_page_includes_notion_card(self, client):
         resp = client.get("/settings")

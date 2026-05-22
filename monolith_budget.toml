@@ -38,8 +38,8 @@ ceiling = 580
 rationale = "U4 read-side projector (SLOC 548 at seed): flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until U5 inline-flush seam reveals a real boundary. Re-evaluate when U7 bp-events-rebuild bootstrap reuses the reducer entry points."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
-ceiling = 720
-rationale = "Registry + re-export hub. Nofollow rationale strings extracted to _nofollow_rationales.py (2026-05-22), dropping from 726 to 691 SLOC. Ceiling lowered 750→720 = round_up_to_10(691+30). New nofollow adapters add a one-line _R['key'] reference here and a string entry in _nofollow_rationales.py; bump ceiling in the same PR."
+ceiling = 530
+rationale = "Registry + re-export hub. Hashnode platform fully removed (2026-05-22): deleted register() + imports + verify_adapter_setup branch + _verify_hashnode_live(), dropping from 602 to 498 SLOC (write.as was removed earlier in the same session). Ceiling 530 = round_up_to_10(498+30). New nofollow adapters add a one-line _R['key'] reference here and a string entry in _nofollow_rationales.py; bump ceiling in the same PR."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
 ceiling = 465

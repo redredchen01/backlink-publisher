@@ -32,15 +32,13 @@ from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
 from .devto_api import DevtoAPIAdapter
-from .hashnode import HashnodeAPIAdapter
-from .instant_web import TelegraphCdpAdapter, WriteAsCdpAdapter
+from .instant_web import TelegraphCdpAdapter
 from .medium_api import MediumAPIAdapter
 from .medium_brave import MediumBraveAdapter
 from .medium_browser import MediumBrowserAdapter
 from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
-from .writeas import WriteAsAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
 # RECIPES["velog"] before the registration line below references it.
@@ -49,7 +47,6 @@ from .writeas import WriteAsAPIAdapter
 # from API path propagates without fall-through, per registry contract).
 from ..browser_publish import BrowserPublishDispatcher
 from ..browser_publish.recipes import velog as _velog_recipe  # noqa: F401
-from ..browser_publish.recipes import hashnode as _hashnode_recipe  # noqa: F401
 from ..browser_publish.recipes import devto as _devto_recipe  # noqa: F401
 from ..browser_publish.recipes import mastodon as _mastodon_recipe  # noqa: F401
 from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
@@ -61,10 +58,9 @@ from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
 # ``False`` and ``"uncertain"`` additionally require ``rationale=`` of
 # ≥80 stripped chars (R3, mirrors ``monolith_budget.toml`` discipline).
 #
-# CDP adapters (``TelegraphCdpAdapter`` / ``WriteAsCdpAdapter``) are
-# imported from ``instant_web.py`` so the module is callable from
-# regression tests on this branch, but they are NOT added to the
-# dispatch chain yet — that wiring ships with Plan 001
+# ``TelegraphCdpAdapter`` is imported from ``instant_web.py`` so the
+# module is callable from regression tests on this branch, but it is
+# NOT added to the dispatch chain yet — that wiring ships with Plan 001
 # (PR #141 chrome-cdp-multi-channel-publish) which is still open.
 register("blogger", BloggerAPIAdapter, dofollow=True)
 register(
@@ -82,14 +78,6 @@ register(
     dofollow=True,
 )
 register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
-register(
-    "hashnode",
-    HashnodeAPIAdapter,
-    BrowserPublishDispatcher.for_channel("hashnode"),
-    dofollow=False,
-    rationale=_R["hashnode"],
-)
-register("writeas", WriteAsAPIAdapter, dofollow=True)
 register(
     "devto",
     DevtoAPIAdapter,
@@ -230,42 +218,6 @@ def verify_adapter_setup(
             )
         return
 
-    if platform == "hashnode":
-        if config.hashnode is None or not config.hashnode.publication_id:
-            raise DependencyError(
-                "Hashnode config missing. Add [hashnode] publication_id=\"<id>\" "
-                "to ~/.config/backlink-publisher/config.toml"
-            )
-        if not config.hashnode_token_path.exists():
-            raise DependencyError(
-                "Hashnode PAT not stored. Write "
-                f"{{\"token\": \"<pat>\"}} to {config.hashnode_token_path} "
-                "(chmod 600). Generate at hashnode.com/settings/developer."
-            )
-        return
-
-    if platform == "writeas":
-        # Offline verify mirrors the API-adapter contract (config + token);
-        # WriteAsCdpAdapter's `available()` only checks for a Chrome binary,
-        # so short-circuiting on it would let a machine with Chrome but no
-        # writeas-token pass verify and crash at publish-time when the
-        # dispatch chain falls through to WriteAsAPIAdapter without a
-        # token. The CDP adapter is still registered in the chain and
-        # remains tryable by the dispatcher; verify gates on the
-        # API-path prerequisites that the chain ultimately depends on.
-        if config.writeas is None:
-            raise DependencyError(
-                "Write.as config missing. Add [writeas] section to "
-                "~/.config/backlink-publisher/config.toml"
-            )
-        if not config.writeas_token_path.exists():
-            raise DependencyError(
-                "Write.as token not stored. Write "
-                f"{{\"token\": \"<access_token>\"}} to {config.writeas_token_path} "
-                "(chmod 600). Obtain via POST /api/auth/login or writeas-login CLI."
-            )
-        return
-
     if platform == "notion":
         if not NotionAPIAdapter.available(config):
             raise DependencyError(
@@ -324,12 +276,6 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
 
     if platform == "velog":
         return _verify_velog_live(config)
-
-    if platform == "hashnode":
-        return _verify_hashnode_live(config)
-
-    if platform == "writeas":
-        return _verify_writeas_live(config)
 
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
     # than fake-green. Per-adapter live impls (Medium /me) land in follow-up PRs.
@@ -743,217 +689,6 @@ def _verify_velog_live(config: Config) -> VerifyResult:
         )
 
     identity = current_user.get("username") or current_user.get("display_name")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
-    )
-
-
-_HASHNODE_VERIFY_TIMEOUT_S = 5
-
-
-def _verify_hashnode_live(config: Config) -> VerifyResult:
-    """POST ``query { me { ... } }`` to confirm the PAT is still valid.
-
-    Plan 2026-05-19-006 Unit 8 — first-class live verify built in with
-    the adapter (same model as ghpages Unit 7).
-
-    Strict read-only: ``hashnode-token.json`` is never mutated. The PAT
-    is bearer-equivalent (server-side rotation only) so the adapter has
-    nothing to write back. Token rotation is the operator's job
-    (regenerate at hashnode.com/settings/developer).
-
-    Status mapping:
-      - 200 + ``data.me`` non-null → ``ok``, identity = username, dofollow=True
-        (Hashnode is confirmed dofollow on canonical post URLs)
-      - 200 + ``errors`` only       → ``token_expired`` when the message
-        mentions auth/unauthorized; otherwise ``never``
-      - 401                          → ``token_expired``
-      - ``requests.Timeout``         → ``timeout``
-      - other (4xx/5xx/connection/parse) → ``never`` with blocker text
-    """
-    import requests
-    from .hashnode import HASHNODE_API, ME_QUERY, _required_headers, _load_token
-
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
-
-    try:
-        resp = requests.post(
-            HASHNODE_API,
-            headers=_required_headers(token),
-            json={"query": ME_QUERY},
-            timeout=_HASHNODE_VERIFY_TIMEOUT_S,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"hashnode /me timed out after {_HASHNODE_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"hashnode network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "Hashnode PAT rejected (HTTP 401) — regenerate at "
-                "hashnode.com/settings/developer and re-save to hashnode-token.json"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode /me returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Hashnode returned non-JSON response"],
-        )
-
-    me = ((body or {}).get("data") or {}).get("me")
-    if me is None:
-        # GraphQL errors-only response. Classify by message content.
-        errors = body.get("errors") or []
-        msg = (errors[0].get("message") if errors else "") or "unknown"
-        lowered = msg.lower()
-        if any(k in lowered for k in ("unauthorized", "auth", "invalid token")):
-            return VerifyResult(
-                ok=False,
-                last_verify_result="token_expired",
-                blockers=[f"Hashnode auth error: {msg}"],
-            )
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode GraphQL error: {msg}"],
-        )
-
-    identity = me.get("username") or me.get("name")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
-    )
-
-
-_WRITEAS_VERIFY_TIMEOUT_S = 5
-
-
-def _verify_writeas_live(config: Config) -> VerifyResult:
-    """GET ``/api/me`` to confirm the stored token still works.
-
-    Plan 2026-05-19-006 Unit 9 — replaces the stub for writeas. Reads
-    the token via the adapter's standard ``_load_token`` helper.
-
-    Strict read-only: ``writeas-token.json`` is never mutated. Write.as
-    tokens are revoked on operator logout (or on server policy) — verify
-    never rotates the token, that's a re-login concern.
-
-    Status mapping:
-      - 200 + ``data`` non-null → ``ok``, identity = username, dofollow=True
-        (Write.as collection-bound posts confirmed dofollow per Phase 3 roster)
-      - 401 → ``token_expired`` (signals operator must re-login)
-      - ``requests.Timeout`` → ``timeout``
-      - other (4xx/5xx/connection/parse) → ``never``
-    """
-    import requests
-    from .writeas import _load_token, _required_headers, DEFAULT_API_BASE
-
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
-
-    wa_cfg = config.writeas
-    api_base = (wa_cfg.api_base if wa_cfg else DEFAULT_API_BASE) or DEFAULT_API_BASE
-
-    try:
-        resp = requests.get(
-            f"{api_base.rstrip('/')}/me",
-            headers=_required_headers(token),
-            timeout=_WRITEAS_VERIFY_TIMEOUT_S,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"write.as /me timed out after {_WRITEAS_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"write.as network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "Write.as token rejected (HTTP 401) — re-login at write.as "
-                "and re-save to writeas-token.json"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Write.as /me returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Write.as returned non-JSON response"],
-        )
-
-    data = (body or {}).get("data")
-    if not data:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Write.as /me returned empty data"],
-        )
-
-    identity = data.get("username") or data.get("email")
     return VerifyResult(
         ok=True,
         identity=identity,

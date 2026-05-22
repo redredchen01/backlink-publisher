@@ -1131,7 +1131,7 @@ class TestChannelBindingAPIRoutes:
 
 class TestTokenPasteRoutes:
     """Plan 006 follow-up (2026-05-20) — token-paste binding for ghpages.
-    (writeas was retired from the WebUI on 2026-05-20.) Full lifecycle in
+    (Legacy retired channel.) Full lifecycle in
     tests/test_webui_token_paste.py; this smoke test satisfies the
     route-coverage gate below."""
 

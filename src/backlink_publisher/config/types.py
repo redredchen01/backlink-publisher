@@ -163,27 +163,6 @@ class GhpagesConfig:
 
 
 @dataclass(frozen=True)
-class HashnodeConfig:
-    """Hashnode adapter configuration.
-
-    Token is stored in a separate 0600 JSON file (``hashnode-token.json``),
-    NOT in ``config.toml`` (same SEC-3 reasoning as ghpages). This dataclass
-    holds only the non-secret routing fields.
-
-    ``publication_id`` — the operator's Hashnode publication ID (UUID-like
-                         string). Required for the publishPost mutation —
-                         posts always belong to a publication, never a user
-                         directly. Operators look this up via the Hashnode
-                         dashboard URL or the ``me { publications }`` query.
-    ``host`` — optional custom domain. When empty, posts publish under the
-               default ``<subdomain>.hashnode.dev`` URL.
-    """
-
-    publication_id: str = ""
-    host: str = ""
-
-
-@dataclass(frozen=True)
 class MastodonConfig:
     """Mastodon adapter configuration — single Fediverse instance.
 
@@ -199,27 +178,6 @@ class MastodonConfig:
     """
 
     instance_url: str = ""
-
-
-@dataclass(frozen=True)
-class WriteAsConfig:
-    """Write.as adapter configuration.
-
-    Auth token (issued by Write.as on operator login) is stored in a
-    separate 0600 JSON file (``writeas-token.json``), NOT in
-    ``config.toml`` (same SEC-3 reasoning as ghpages/hashnode).
-
-    ``collection_alias`` — when set, posts are bound to the operator's
-                            named collection at
-                            ``https://write.as/{collection_alias}/{slug}``.
-                            When empty, posts publish to the user's
-                            default (per-user) feed.
-    ``api_base`` — overridable for self-hosted WriteFreely instances.
-                   Default is the canonical ``https://write.as/api``.
-    """
-
-    collection_alias: str = ""
-    api_base: str = "https://write.as/api"
 
 
 @dataclass(frozen=True)
@@ -372,20 +330,6 @@ class Config:
     absent. The PAT lives in a separate 0600 file at
     ``~/.config/backlink-publisher/ghpages-token.json`` (per SEC-3)."""
 
-    hashnode: HashnodeConfig | None = None
-    """Hashnode adapter config (publication_id / host).
-
-    Populated from ``[hashnode]`` in config.toml. ``None`` when section is
-    absent. The PAT lives in a separate 0600 file at
-    ``~/.config/backlink-publisher/hashnode-token.json`` (per SEC-3)."""
-
-    writeas: WriteAsConfig | None = None
-    """Write.as adapter config (collection_alias / api_base).
-
-    Populated from ``[writeas]`` in config.toml. ``None`` when section is
-    absent. The login-issued token lives in a separate 0600 file at
-    ``~/.config/backlink-publisher/writeas-token.json`` (per SEC-3)."""
-
     mastodon: "MastodonConfig | None" = None
     """Mastodon adapter config (single Fediverse instance URL).
 
@@ -427,16 +371,6 @@ class Config:
     def ghpages_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "ghpages-token.json"
-
-    @property
-    def hashnode_token_path(self) -> Path:
-        from backlink_publisher import config as _cfg
-        return _cfg._config_dir() / "hashnode-token.json"
-
-    @property
-    def writeas_token_path(self) -> Path:
-        from backlink_publisher import config as _cfg
-        return _cfg._config_dir() / "writeas-token.json"
 
     @property
     def notion_token_path(self) -> Path:

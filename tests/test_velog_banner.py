@@ -1,7 +1,7 @@
 """Tests for ``VelogGraphQLAdapter.embed_banner``.
 
 Plan: docs/plans/2026-05-20-004-feat-per-adapter-embed-banner-plan.md
-Unit 5 — Velog returns ``None`` (writeas-style explicit opt-in to
+Unit 5 — Velog returns ``None`` (explicit opt-in to
 source_url fallback) because the plan's ``image_upload_url`` mutation
 was not present in velog's GraphQL schema at probe time
 (2026-05-20).  Introspection disabled; direct probes of likely

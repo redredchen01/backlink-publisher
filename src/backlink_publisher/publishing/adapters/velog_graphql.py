@@ -443,7 +443,7 @@ class VelogGraphQLAdapter(Publisher):
         unverified upload path would land dead code raising
         ``BannerUploadError`` on every row in non-strict mode.
 
-        Returning ``None`` is the writeas-style "considered but can't"
+        Returning ``None`` is the explicit "considered but can't"
         signal (distinct from Medium's not-implementing): dispatcher
         prepends ``![alt](source_url)`` from ``banner.source_url`` and
         emits ``banner.source_url_fallback`` with ``reason=

@@ -11,10 +11,9 @@ time the package is imported -- typically when a CLI subprocess spawned
 by the WebUI tries to load the package, so the operator sees a publish
 failure rather than a CI red.
 
-This happened in the wild on 2026-05-21: ``WriteAsConfig`` was deleted
-from ``backlink_publisher.config.types`` but ``backlink_publisher.config.__init__``
-still ``from .types import (..., WriteAsConfig)``. Hashnode publish
-crashed with ``ImportError: cannot import name 'WriteAsConfig'``.
+This happened in the wild on 2026-05-21: a config type was deleted
+from its module but the star-import still referenced it. Publish
+crashed with ``ImportError``.
 
 The test uses a subprocess so cached imports in the test runner can't
 mask a stale ``__all__`` entry, and it also asserts the *companion*
