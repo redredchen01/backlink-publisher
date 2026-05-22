@@ -45,7 +45,6 @@ class TestExponentialBackoff:
 
 
 class TestExecutePublishTask:
-    SAMPLE_PLAN = json.dumps({"title": "Test", "content_markdown": "# Hello", "links": [], "tags": [], "platform": "blogger", "language": "zh-CN"})
     SAMPLE_PUBLISH = json.dumps({"title": "Test", "published_url": "https://x.com/post", "status": "published", "target_url": "https://example.com/"})
 
     @patch("webui_app.scheduler.run_pipe")
@@ -54,7 +53,6 @@ class TestExecutePublishTask:
     def test_happy_path_full_pipeline(self, mock_qs, mock_history, mock_run_pipe):
         from webui_app.scheduler import _execute_publish_task
 
-        s = self.SAMPLE_PLAN
         plan_out = json.dumps({"title": "A", "content_markdown": "# A", "links": [], "tags": [], "platform": "blogger", "language": "zh-CN"})
         mock_run_pipe.side_effect = [
             {"stdout": plan_out + "\n", "stderr": ""},
