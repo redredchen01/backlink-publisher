@@ -3,8 +3,25 @@
                background:#f3f4f6;
                min-height:100vh; padding:20px; }
         .navbar { background:var(--primary); color:white; padding:16px 24px;
-                  border-radius:12px; margin-bottom:24px; box-shadow:0 4px 16px rgba(79,70,229,.15); }
+                  border-radius:12px; margin-bottom:0; box-shadow:0 4px 16px rgba(79,70,229,.15); }
         .navbar h1 { font-size:1.4rem; font-weight:700; margin:0; color:white; }
+        /* F30 — sticky section tab bar */
+        .settings-tab-bar {
+            position:sticky; top:0; z-index:200;
+            display:flex; gap:4px;
+            background:#fff; border-bottom:2px solid #e5e7eb;
+            padding:8px 20px 0; margin-bottom:24px;
+            box-shadow:0 2px 8px rgba(0,0,0,.06);
+        }
+        .stab-link {
+            display:inline-block; padding:8px 14px 10px;
+            font-size:13px; font-weight:500; color:#6b7280;
+            text-decoration:none; border-bottom:3px solid transparent;
+            margin-bottom:-2px; border-radius:4px 4px 0 0;
+            transition:color .15s;
+        }
+        .stab-link:hover { color:var(--primary); }
+        .stab-link.active { color:var(--primary); border-bottom-color:var(--primary); }
         .card { border:none; border-radius:12px; box-shadow:0 2px 8px rgba(0,0,0,.08);
                 margin-bottom:20px; }
         .card-header { background:#f8fafc;
