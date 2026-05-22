@@ -202,27 +202,6 @@ class MastodonConfig:
 
 
 @dataclass(frozen=True)
-class WriteAsConfig:
-    """Write.as adapter configuration.
-
-    Auth token (issued by Write.as on operator login) is stored in a
-    separate 0600 JSON file (``writeas-token.json``), NOT in
-    ``config.toml`` (same SEC-3 reasoning as ghpages/hashnode).
-
-    ``collection_alias`` — when set, posts are bound to the operator's
-                            named collection at
-                            ``https://write.as/{collection_alias}/{slug}``.
-                            When empty, posts publish to the user's
-                            default (per-user) feed.
-    ``api_base`` — overridable for self-hosted WriteFreely instances.
-                   Default is the canonical ``https://write.as/api``.
-    """
-
-    collection_alias: str = ""
-    api_base: str = "https://write.as/api"
-
-
-@dataclass(frozen=True)
 class VelogConfig:
     """Velog adapter configuration.
 
@@ -379,13 +358,6 @@ class Config:
     absent. The PAT lives in a separate 0600 file at
     ``~/.config/backlink-publisher/hashnode-token.json`` (per SEC-3)."""
 
-    writeas: WriteAsConfig | None = None
-    """Write.as adapter config (collection_alias / api_base).
-
-    Populated from ``[writeas]`` in config.toml. ``None`` when section is
-    absent. The login-issued token lives in a separate 0600 file at
-    ``~/.config/backlink-publisher/writeas-token.json`` (per SEC-3)."""
-
     mastodon: "MastodonConfig | None" = None
     """Mastodon adapter config (single Fediverse instance URL).
 
@@ -432,11 +404,6 @@ class Config:
     def hashnode_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "hashnode-token.json"
-
-    @property
-    def writeas_token_path(self) -> Path:
-        from backlink_publisher import config as _cfg
-        return _cfg._config_dir() / "writeas-token.json"
 
     @property
     def notion_token_path(self) -> Path:

@@ -39,7 +39,6 @@ class TestPublishBackendClassification:
         [
             ("blogger", "api"),       # single API entry
             ("telegraph", "api"),     # single API entry
-            ("writeas", "api"),       # single API entry
             ("ghpages", "api"),       # single API entry
             ("medium", "api"),        # 3 API entries
             ("velog", "api+chrome"),  # API primary + chrome fallback

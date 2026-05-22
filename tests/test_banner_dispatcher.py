@@ -128,7 +128,7 @@ class TestEmbedReturnsNone:
             adapter,
             banner=_banner(source_url="https://upstream.cdn/img.png"),
             body=_ORIGINAL_BODY,
-            platform="writeas",
+            platform="telegraph",
             strict=False,
             emit=emit,
         )
@@ -138,7 +138,7 @@ class TestEmbedReturnsNone:
         assert emit.events == [
             (
                 "banner.source_url_fallback",
-                {"platform": "writeas", "reason": "adapter_returned_none"},
+                {"platform": "telegraph", "reason": "adapter_returned_none"},
             )
         ]
 
@@ -150,7 +150,7 @@ class TestEmbedReturnsNone:
             adapter,
             banner=_banner(),  # no source_url key at all
             body=_ORIGINAL_BODY,
-            platform="writeas",
+            platform="telegraph",
             strict=False,
             emit=emit,
         )
@@ -167,7 +167,7 @@ class TestEmbedReturnsNone:
             adapter,
             banner=_banner(source_url=None),
             body=_ORIGINAL_BODY,
-            platform="writeas",
+            platform="telegraph",
             strict=False,
             emit=emit,
         )

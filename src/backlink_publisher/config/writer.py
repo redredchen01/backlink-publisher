@@ -17,7 +17,6 @@ from .types import (
     HashnodeConfig,
     MastodonConfig,
     ThreeUrlConfig,
-    WriteAsConfig,
 )
 
 if sys.version_info >= (3, 11):
@@ -49,7 +48,6 @@ def save_config(
     target_three_url: dict[str, ThreeUrlConfig] | None = None,
     ghpages_config: GhpagesConfig | None = None,
     hashnode_config: HashnodeConfig | None = None,
-    writeas_config: WriteAsConfig | None = None,
     mastodon_config: MastodonConfig | None = None,
 ) -> None:
     config_path = path or (_resolve_config_dir() / "config.toml")
@@ -92,7 +90,6 @@ def save_config(
 
     ghpages_cfg = ghpages_config if ghpages_config is not None else existing.ghpages
     hashnode_cfg = hashnode_config if hashnode_config is not None else existing.hashnode
-    writeas_cfg = writeas_config if writeas_config is not None else existing.writeas
     mastodon_cfg = mastodon_config if mastodon_config is not None else existing.mastodon
 
     lines: list[str] = []
@@ -154,12 +151,6 @@ def save_config(
         lines.append("[hashnode]")
         lines.append(f"publication_id = {_toml_str(hashnode_cfg.publication_id)}")
         lines.append(f"host           = {_toml_str(hashnode_cfg.host)}")
-        lines.append("")
-
-    if writeas_cfg is not None:
-        lines.append("[writeas]")
-        lines.append(f"collection_alias = {_toml_str(writeas_cfg.collection_alias)}")
-        lines.append(f"api_base         = {_toml_str(writeas_cfg.api_base)}")
         lines.append("")
 
     if mastodon_cfg is not None:

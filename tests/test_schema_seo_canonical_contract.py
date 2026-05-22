@@ -147,7 +147,7 @@ class TestCanonicalUrlFormat:
     @pytest.mark.parametrize(
         "injection_payload",
         [
-            # 1. HTML body injection — script tag break-out (Blogger/Writeas)
+            # 1. HTML body injection — script tag break-out
             '"><script>alert(1)</script>',
             # 2. HTML attribute escape — break out of href="..."
             '" onerror="alert(1)',

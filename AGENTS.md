@@ -86,7 +86,7 @@ Plan 2026-05-20-006 deleted the legacy `sys.meta_path` bridge. The old flat name
 | `backlink_publisher.content.*` | `fetch`, `scraper`, `themed_gen`, `body` |
 | `backlink_publisher.linkcheck.*` | `http`, `language`, `verify` |
 | `backlink_publisher._util.*` | `errors`, `io`, `jsonl`, `logger`, `markdown`, `url`, `net_safety`, `secrets`, `url_derive` |
-| `backlink_publisher.publishing.adapters.*` | All publisher adapters (blogger, medium, telegraph, ghpages, hashnode, writeas, …) |
+| `backlink_publisher.publishing.adapters.*` | All publisher adapters (blogger, medium, telegraph, ghpages, hashnode, …) |
 
 Note: `from backlink_publisher.linkcheck import check_url` still works — `linkcheck` is a real package whose `__init__.py` does `from .http import *`, independent of the deleted bridge.
 
@@ -347,7 +347,6 @@ Per-platform upload contract:
 - **hashnode**: `uploadMedia` GraphQL mutation (the existing hashnode adapter already maintains a GraphQL client).
 - **velog**: `image_upload_url` GraphQL mutation returns a presigned URL → PUT bytes.
 - **ghpages**: commit the file to `<repo>/assets/banners/<sha>.<ext>` and return the `raw.githubusercontent.com` URL.
-- **writeas**: NO media-upload API → `embed_banner` returns `None` (explicit opt-in to the source-URL fallback branch; semantically distinct from Medium-style not-implementing).
 - **blogger**: data-URI base64 inline (probe-confirmed at Unit 3 time) or the legacy `images.insert` backdoor if still alive.
 
 **Medium does NOT implement `embed_banner`.** All three Medium fallback adapters (`MediumAPIAdapter`, `MediumBraveAdapter`, `MediumBrowserAdapter`) omit the method so the dispatcher reaches the not-opted-in branch and prepends `![alt](source_url)`. Medium's publish-time auto-rehost then snapshots the upstream provider's CDN URL into Medium's own image hosting, yielding a Medium-hosted URL in the published post without us writing platform-specific upload logic for each Medium fallback. **Verification required at implementer time**: confirm Medium auto-rehost still works in the current year by publishing one row to a scratch Medium account and inspecting the rendered `<img src>`. If auto-rehost is dead, Medium needs its own upload path or banners must be explicitly disabled for Medium.

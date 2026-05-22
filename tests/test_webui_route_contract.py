@@ -1061,7 +1061,7 @@ class TestQueueDashboardRoutes:
     def test_ce_queue_task_returns_json(self, client):
         resp = client.post(
             "/ce:queue-task",
-            data={"platform": "medium", "urls_json": '["https://example.com/"]'},
+            data={"platform": "medium", "urls_json": '["https://real-site.com/"]'},
         )
         assert resp.status_code == 200
         assert resp.is_json
@@ -1131,9 +1131,8 @@ class TestChannelBindingAPIRoutes:
 
 class TestTokenPasteRoutes:
     """Plan 006 follow-up (2026-05-20) — token-paste binding for ghpages.
-    (writeas was retired from the WebUI on 2026-05-20.) Full lifecycle in
-    tests/test_webui_token_paste.py; this smoke test satisfies the
-    route-coverage gate below."""
+    Full lifecycle in tests/test_webui_token_paste.py; this smoke test satisfies
+    the route-coverage gate below."""
 
     def test_post_save_channel_token_missing_csrf_returns_403(self, csrf_client):
         resp = csrf_client.post("/settings/save-channel-token")

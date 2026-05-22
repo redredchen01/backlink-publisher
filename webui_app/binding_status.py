@@ -36,7 +36,7 @@ from backlink_publisher.config import Config
 # `test_settings_dashboard_rendering.py`. Adapter source stays in the repo
 # so CLI / tests continue to exercise the registry pattern; only the UI
 # surface is suppressed.
-HIDDEN_FROM_UI: frozenset[str] = frozenset({"writeas"})
+HIDDEN_FROM_UI: frozenset[str] = frozenset()
 
 # Dofollow / nofollow knowledge moved to publishing.registry (Plan 2026-05-20-009
 # U5): per-adapter declaration via register(..., dofollow=...) is the single

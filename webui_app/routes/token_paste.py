@@ -2,16 +2,10 @@
 
 Single POST endpoint that writes a `<channel>-token.json` (0600) for the
 PAT-based publishing platforms whose binding is "paste a token", not OAuth
-or browser-mediated. Currently allowlists ghpages only — writeas was
-retired from the WebUI on 2026-05-20 because the channel is unusable in
-practice. hashnode lives in the same code path but is excluded from the
-allowlist until its dofollow status can be empirically verified — once
-confirmed, add it here.
-
-The route is deliberately narrow: it writes the token file only. Routing
-config fields (repo / collection_alias / api_base / etc) are operator-edited
-in config.toml directly — extending save_config to round-trip those
-sections is a separate, larger change tracked as a follow-up.
+or browser-mediated. The route is deliberately narrow: it writes the token
+file only. Routing config fields are operator-edited in config.toml directly
+— extending save_config to round-trip those sections is a separate, larger
+change tracked as a follow-up.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Tests for ``HashnodeAPIAdapter.embed_banner``.
 
 Plan: docs/plans/2026-05-20-004-feat-per-adapter-embed-banner-plan.md
-Unit 4 — Hashnode returns ``None`` (writeas-style explicit opt-in to
+Unit 4 — Hashnode returns ``None`` (explicit opt-in to
 source_url fallback) because the free GraphQL API was retired on
 2026-05-13 (see hashnode.com/changelog/2026-05-13-graphql-api-paid-access).
 
