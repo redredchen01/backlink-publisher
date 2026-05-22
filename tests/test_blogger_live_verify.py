@@ -90,7 +90,7 @@ class TestBloggerLiveVerifyHappyPath:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_response("My Blog Owner")):
+        with patch("backlink_publisher.http.get", return_value=_ok_response("My Blog Owner")):
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert isinstance(result, VerifyResult)
@@ -107,7 +107,7 @@ class TestBloggerLiveVerifyHappyPath:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_response()) as mock_get:
+        with patch("backlink_publisher.http.get", return_value=_ok_response()) as mock_get:
             verify_adapter_setup("blogger", cfg, mode="live")
 
         assert mock_get.call_count == 1
@@ -126,7 +126,7 @@ class TestBloggerLiveVerify401:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_http_status_response(401)):
+        with patch("backlink_publisher.http.get", return_value=_http_status_response(401)):
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert result.ok is False
@@ -143,7 +143,7 @@ class TestBloggerLiveVerifyTimeout:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", side_effect=requests.Timeout("slow")):
+        with patch("backlink_publisher.http.get", side_effect=requests.Timeout("slow")):
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert result.ok is False
@@ -155,7 +155,7 @@ class TestBloggerLiveVerifyTimeout:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", side_effect=requests.ConnectionError("dns")):
+        with patch("backlink_publisher.http.get", side_effect=requests.ConnectionError("dns")):
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert result.ok is False
@@ -172,7 +172,7 @@ class TestBloggerLiveVerifyOtherStatus:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_http_status_response(status)):
+        with patch("backlink_publisher.http.get", return_value=_http_status_response(status)):
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert result.ok is False
@@ -191,7 +191,7 @@ class TestBloggerLiveVerifyNoToken:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get") as mock_get:
+        with patch("backlink_publisher.http.get") as mock_get:
             result = verify_adapter_setup("blogger", cfg, mode="live")
 
         assert result.ok is False
@@ -206,7 +206,7 @@ class TestBloggerLiveVerifyNoToken:
         _seed_blogger_token(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get") as mock_get:
+        with patch("backlink_publisher.http.get") as mock_get:
             result = verify_adapter_setup("blogger", Config(), mode="live")
 
         assert result.ok is False
@@ -231,7 +231,7 @@ class TestBloggerLiveVerifyReadOnly:
         cfg = _config_with_blogger_oauth(tmp_path)
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
-        with patch("requests.get", return_value=_ok_response()):
+        with patch("backlink_publisher.http.get", return_value=_ok_response()):
             verify_adapter_setup("blogger", cfg, mode="live")
 
         assert token_file.stat().st_mtime == mtime_before, (
@@ -250,7 +250,7 @@ class TestBloggerLiveVerifyReadOnly:
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
         with (
-            patch("requests.get", return_value=_http_status_response(401)),
+            patch("backlink_publisher.http.get", return_value=_http_status_response(401)),
             patch("backlink_publisher.config.save_blogger_token") as mock_save,
         ):
             result = verify_adapter_setup("blogger", cfg, mode="live")
@@ -269,7 +269,7 @@ class TestBloggerLiveVerifyReadOnly:
         from backlink_publisher.publishing.adapters import verify_adapter_setup
 
         with (
-            patch("requests.get", return_value=_ok_response()),
+            patch("backlink_publisher.http.get", return_value=_ok_response()),
             patch(
                 "backlink_publisher.publishing.adapters.blogger_api._build_credentials"
             ) as mock_build,
