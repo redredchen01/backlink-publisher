@@ -42,8 +42,8 @@ ceiling = 750
 rationale = "Registry + re-export hub (SLOC 726 post Plan 2026-05-21-003 Phase 2): added Notion + DevtoAPIAdapter API-primary registrations with per-platform nofollow rationale blocks, growing from 676 to 726. Ceiling raised 700→750 to cover Plan 003 Phase 2 platform expansion (Units 6+7). Decomposition target: extract per-channel nofollow rationale strings to _rationales.py when the adapter count stabilises."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
-ceiling = 750
-rationale = "Phase 0 seal CLI (SLOC 720): 7 subcommands (init, show, verify, reseal, verify-seal-hooks, bootstrap, runbook), allowlist parsing, XDG-helper plumbing, worktree-policy lib call. Post-G1 refactor will split runbook and CI-helper into sub-modules; ceiling 750 holds 30-SLOC headroom until then."
+ceiling = 465
+rationale = "_handle_init (173 lines) + its exclusive helpers (_build_routine_verdict_ref, _build_manual_verdict_ref, _get_main_sha, _post_push_verify, _InitError, _NotesPushDidNotLand) extracted to _seal_init.py (2026-05-22). phase0_seal.py dropped from 720 to 449 SLOC — 7 subcommand dispatch layer + _handle_{show,verify,reseal,verify_hook} + shared helpers remain. Ceiling 465 = round_up_to_10(435+30)."
 
 [files."src/backlink_publisher/cli/plan_check.py"]
 ceiling = 620
