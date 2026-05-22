@@ -626,16 +626,19 @@ class TestPipelineRoutes:
         body = resp.data.decode("utf-8", errors="ignore")
         assert 'name="target_language"' in body, "batch form missing target_language"
 
-        # 2. Template source uses the shared include in both form contexts
-        template_path = (
-            Path(__file__).resolve().parents[1]
-            / "webui_app" / "templates" / "index.html"
+        # 2. Template source uses the shared include in both form contexts.
+        # Plan B Unit 2 moved the tab panes to _tab_*.html partials, so
+        # _shared_config_selects.html now appears in _tab_new.html and
+        # _tab_batch.html rather than index.html directly.
+        templates_dir = Path(__file__).resolve().parents[1] / "webui_app" / "templates"
+        all_template_src = "".join(
+            p.read_text(encoding="utf-8")
+            for p in templates_dir.glob("*.html")
         )
-        src = template_path.read_text(encoding="utf-8")
-        # count include statements — must appear exactly twice
-        assert src.count("_shared_config_selects.html") == 2, (
-            "expected 2 includes of _shared_config_selects.html, got "
-            + str(src.count("_shared_config_selects.html"))
+        count = all_template_src.count("_shared_config_selects.html")
+        assert count == 2, (
+            "expected 2 includes of _shared_config_selects.html across templates, got "
+            + str(count)
         )
 
         # 3. The partial itself is on disk

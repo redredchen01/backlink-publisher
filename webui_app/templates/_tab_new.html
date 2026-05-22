@@ -1,0 +1,407 @@
+            <div class="tab-pane fade {% if not history_active %}show active{% endif %}" id="newPanel" role="tabpanel">
+
+        {# Determine current step based on pipeline state #}
+        {% if published %}
+          {% set cur_step = 4 %}
+        {% elif validated %}
+          {% set cur_step = 4 %}
+        {% elif plans %}
+          {% set cur_step = 3 %}
+        {% elif config and config.target_url %}
+          {% set cur_step = 2 %}
+        {% else %}
+          {% set cur_step = 1 %}
+        {% endif %}
+
+        <div class="step-bar">
+            {% for step_num, step_name in [(1,'输入网址'),(2,'生成文章'),(3,'验证内容'),(4,'发布')] %}
+              {% if step_num < cur_step %}
+                {% set cls = 'done' %}
+              {% elif step_num == cur_step %}
+                {% set cls = 'active' %}
+              {% else %}
+                {% set cls = 'pending' %}
+              {% endif %}
+              <div class="step-item">
+                  <div class="step-circle {{ cls }}">
+                      {% if cls == 'done' %}<i class="bi bi-check-lg"></i>{% else %}{{ step_num }}{% endif %}
+                  </div>
+                  <span class="step-label {{ cls }}">{{ step_name }}</span>
+              </div>
+              {% if not loop.last %}
+                {% if step_num < cur_step %}
+                  <div class="step-connector done"></div>
+                {% elif step_num == cur_step %}
+                  <div class="step-connector active"></div>
+                {% else %}
+                  <div class="step-connector pending"></div>
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-globe2 me-2"></i>输入目标网站连结
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/ce:plan">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <!-- Plan 2026-05-20-002 Unit 5 — paste-to-derive input.
+                         Nameless: browser never submits this field, so /ce:plan
+                         handler's extras-loop (key.startswith('url_')) cannot
+                         capture it under any future field-rename. -->
+                    <div class="url-derive-row" style="margin-bottom: 0.75rem;">
+                        <input type="text" id="derive_source" class="form-control form-control-lg"
+                               placeholder="粘贴作品页或类别页 URL，自动派生三栏 (例: https://51acgs.com/comic/6)"
+                               aria-label="粘贴 URL 自动派生">
+                        <small class="text-muted">粘贴一个 URL → 自动填入下方三栏并验证</small>
+                    </div>
+
+                    <div class="url-input-group">
+                        <div class="url-item">
+                            <span class="url-badge main">主</span>
+                            <input type="url" class="form-control" name="main_url" placeholder="https://example.com/" value="{{ target_url }}" aria-describedby="status-main" required>
+                        </div>
+                        <span class="verify-status text-muted" id="status-main" role="status" aria-live="polite" aria-atomic="true"></span>
+                        <div class="url-field-help">主网域 — 要做反向链接的根目标 (必填)</div>
+
+                        <div class="url-item">
+                            <span class="url-badge cat">类</span>
+                            <input type="url" class="form-control" name="category_url" placeholder="https://example.com/category" value="{{ category_url|default('') }}" aria-describedby="status-category">
+                        </div>
+                        <span class="verify-status text-muted" id="status-category" role="status" aria-live="polite" aria-atomic="true"></span>
+                        <div class="url-field-help">分类页 — 站内分类/列表页 (可选；填了会自动写入 config)</div>
+
+                        <div class="url-item">
+                            <span class="url-badge work">漫</span>
+                            <input type="url" class="form-control" name="work_url" placeholder="https://example.com/article/1" value="{{ work_url|default('') }}" aria-describedby="status-work">
+                        </div>
+                        <span class="verify-status text-muted" id="status-work" role="status" aria-live="polite" aria-atomic="true"></span>
+                        <div class="url-field-help">漫画页 — 站内具体作品/内容页 (可选；填了会触发自动升级到 ThreeUrlConfig)</div>
+
+                        {% for extra_url in extra_urls %}
+                        <div class="url-item">
+                            <span class="url-badge extra">附</span>
+                            <input type="url" class="form-control" name="url_{{ loop.index }}" placeholder="附加连结 (分页/分类/相关文章)" value="{{ extra_url }}">
+                        </div>
+                        {% endfor %}
+                        <div class="url-item">
+                            <span class="url-badge extra">+</span>
+                            <input type="url" class="form-control" name="url_new" placeholder="+ 添加更多附加连结..." style="border: 2px dashed #ccc;">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-search me-2"></i>分析连结
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        {% if config %}
+        <div class="card">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                <span><i class="bi bi-gear me-2"></i>配置参数</span>
+                {% if profiles %}
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="profilePicker" class="form-select form-select-sm" style="width:180px;"
+                            onchange="loadProfile(this.value)">
+                        <option value="">— 载入配置 —</option>
+                        {% for p in profiles %}
+                        <option value="{{ loop.index0 }}">{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/ce:generate" id="configForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="urls_json" value="{{ urls_json }}">
+                    
+                    {# Plan 013 U2 — shared 4-select partial (platform/language/url_mode/publish_mode). #}
+                    {% include '_shared_config_selects.html' %}
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">文章标题 (留空自动生成)</label>
+                            <input type="text" class="form-control" name="custom_title" value="{{ config.custom_title }}" placeholder="自定义标题">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">自定义标签 (逗号分隔)</label>
+                            <input type="text" class="form-control" name="custom_tags" value="{{ config.custom_tags }}" placeholder="留空则自动生成">
+                            {% if config.suggested_anchors %}
+                            <div class="mt-2">
+                                <small class="text-muted">锚文本建议:</small>
+                                {% for anchor in config.suggested_anchors %}
+                                <span class="badge bg-light text-dark border cursor-pointer" onclick="document.getElementsByName('custom_tags')[0].value += '{{ anchor }},'" style="cursor:pointer; margin-right: 5px;">{{ anchor }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label"><i class="bi bi-download me-1"></i>抓取 TDK</label>
+                        <select class="form-select" name="fetch_tdk" style="max-width: 300px;">
+                            <option value="no" {% if config.fetch_tdk == 'no' %}selected{% endif %}>不抓取</option>
+                            <option value="yes" {% if config.fetch_tdk != 'no' %}selected{% endif %}>抓取目标站 TDK (是)</option>
+                        </select>
+                        <small class="text-muted">自动抓取目标网站的 Title/Description/Keywords 作为文章参考</small>
+                    </div>
+                    
+                    {% if meta_info %}
+                    <div class="info-box">
+                        <h6><i class="bi bi-info-circle me-1"></i>抓取的页面信息</h6>
+                        {% for m in meta_info %}
+                        <div style="background: white;padding: 12px;margin: 8px 0;border-radius: 8px;">
+                            <strong style="color: var(--primary);">{{ m.url|truncate(60) }}</strong><br>
+                            <small style="color: var(--secondary);">{{ m.title[:80] }}</small>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-rocket me-2"></i>生成发布计划
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                onclick="saveProfilePrompt()" title="将当前设置保存为命名配置">
+                            <i class="bi bi-bookmark-plus me-1"></i>保存为配置
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if plans %}
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-check-circle me-2"></i>生成完成 - 预览
+            </div>
+            <div class="card-body">
+                {% for plan in plans_list %}
+                <div class="result-card">
+                    <h5><i class="bi bi-file-text me-2"></i>{{ plan.title }}</h5>
+                    
+                    <div class="meta-info">
+                        <span><i class="bi bi-translate me-1"></i>{{ plan.language }}</span>
+                        <span><i class="bi bi-globe me-1"></i>{{ plan.platform }}</span>
+                        <span><i class="bi bi-text-center me-1"></i>{{ plan.content_markdown|length }} 字</span>
+                        <span class="link-count-badge {% if plan.links|length >= 6 and plan.links|length <= 8 %}valid{% else %}invalid{% endif %}">
+                            <i class="bi bi-link-45deg"></i> {{ plan.links|length }} 个外链
+                            {% if plan.links|length < 6 or plan.links|length > 8 %}
+                            <span style="font-size:11px;">⚠️ 需 6-8</span>
+                            {% endif %}
+                        </span>
+                        {% if plan.cover_image_warning %}
+                        <span class="badge bg-warning text-dark"
+                              data-bs-toggle="tooltip" data-bs-placement="bottom"
+                              title="{{ plan.cover_image_warning }}">
+                            <i class="bi bi-image-alt me-1"></i>封面降级
+                        </span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="tag-list">
+                        {% for tag in plan.tags %}<span class="tag-item">{{ tag }}</span>{% endfor %}
+                    </div>
+                    
+                    <details>
+                        <summary><i class="bi bi-eye me-1"></i>HTML 内容预览</summary>
+                        <div class="content-preview mt-3" id="preview-{{ loop.index0 }}">
+{{ plan.content_markdown | render_markdown | safe }}
+                        </div>
+                    </details>
+
+                    <!-- Inline Editor -->
+                    <div style="margin-top:10px;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                onclick="toggleEditor({{ loop.index0 }})"
+                                id="editBtn-{{ loop.index0 }}">
+                            <i class="bi bi-pencil me-1"></i>编辑内容
+                        </button>
+                        <div id="editor-{{ loop.index0 }}" style="display:none;margin-top:10px;">
+                            <textarea id="editorArea-{{ loop.index0 }}"
+                                      rows="12" class="form-control"
+                                      style="font-family:monospace;font-size:12px;line-height:1.6;"
+                                      onkeyup="markDirty({{ loop.index0 }})">{{ plan.content_markdown }}</textarea>
+                            <div style="margin-top:8px;display:flex;gap:8px;">
+                                <button type="button" class="btn btn-sm btn-primary"
+                                        onclick="saveEdit({{ loop.index0 }})">
+                                    <i class="bi bi-check2 me-1"></i>确认修改
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        onclick="cancelEdit({{ loop.index0 }}, {{ plan.content_markdown | tojson }})">
+                                    <i class="bi bi-x me-1"></i>取消
+                                </button>
+                                <small id="editStatus-{{ loop.index0 }}" class="text-muted" style="line-height:30px;"></small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <details>
+                        <summary><i class="bi bi-link-45deg me-1"></i>外链列表 ({{ plan.links|length }} 个)</summary>
+                        <table class="link-table">
+                            <thead>
+                                <tr>
+                                    <th>类型</th>
+                                    <th>锚文本</th>
+                                    <th>网址</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for link in plan.links %}
+                                <tr>
+                                    <td><span class="type-badge {% if link.required %}required{% else %}optional{% endif %}">{% if link.required %}必要{% else %}辅助{% endif %}</span></td>
+                                    <td>{{ link.anchor }}</td>
+                                    <td><a href="{{ link.url }}" target="_blank" style="color: var(--primary);">{{ link.url|truncate(50) }}</a></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </details>
+                </div>
+                {% endfor %}
+                
+                <div class="btn-group-actions">
+                    <form method="POST" action="/ce:validate" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="plans" value="{{ plans }}">
+                        <button type="submit" class="btn btn-secondary">
+                            <i class="bi bi-check2-square me-2"></i>验证内容
+                        </button>
+                    </form>
+                    <form method="POST" action="/ce:publish" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="plans" value="{{ plans }}">
+                        <input type="hidden" name="platform" value="{{ config.platform }}">
+                        <div class="input-group" style="display:inline-flex;gap:0;">
+                            <select name="publish_mode" class="form-select" style="width:110px;border-radius:10px 0 0 10px;">
+                                <option value="draft">存草稿</option>
+                                <option value="publish">正式发布</option>
+                            </select>
+                            <button type="submit" class="btn btn-success" style="border-radius:0 10px 10px 0;">
+                                <i class="bi bi-upload me-2"></i>发布
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if validated %}
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-check-circle-fill me-2"></i>验证通过
+            </div>
+            <div class="card-body">
+                <div class="success-box mb-3">
+                    <i class="bi bi-check-circle me-2"></i>内容验证成功！
+                </div>
+                <form method="POST" action="/ce:publish">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="plans" value="{{ validated }}">
+                    <input type="hidden" name="platform" value="{{ config.platform }}">
+                    <div class="input-group" style="max-width:320px;">
+                        <select name="publish_mode" class="form-select" style="border-radius:10px 0 0 10px;">
+                            <option value="draft">存草稿</option>
+                            <option value="publish">正式发布</option>
+                        </select>
+                        <button type="submit" class="btn btn-success" style="border-radius:0 10px 10px 0;">
+                            <i class="bi bi-upload me-2"></i>发布到 {{ config.platform }}
+                        </button>
+                    </div>
+                    <div style="font-size:12px;color:#6b7280;margin-top:6px;">
+                        「存草稿」= 保存到平台草稿箱，「正式发布」= 立即公开上线
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if published or publish_state %}
+        {# publish_state ∈ {all_success, partial_success, all_failed}; defaults
+           to all_success when absent so legacy callers (passing only `published`)
+           keep the original green banner. #}
+        {% set _ps = publish_state or 'all_success' %}
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-trophy me-2"></i>发布结果
+            </div>
+            <div class="card-body">
+                {% if _ps == 'all_success' %}
+                <div class="success-box mb-3">
+                    <i class="bi bi-check-circle me-2"></i>
+                    发布成功！
+                </div>
+                {% elif _ps == 'partial_success' %}
+                <div class="success-box mb-3" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border-left-color:var(--warning);color:#92400e;">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    部分发布成功 ({{ n_ok }}/{{ n_total }})
+                </div>
+                {% if publish_error %}
+                <div class="error-box mb-3">{{ publish_error }}</div>
+                {% endif %}
+                {% else %}
+                <div class="error-box mb-3">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    发布失败{% if publish_error %}：{{ publish_error }}{% endif %}
+                </div>
+                {% endif %}
+                {% if publish_results %}
+                {% for r in publish_results %}
+                {% set article_url = r.published_url or r.draft_url %}
+                <div class="result-card" style="border-left-color:{% if r.status == 'published' %}var(--success){% else %}var(--warning){% endif %};">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
+                        <div>
+                            <div style="font-weight:600;color:var(--dark);margin-bottom:6px;">{{ r.title }}</div>
+                            <span class="status-badge {% if r.status == 'published' %}success{% else %}pending{% endif %}">
+                                {% if r.status == 'published' %}<i class="bi bi-check-circle me-1"></i>已发布
+                                {% elif r.status == 'drafted' %}<i class="bi bi-clock me-1"></i>草稿
+                                {% else %}{{ r.status }}{% endif %}
+                            </span>
+                        </div>
+                        {% if article_url %}
+                        <a href="{{ article_url }}" target="_blank" rel="noopener"
+                           class="btn btn-success btn-sm" style="align-self:center;">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>查看文章
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% if article_url %}
+                    <div style="margin-top:10px;padding:8px 12px;background:#f9fafb;border-radius:6px;
+                                font-size:12px;word-break:break-all;border:1px solid #e5e7eb;">
+                        <i class="bi bi-link-45deg me-1" style="color:var(--primary);"></i>
+                        <a href="{{ article_url }}" target="_blank" rel="noopener"
+                           style="color:var(--primary);">{{ article_url }}</a>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% if published %}
+                <details style="margin-top:12px;">
+                    <summary style="font-size:12px;color:var(--secondary);cursor:pointer;">原始输出</summary>
+                    <pre class="content-preview mt-2" style="font-size:11px;">{{ published }}</pre>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="card">
+            <div class="card-header" style="background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);">
+                <i class="bi bi-exclamation-triangle me-2"></i>错误
+            </div>
+            <div class="card-body">
+                <div class="error-box">{{ error }}</div>
+            </div>
+        </div>
+        {% endif %}
+        
+            </div><!-- End newPanel tab -->
