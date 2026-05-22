@@ -104,7 +104,12 @@ def _dispatch_row(
     fetch_verify_enabled: bool = True,
 ) -> Iterator[dict[str, Any]]:
     three_url_cfg = get_three_url_config(config, row["main_domain"])
-    if three_url_cfg is not None:
+    target_language = row.get("target_language", row["language"])
+    # work_themed and zh_short only produce content in the site's native language;
+    # when the operator explicitly requests a different output language, fall through
+    # to long-form _generate_payload which respects target_language.
+    use_native_schedulers = target_language == row["language"]
+    if three_url_cfg is not None and use_native_schedulers:
         from backlink_publisher.cli.plan_backlinks import _plan_work_themed_row
         for payload in _plan_work_themed_row(row, three_url_cfg, count=work_count):
             _emit_link_count_recon(payload, branch="work_themed")
@@ -114,7 +119,7 @@ def _dispatch_row(
     payload: dict[str, Any] | None = None
     if (
         row["language"] == "zh-CN"
-        and row.get("target_language", "zh-CN") == "zh-CN"
+        and use_native_schedulers
         and _scheduler_enabled_for(config, row["main_domain"])
     ):
         from backlink_publisher.cli.plan_backlinks import _plan_zh_short_row

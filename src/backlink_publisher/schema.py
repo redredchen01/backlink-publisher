@@ -23,6 +23,7 @@ INPUT_OPTIONAL_FIELDS = {
     "extra_urls": list,
     "custom_title": str,
     "custom_tags": str,
+    "target_language": str,
 }
 
 #: Re-export from :mod:`backlink_publisher.linkcheck.language` for back-compat —
