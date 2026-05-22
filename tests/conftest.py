@@ -39,10 +39,9 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
     os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
     os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(cache_dir)
 
-    # Note: ``webui_store`` singletons are now ``_LazyStore`` proxies so
-    # they resolve their path from ``BACKLINK_PUBLISHER_CONFIG_DIR`` on
-    # first access.  No ``_refresh_paths()`` call is needed.
-    # (Plan C — webui-store-lazy-init)
+    # Note: ``webui_store`` singletons are now ``_LazyStore`` proxies
+    # (Plan 2026-05-22 P7 C1) so they resolve their path from the env
+    # var on first access.  No ``_refresh_paths()`` call is needed.
 
     yield
     if previous_config is None:
@@ -57,7 +56,7 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(autouse=True)
 def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch ``publish_backlinks.check_url`` at the consumer reference.
+    """Patch ``linkcheck.http.check_url`` at the definition site.
 
     Per ``feedback_test-autouse-verify-mock`` + the
     ``ci-test-isolation-failures-medium-brave-sleep-timeout-2026-05-13``
@@ -68,7 +67,7 @@ def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
     drive specific failure paths can re-patch within their own scope.
     """
     monkeypatch.setattr(
-        "backlink_publisher.cli.publish_backlinks.check_url",
+        "backlink_publisher.linkcheck.http.check_url",
         lambda _url: (True, None),
         raising=True,
     )

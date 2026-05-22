@@ -16,6 +16,7 @@ from .types import (
     GhpagesConfig,
     HashnodeConfig,
     MastodonConfig,
+    SaveConfigOverrides,
     ThreeUrlConfig,
     WriteAsConfig,
 )
@@ -52,7 +53,35 @@ def save_config(
     writeas_config: WriteAsConfig | None = None,
     mastodon_config: MastodonConfig | None = None,
 ) -> None:
-    config_path = path or (_resolve_config_dir() / "config.toml")
+    """Save config to TOML.  Legacy signature — new code SHOULD use
+    ``save_config_with_overrides(config, overrides=SaveConfigOverrides(...))``
+    instead for IDE-friendly parameter documentation.
+    """
+    overrides = SaveConfigOverrides(
+        path=path, extra_blogger_ids=extra_blogger_ids,
+        medium_token=medium_token, blogger_client_id=blogger_client_id,
+        blogger_client_secret=blogger_client_secret,
+        target_anchor_keywords=target_anchor_keywords,
+        target_three_url=target_three_url,
+        ghpages_config=ghpages_config, hashnode_config=hashnode_config,
+        writeas_config=writeas_config, mastodon_config=mastodon_config,
+    )
+    return _save_config_impl(config, overrides)
+
+
+def save_config_with_overrides(
+    config: "Config",
+    overrides: SaveConfigOverrides | None = None,
+) -> None:
+    """Save config with a typed overrides dataclass."""
+    return _save_config_impl(config, overrides or SaveConfigOverrides())
+
+
+def _save_config_impl(
+    config: "Config",
+    overrides: SaveConfigOverrides,
+) -> None:
+    config_path = overrides.path or (_resolve_config_dir() / "config.toml")
     config_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(config_path.parent, 0o700)
@@ -62,38 +91,38 @@ def save_config(
     existing = load_config(config_path)
 
     blog_ids: dict[str, str] = dict(config.blogger_blog_ids)
-    if extra_blogger_ids is None:
+    if overrides.extra_blogger_ids is None:
         for k, v in existing.blogger_blog_ids.items():
             if k not in blog_ids:
                 blog_ids[k] = v
-    elif extra_blogger_ids:
-        blog_ids.update(extra_blogger_ids)
+    elif overrides.extra_blogger_ids:
+        blog_ids.update(overrides.extra_blogger_ids)
 
-    client_id = blogger_client_id or (
+    client_id = overrides.blogger_client_id or (
         existing.blogger_oauth.client_id if existing.blogger_oauth else ""
     )
-    client_secret = blogger_client_secret or (
+    client_secret = overrides.blogger_client_secret or (
         existing.blogger_oauth.client_secret if existing.blogger_oauth else ""
     )
 
-    token = medium_token if medium_token is not None else (
+    token = overrides.medium_token if overrides.medium_token is not None else (
         existing.medium_integration_token or ""
     )
 
-    if target_anchor_keywords is None:
+    if overrides.target_anchor_keywords is None:
         kws_by_domain = dict(existing.target_anchor_keywords)
     else:
-        kws_by_domain = dict(target_anchor_keywords)
+        kws_by_domain = dict(overrides.target_anchor_keywords)
 
-    if target_three_url is None:
+    if overrides.target_three_url is None:
         three_url_by_domain = dict(existing.target_three_url)
     else:
-        three_url_by_domain = dict(target_three_url)
+        three_url_by_domain = dict(overrides.target_three_url)
 
-    ghpages_cfg = ghpages_config if ghpages_config is not None else existing.ghpages
-    hashnode_cfg = hashnode_config if hashnode_config is not None else existing.hashnode
-    writeas_cfg = writeas_config if writeas_config is not None else existing.writeas
-    mastodon_cfg = mastodon_config if mastodon_config is not None else existing.mastodon
+    ghpages_cfg = overrides.ghpages_config if overrides.ghpages_config is not None else existing.ghpages
+    hashnode_cfg = overrides.hashnode_config if overrides.hashnode_config is not None else existing.hashnode
+    writeas_cfg = overrides.writeas_config if overrides.writeas_config is not None else existing.writeas
+    mastodon_cfg = overrides.mastodon_config if overrides.mastodon_config is not None else existing.mastodon
 
     lines: list[str] = []
 

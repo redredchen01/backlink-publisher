@@ -1,8 +1,11 @@
 [console_scripts]
 bind-channel = backlink_publisher.cli.bind_channel:main
 footprint = backlink_publisher.cli.footprint:main
+frw-login = backlink_publisher.cli.frw_login:main
+medium-login = backlink_publisher.cli.medium_login:main
 phase0-seal = backlink_publisher.cli.phase0_seal:main
 plan-backlinks = backlink_publisher.cli.plan_backlinks:main
+plan-check = backlink_publisher.cli.plan_check:main
 publish-backlinks = backlink_publisher.cli.publish_backlinks:main
 report-anchors = backlink_publisher.cli.report_anchors:main
 validate-backlinks = backlink_publisher.cli.validate_backlinks:main

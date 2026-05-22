@@ -123,7 +123,7 @@ class TestClearToken:
         })
         assert resp.status_code == 302
         assert b"flash_type=success" in resp.data
-        assert "清除".encode() in resp.data
+        assert b"token+%E5%B7%B2%E6%B8%85%E9%99%A4" in resp.data or b"token%20%E5%B7%B2%E6%B8%85%E9%99%A4" in resp.data
         assert not token_file.exists()
 
     def test_clear_nonexistent_is_info(self, client, tmp_path):

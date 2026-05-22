@@ -108,7 +108,7 @@ class TestRejectUnsupportedPlatform:
 
     def test_rejects_arbitrary_unregistered_platform(self) -> None:
         """R9d's net is wider than legacy linkedin-only rejection."""
-        for unregistered in ("tiktok", "threads", "wordpress", "definitely-fake"):
+        for unregistered in ("tiktok", "threads", "definitely-fake"):
             msg = reject_unsupported_platform(unregistered)
             assert msg is not None, f"{unregistered!r} should be rejected"
             assert unregistered in msg

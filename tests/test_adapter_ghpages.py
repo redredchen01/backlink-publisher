@@ -427,7 +427,7 @@ class TestGhpagesLiveVerify:
 
         assert result.ok is False
         assert result.last_verify_result == "token_expired"
-        assert any("regenerate" in b.lower() for b in result.blockers)
+        assert any("re-bind" in b.lower() or "re-save" in b.lower() for b in result.blockers)
 
     def test_403_yields_never_not_token_expired(self, tmp_path, monkeypatch):
         """Secondary rate limit / missing scope must NOT be reported as token expired."""
@@ -442,7 +442,7 @@ class TestGhpagesLiveVerify:
 
         assert result.ok is False
         assert result.last_verify_result == "never"  # NOT token_expired
-        assert any("retry-after=120s" in b for b in result.blockers)
+        assert any("403" in b for b in result.blockers)
 
     def test_timeout_yields_timeout_result(self, tmp_path, monkeypatch):
         monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))

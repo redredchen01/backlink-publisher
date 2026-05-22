@@ -1,6 +1,73 @@
 import json
 import uuid
+import random
 from datetime import datetime, timedelta
+
+_MAX_BACKOFF_SECONDS = 3600
+
+def _exponential_backoff(retry_count: int) -> int:
+    """Calculate exponential backoff time with jitter."""
+    base = 5 * (2 ** retry_count)
+    return min(base + random.randint(0, 10), _MAX_BACKOFF_SECONDS)
+
+def _execute_publish_task(task: dict) -> dict:
+    """Execute a single publish task pipeline (Plan -> Validate -> Publish)."""
+    task_id = task['id']
+    _queue_store.update_task(task_id, {'status': 'processing'})
+    try:
+        config = task['config']
+        urls = task['urls']
+        if not urls:
+            raise ValueError("No URLs provided")
+        
+        platform = config.get('platform', 'medium')
+        language = config.get('target_language', 'zh-CN')
+        url_mode = config.get('url_mode', 'A')
+        publish_mode = config.get('publish_mode', 'draft')
+        
+        # 1. Plan
+        seed = {
+            'target_url': urls[0],
+            'platform': platform,
+            'language': language,
+            'url_mode': url_mode,
+            'extra_urls': urls[1:],
+            'custom_title': config.get('custom_title', ''),
+            'custom_tags': config.get('custom_tags', ''),
+        }
+        res_plan = run_pipe(['plan-backlinks'], json.dumps([seed]))
+        plans_jsonl = res_plan['stdout']
+        
+        # 2. Validate
+        run_pipe(['validate-backlinks'], plans_jsonl)
+        
+        # 3. Publish
+        cmd_pub = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
+        res_pub = run_pipe(cmd_pub, plans_jsonl)
+        
+        return {'status': 'success', 'completed_at': datetime.now().isoformat()}
+    except Exception as exc:
+        retry_count = task.get('retry_count', 0)
+        max_retries = task.get('max_retries', 3)
+        
+        stderr = str(exc)
+        backoff = _exponential_backoff(retry_count)
+        next_retry = datetime.now() + timedelta(seconds=backoff)
+        
+        if retry_count >= max_retries:
+            return {'status': 'failed', 'error': '已达最大重试次数'}
+        
+        if "429" in stderr or "Too Many Requests" in stderr:
+            error_msg = f'频率限制 (429)，将在 {next_retry.strftime("%H:%M")} 重试'
+        else:
+            error_msg = stderr
+            
+        return {
+            'status': 'failed',
+            'error': error_msg,
+            'retry_count': retry_count + 1,
+            'next_retry_at': next_retry.isoformat()
+        }
 
 from apscheduler.executors.pool import ThreadPoolExecutor as APSThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -33,50 +100,13 @@ def _process_queue_job() -> None:
     pending = [t for t in tasks if t.get('status') in ('pending', 'failed') 
                and (not t.get('next_retry_at') or datetime.fromisoformat(t['next_retry_at']) <= now)]
     
-    if not pending:
-        return
-
-    task = pending[0]
-    task_id = task['id']
-    _queue_store.update_task(task_id, {'status': 'processing'})
-
-    try:
-        config = task['config']
-        urls = task['urls']
-        target_url = urls[0] if urls else ''
-        
-        seed = {
-            'target_url': target_url,
-            'platform': config.get('platform', 'medium'),
-            'language': config.get('target_language', 'zh-CN'),
-            'url_mode': config.get('url_mode', 'A'),
-            'publish_mode': 'draft',
-            'custom_title': config.get('custom_title', ''),
-            'custom_tags': config.get('custom_tags', ''),
-            'extra_urls': urls[1:] if urls else [],
-        }
-        
-        run_pipe(['publish-backlinks'], json.dumps([seed]))
-        _queue_store.update_task(task_id, {
-            'status': 'success',
-            'completed_at': now.isoformat()
-        })
-    except Exception as exc:
-        # run_pipe raises on failure — capture error, detect 429 backoff
-        stderr = str(exc)
-        if "429" in stderr or "Too Many Requests" in stderr:
-            retry_delay = 300
-            next_retry = now + timedelta(seconds=retry_delay)
-            _queue_store.update_task(task_id, {
-                'status': 'failed',
-                'error': f'频率限制 (429)，将在 {next_retry.strftime("%H:%M")} 重试',
-                'next_retry_at': next_retry.isoformat()
-            })
-        else:
-            _queue_store.update_task(task_id, {
-                'status': 'failed',
-                'error': stderr or '发布失败'
-            })
+    for task in pending:
+        task_id = task['id']
+        try:
+            result = _execute_publish_task(task)
+            _queue_store.update_task(task_id, result)
+        except Exception as exc:
+            _queue_store.update_task(task_id, {'status': 'failed', 'error': str(exc)})
 
 
 def _publish_draft_job(item_id: str) -> None:

@@ -287,6 +287,45 @@ client_secret = "your-client-secret"
 # path_template = "_posts/{date}-{slug}.md"
 
 # ────────────────────────────────────────────────────────────
+# [wordpress] — WordPress.com adapter (Plan 2026-05-21-006)
+# ────────────────────────────────────────────────────────────
+# The bearer token does NOT live here — store it in a separate 0600 file at
+# ~/.config/backlink-publisher/wordpress-token.json (format: {"token": "<oauth2_bearer>"}).
+# Per SEC-3: TOML files get backed up / screenshotted / pushed to dotfile repos.
+# OAuth2 bearer tokens must never end up in TOML.
+#
+# Token setup (do this once):
+#   1. Create a web-application OAuth2 app at wordpress.com/developers/my-apps
+#      with scopes "auth" and "sites".  Copy the Bearer token.
+#   2. echo '{"token":"<paste>"}' > ~/.config/backlink-publisher/wordpress-token.json
+#   3. chmod 600 ~/.config/backlink-publisher/wordpress-token.json
+#
+# [wordpress]
+# site = "your-blog.wordpress.com"   # or just "your-blog" (auto-expands to your-blog.wordpress.com)
+
+# ────────────────────────────────────────────────────────────
+# [tumblr] — Tumblr adapter (Plan 2026-05-21-006)
+# ────────────────────────────────────────────────────────────
+# OAuth1a consumer credentials and per-user token pair.
+# Consumer key/secret go in config.toml (low-secret, not a bearer token).
+# Per-user OAuth token pair lives in tumblr-token.json (0600, SEC-3).
+#
+# Token setup (do this once):
+#   1. Register an app at https://www.tumblr.com/oauth/apps
+#      — callback URL can be http://localhost (not used; library-based OAuth1a).
+#   2. Fill consumer_key and consumer_secret below from the dashboard.
+#   3. Run the Tumblr OAuth1a user-authorization flow manually (or via follow-up
+#      bind-channel command when implemented), writing the OSVER/OUT secret pair
+#      to tumblr-token.json:
+#      echo '{"oauth_token":"<AT>","oauth_token_secret":"<AS>"}' > ~/.config/backlink-publisher/tumblr-token.json
+#   4. chmod 600 ~/.config/backlink-publisher/tumblr-token.json
+#
+# [tumblr]
+# blog_identifier  = "myblog.tumblr.com"   # the blog username dot tumblr-dot-com
+# consumer_key     = "your-consumer-key"   # from Tumblr developer console
+# consumer_secret  = "your-consumer-secret"
+
+# ────────────────────────────────────────────────────────────
 # [image_gen] — AI banner image generation (Plan 2026-05-20-001)
 # ────────────────────────────────────────────────────────────
 # When configured, plan-backlinks generates a 1200×630 OG banner per

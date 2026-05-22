@@ -33,7 +33,7 @@ Workspace root (not a git repo) holds `backlink-publisher/` (canonical) and `bp-
 
 ### WebUI
 
-Flask app at `webui_app/` (20 route modules, `create_app()` factory). State persistence at `webui_store/` — five module-level singletons in `webui_store/__init__.py` (`history_store`, `profiles_store`, `drafts_store`, `schedule_store`, `queue_store`) plus `channel_status_store` from the `channel_status` submodule. Launcher: `python webui.py`.
+Flask app at `webui_app/` (20 route modules, `create_app()` factory). State persistence at `webui_store/` — six module-level ``_LazyStore`` proxies (Plan 2026-05-22 P7 C1) that defer path resolution to first access: `history_store`, `profiles_store`, `drafts_store`, `schedule_store`, `queue_store` (from `webui_store/__init__.py`) plus `channel_status_store` (from `webui_store/channel_status.py`). Stores are also registered on Flask app as `current_app.extensions['webui_stores']` for app-scoped access. Launcher: `python webui.py`.
 
 App-level CSRF guard `_global_csrf_guard` (PR #143, `webui_app/__init__.py`) enforces a token on every POST/PUT/PATCH/DELETE. Tests opt out via `app.config['CSRF_ENABLED'] = False` (or the legacy `WTF_CSRF_ENABLED` flag — both honored). The `_check_csrf_or_abort` helper has a single production call site inside the global guard; PR #148 removed all inline per-route calls.
 

@@ -364,6 +364,122 @@ def test_language_matches_via_detection_pipeline_negative():
     assert language_matches(detected, "zh-CN") is False
 
 
+# ── publishing.adapters.link_attr_verifier._tag_has_nofollow ──────────────────
+
+
+def test_tag_has_nofollow_positive_when_rel_contains_nofollow():
+    """Property: <a> with rel attribute containing "nofollow" returns True."""
+    from backlink_publisher.publishing.adapters.link_attr_verifier import _tag_has_nofollow
+    assert _tag_has_nofollow('<a href="x" rel="nofollow">link</a>') is True
+    assert _tag_has_nofollow('<a rel="ugc nofollow" href="x">link</a>') is True
+    assert _tag_has_nofollow('<a rel="nofollow ugc noopener" href="x">link</a>') is True
+
+
+@given(
+    tag_text=st.text(alphabet="abcdefghijklmnopqrstuvwxyz ", min_size=3, max_size=30),
+)
+def test_tag_has_nofollow_negative_when_no_rel(tag_text):
+    """Property: <a> without rel attribute returns False."""
+    from backlink_publisher.publishing.adapters.link_attr_verifier import _tag_has_nofollow
+    html = f'<a href="https://x.com/{tag_text.strip()}">link</a>'
+    assert _tag_has_nofollow(html) is False
+
+
+@given(
+    pre=st.text(alphabet="abc", min_size=0, max_size=10),
+    post=st.text(alphabet="xyz", min_size=0, max_size=10),
+)
+def test_tag_has_nofollow_negative_when_substring(pre, post):
+    """Property: ``nofollowed`` or ``not-nofollow`` are NOT matched (token boundaries)."""
+    from backlink_publisher.publishing.adapters.link_attr_verifier import _tag_has_nofollow
+    rel_val = f"{pre}nofollow{post}"
+    if rel_val == "nofollow":
+        return  # skip degenerate case where pre+post produce exact "nofollow"
+    html = f'<a href="x" rel="{rel_val}">link</a>'
+    assert _tag_has_nofollow(html) is False, f"expected False for rel={rel_val!r}"
+
+
+@given(
+    prefix=st.text(alphabet=" ", min_size=0, max_size=3),
+    suffix=st.text(alphabet=" ", min_size=0, max_size=3),
+)
+def test_tag_has_nofollow_positive_case_insensitive(prefix, suffix):
+    """Property: case-insensitive — NOFOLLOW, NoFollow etc. all match."""
+    from backlink_publisher.publishing.adapters.link_attr_verifier import _tag_has_nofollow
+    for variant in ["NOFOLLOW", "nofollow", "NoFollow", "NOFOLLOW"]:
+        rel = f"{prefix}{variant}{suffix}".strip()
+        html = f'<a href="x" rel="{rel}">link</a>'
+        assert _tag_has_nofollow(html) is True, f"expected True for rel={rel!r}"
+
+
+# ── anchor.lang.check_anchor_language ────────────────────────────────────────
+
+
+@given(
+    text=st.text(
+        alphabet=st.characters(min_codepoint=0x4E00, max_codepoint=0x9FFF),
+        min_size=1, max_size=30,
+    ),
+)
+def test_check_zh_cn_accepts_cjk(text):
+    """Property: zh-CN accepts any text containing a CJK codepoint."""
+    from backlink_publisher.anchor.lang import _check_zh_cn
+    ok, reason = _check_zh_cn(text)
+    assert ok is True, f"expected CJK text {text!r} to pass, got {reason}"
+
+
+@given(
+    text=st.text(alphabet=st.characters(whitelist_categories=("Lu", "Ll")), min_size=1, max_size=20),
+)
+def test_check_zh_cn_rejects_latin_only(text):
+    """Property: zh-CN rejects text with no CJK codepoint."""
+    from backlink_publisher.anchor.lang import _check_zh_cn
+    ok, reason = _check_zh_cn(text)
+    assert ok is False, f"expected Latin text {text!r} to fail zh-CN"
+
+
+@given(
+    text=st.text(
+        alphabet=st.characters(min_codepoint=0x0400, max_codepoint=0x04FF),
+        min_size=1, max_size=30,
+    ),
+)
+def test_check_ru_accepts_cyrillic(text):
+    """Property: ru accepts any text containing a Cyrillic codepoint."""
+    from backlink_publisher.anchor.lang import _check_ru
+    ok, reason = _check_ru(text)
+    assert ok is True, f"expected Cyrillic text {text!r} to pass, got {reason}"
+
+
+def test_check_ru_rejects_latin_only():
+    """Property: ru rejects text with no Cyrillic codepoint."""
+    from backlink_publisher.anchor.lang import _check_ru
+    for text in ["hello", "Hello World", "test", "abc123"]:
+        ok, reason = _check_ru(text)
+        assert ok is False, f"expected Latin text {text!r} to fail ru, got {reason}"
+
+
+def test_check_en_accepts_latin():
+    """Property: en accepts Latin-only text (A-Z a-z)."""
+    from backlink_publisher.anchor.lang import _check_en
+    for text in ["hello", "Example", "Backlink", "ABC"]:
+        ok, reason = _check_en(text)
+        assert ok is True, f"expected Latin text {text!r} to pass en, got {reason}"
+
+
+def test_check_en_rejects_cjk():
+    """Property: en rejects text with CJK codepoint."""
+    from backlink_publisher.anchor.lang import _check_en
+    ok, reason = _check_en("hello世界")
+    assert ok is False, f"expected CJK text to fail en, got {reason}"
+
+
+def test_check_en_rejects_cyrillic():
+    """Property: en rejects text with Cyrillic codepoint."""
+    from backlink_publisher.anchor.lang import _check_en
+    ok, reason = _check_en("helloПривет")
+    assert ok is False, f"expected Cyrillic text to fail en, got {reason}"
+
 def test_language_matches_via_detection_pipeline_positive():
     """End-to-end happy path: detected lang matches requested lang."""
     zh_body = " ".join(ZH_HINTS * 3)

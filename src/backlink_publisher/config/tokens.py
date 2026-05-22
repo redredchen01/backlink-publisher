@@ -29,7 +29,9 @@ def snapshot_token_revs() -> dict[str, int]:
         ("hashnode", "hashnode-token.json"),
         ("writeas", "writeas-token.json"),
         ("notion", "notion-token.json"),
+        ("wordpress", "wordpress-token.json"),
         ("devto", "devto-token.json"),
+        ("tumblr", "tumblr-token.json"),
     ]:
         token = _load_token(None, filename)
         if token:
@@ -143,3 +145,35 @@ def save_devto_token(data: dict[str, Any], path: Path | None = None) -> None:
     Expected keys: api_key (str).
     """
     _save_token(data, path, "devto-token.json")
+
+
+def load_wordpress_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load WordPress.com Bearer token JSON ({access_token: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "wordpress-token.json")
+
+
+def save_wordpress_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save WordPress.com Bearer token dict to JSON file with mode 0600.
+
+    Expected keys: token (str, WordPress.com OAuth2 bearer).
+    """
+    _save_token(data, path, "wordpress-token.json")
+
+
+def load_tumblr_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Tumblr OAuth1a token JSON ({oauth_token: "...", oauth_token_secret: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "tumblr-token.json")
+
+
+def save_tumblr_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Tumblr OAuth1a token dict to JSON file with mode 0600.
+
+    Expected keys: oauth_token (str), oauth_token_secret (str).
+    """
+    _save_token(data, path, "tumblr-token.json")

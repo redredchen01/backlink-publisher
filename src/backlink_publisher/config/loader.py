@@ -11,13 +11,15 @@ from backlink_publisher._util.errors import DependencyError
 from .types import (
     BloggerOAuthConfig,
     Config,
-    MediumOAuthConfig,
-    ThreeUrlConfig,
     GhpagesConfig,
     HashnodeConfig,
+    MediumOAuthConfig,
     MastodonConfig,
+    ThreeUrlConfig,
+    TumblrConfig,
     VelogConfig,
     WriteAsConfig,
+    WordPressConfig,
 )
 
 if sys.version_info >= (3, 11):
@@ -43,9 +45,8 @@ from .parsers.three_url import (
 def _resolve_config_dir():
     """Indirect lookup so test monkeypatch on
     ``backlink_publisher.config._config_dir`` intercepts even when called
-    from inside loader.py (where the local ``_config_dir`` would otherwise
-    be a module-internal globals lookup, missed by the package-level patch)."""
-    from backlink_publisher import config as _cfg
+    from inside loader.py."""
+    import backlink_publisher.config as _cfg
     return _cfg._config_dir()
 
 
@@ -198,6 +199,24 @@ def load_config(path: Path | None = None) -> Config:
             api_base=str(writeas_section.get("api_base", "https://write.as/api")),
         )
 
+    wordpress_section = data.get("wordpress")
+    wordpress: WordPressConfig | None = None
+    if wordpress_section is not None:
+        # Bearer token lives in wordpress-token.json (SEC-3).
+        wordpress = WordPressConfig(
+            site=str(wordpress_section.get("site", "")),
+        )
+
+    tumblr_section = data.get("tumblr")
+    tumblr: TumblrConfig | None = None
+    if tumblr_section is not None:
+        # OAuth token pair lives in tumblr-token.json (0600 per SEC-3).
+        tumblr = TumblrConfig(
+            blog_identifier=str(tumblr_section.get("blog_identifier", "")),
+            consumer_key=str(tumblr_section.get("consumer_key", "")),
+            consumer_secret=str(tumblr_section.get("consumer_secret", "")),
+        )
+
     mastodon_section = data.get("mastodon")
     mastodon: MastodonConfig | None = None
     if mastodon_section is not None:
@@ -224,6 +243,8 @@ def load_config(path: Path | None = None) -> Config:
         ghpages=ghpages,
         hashnode=hashnode,
         writeas=writeas,
+        wordpress=wordpress,
+        tumblr=tumblr,
         mastodon=mastodon,
         image_gen=image_gen,
     )

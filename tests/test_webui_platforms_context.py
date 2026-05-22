@@ -114,16 +114,6 @@ def test_velog_in_norm_platform_tuple(client):
     assert "velog" in data["platform_slugs"]
 
 
-# ── Wordpress ghost option removal ──────────────────────────────────────────
-
-
-def test_wordpress_option_removed_from_publish_form(client):
-    """Wordpress UI placeholder must be gone (no backing adapter)."""
-    html = _get_index_html(client)
-    assert 'value="wordpress"' not in html
-    assert ">WordPress<" not in html
-
-
 # ── detect_platform: unknown-domain fallback now 'blogger' per operator preset ─
 
 

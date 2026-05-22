@@ -515,12 +515,27 @@ def _path_exists_on_main(
     path: str,
 ) -> tuple[bool, Literal["exists", "missing", "git_error"]]:
     """Check whether *path* resolves as a blob/tree on ``origin/main``.
-
-    Uses ``git cat-file -e origin/main:<path>``. Exit-code discrimination
-    matters: 1 means git ran cleanly and the path is not on main (real drift);
-    128 means git failed (object DB error, corrupt repo, missing ref). The
-    plan and feasibility-reviewer both flagged collapsing the two as a bug
-    (would mask infra failures as "drift").
+    
+    Uses ``git cat-file -e origin/main:<path>`` to test existence.
+    
+    Return value is a tuple ``(exists, status)`` where ``status`` is one of:
+    - ``exists``: the path exists in ``origin/main``.
+    - ``missing``: the path is not present on ``origin/main`` (real drift).
+    - ``git_error``: the git command failed due to infrastructure issues
+      (e.g., corrupt repository, missing reference, object database error).
+    
+    Distinguishing ``missing`` from ``git_error`` is critical.  We use a
+    combination of exit code and stderr:
+    
+    * Exit code ``0`` → ``exists``.
+    * Exit code ``1`` → ``missing`` (git ran cleanly but the path is absent).
+    * Exit code ``128`` or any other non-zero: inspect ``stderr``.
+      - If ``stderr`` contains the phrase ``does not exist in``, interpret as
+        ``missing`` (some git versions use exit 128 for this case).
+      - Otherwise, treat as ``git_error`` (infrastructure failure).
+    
+    Any exception launching the subprocess (OSError, FileNotFoundError) is also
+    classified as ``git_error``.
     """
     global _last_git_error
     _last_git_error = None

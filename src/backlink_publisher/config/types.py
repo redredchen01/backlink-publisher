@@ -184,6 +184,37 @@ class HashnodeConfig:
 
 
 @dataclass(frozen=True)
+class WordPressConfig:
+    """WordPress.com REST API adapter configuration.
+
+    ``site`` — the WordPress.com site slug (e.g. ``myblog`` of
+    ``myblog.wordpress.com``). The bearer token lives in a separate 0600
+    file at ``~/.config/backlink-publisher/wordpress-token.json`` (per
+    SEC-3).  WordPress.com tokens do not expire unless revoked.
+    """
+
+    site: str = ""
+
+
+@dataclass(frozen=True)
+class TumblrConfig:
+    """Tumblr API v2 adapter configuration.
+
+    ``blog_identifier`` — the Tumblr blog identifier
+    (e.g. ``myblog.tumblr.com``).
+    ``consumer_key`` — the Tumblr OAuth1a app public key (from Tumblr
+    developer console).
+    ``consumer_secret`` — the Tumblr OAuth1a app secret.
+    The per-user OAuth token/secret pair lives in ``tumblr-token.json``
+    (0600, per SEC-3).
+    """
+
+    blog_identifier: str = ""
+    consumer_key: str = ""
+    consumer_secret: str = ""
+
+
+@dataclass(frozen=True)
 class MastodonConfig:
     """Mastodon adapter configuration — single Fediverse instance.
 
@@ -278,6 +309,28 @@ class AnchorAlarmConfig:
     exact_ratio_ceiling: float | None = None
     top3_concentration_ceiling: float | None = None
     overrides: list[AnchorAlarmOverride] = field(default_factory=list)
+
+
+@dataclass
+class SaveConfigOverrides:
+    """Optional overrides for ``save_config()``.
+
+    Replaces the 11+ keyword-argument pattern with a single dataclass —
+    IDE-friendly, default values centralized, and new fields don't require
+    changing the function signature.  Every field defaults to ``None`` which
+    means "no override, keep existing config value".
+    """
+    path: Path | None = None
+    extra_blogger_ids: dict[str, str] | None = None
+    medium_token: str | None = None
+    blogger_client_id: str | None = None
+    blogger_client_secret: str | None = None
+    target_anchor_keywords: dict[str, list[str]] | None = None
+    target_three_url: dict[str, ThreeUrlConfig] | None = None
+    ghpages_config: GhpagesConfig | None = None
+    hashnode_config: HashnodeConfig | None = None
+    writeas_config: WriteAsConfig | None = None
+    mastodon_config: MastodonConfig | None = None
 
 
 @dataclass
@@ -386,6 +439,20 @@ class Config:
     absent. The login-issued token lives in a separate 0600 file at
     ``~/.config/backlink-publisher/writeas-token.json`` (per SEC-3)."""
 
+    wordpress: "WordPressConfig | None" = None
+    """WordPress.com adapter config (site slug).
+
+    Populated from ``[wordpress]`` in config.toml. ``None`` when section is
+    absent. The bearer token lives in a separate 0600 file at
+    ``~/.config/backlink-publisher/wordpress-token.json`` (per SEC-3).
+    WordPress.com tokens do not expire unless revoked."""
+
+    tumblr: "TumblrConfig | None" = None
+    """Tumblr API v2 adapter config (blog_identifier / consumer_key / consumer_secret).
+
+    Populated from ``[tumblr]`` in config.toml. ``None`` when section is absent.
+    The OAuth token pair lives in ``tumblr-token.json`` (0600, per SEC-3)."""
+
     mastodon: "MastodonConfig | None" = None
     """Mastodon adapter config (single Fediverse instance URL).
 
@@ -447,6 +514,16 @@ class Config:
     def devto_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "devto-token.json"
+
+    @property
+    def wordpress_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "wordpress-token.json"
+
+    @property
+    def tumblr_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "tumblr-token.json"
 
     @property
     def screenshot_dir(self) -> Path:

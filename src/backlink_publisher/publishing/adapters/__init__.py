@@ -22,7 +22,7 @@ Behaviour preserved verbatim:
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
@@ -41,6 +41,8 @@ from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 from .writeas import WriteAsAPIAdapter
+from .wordpress_api import WordPressAPIAdapter
+from .tumblr_api import TumblrAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
 # RECIPES["velog"] before the registration line below references it.
@@ -65,6 +67,23 @@ from ..browser_publish.recipes import mastodon as _mastodon_recipe  # noqa: F401
 # regression tests on this branch, but they are NOT added to the
 # dispatch chain yet — that wiring ships with Plan 001
 # (PR #141 chrome-cdp-multi-channel-publish) which is still open.
+#
+# ── Platform verify registry ──────────────────────────────────────────
+# Replaces the if/elif chain in ``verify_adapter_setup`` and
+# ``_verify_live`` with dict lookups. Each platform contributes two
+# functions registered below.
+_OFFLINE_VERIFY: dict[str, Callable[[Config], None]] = {}
+_LIVE_VERIFY: dict[str, Callable[[Config], "VerifyResult"]] = {}
+
+
+def register_offline_verify(platform: str, fn: Callable[[Config], None]) -> None:
+    _OFFLINE_VERIFY[platform] = fn
+
+
+def register_live_verify(platform: str, fn: Callable[[Config], "VerifyResult"]) -> None:
+    _LIVE_VERIFY[platform] = fn
+
+
 register("blogger", BloggerAPIAdapter, dofollow=True)
 register(
     "medium",
@@ -144,6 +163,189 @@ register(
         "never a personal Mastodon identity."
     ),
 )
+register(
+    "wordpress",
+    WordPressAPIAdapter,
+    dofollow=True,
+)
+register(
+    "tumblr",
+    TumblrAPIAdapter,
+    dofollow=False,
+    rationale=(
+        "Tumblr applies rel=nofollow to outbound links on free-tier blogs per "
+        "Tumblr's platform policy — all HTML <a> elements created via the "
+        "official web editor carry nofollow by default. Pro-tier Tumblr accounts "
+        "can manually set rel=follow on individual posts but not globally, so "
+        "dofollow=False is the conservative default. Backlinks published via "
+        "the API still drive referral traffic, topical relevance signal, and "
+        "indexation acceleration even without PageRank transfer."
+    ),
+)
+
+
+# ── Per-platform offline verify (replaces if/elif chain) ───────────────
+
+def _offline_verify_blogger(config: Config) -> None:
+    if not config.blogger_oauth:
+        raise DependencyError(
+            "Blogger OAuth not configured. "
+            "Add [blogger.oauth] to ~/.config/backlink-publisher/config.toml"
+        )
+
+
+def _offline_verify_medium(config: Config) -> None:
+    has_token = bool(config.medium_integration_token)
+    from backlink_publisher.config import load_medium_token
+    has_oauth = bool(load_medium_token())
+    from .medium_browser import sync_playwright as _spw
+    has_playwright = _spw is not None
+    if not (has_token or has_oauth or has_playwright):
+        raise DependencyError(
+            "Medium adapter not ready: no integration_token, no OAuth token "
+            "file, and Playwright is not installed. "
+            "Run 'playwright install chromium' or configure a token in /settings."
+        )
+
+
+def _offline_verify_telegraph(config: Config) -> None:
+    verify_telegraph_setup(config)
+
+
+def _offline_verify_velog(config: Config) -> None:
+    velog_cfg = config.velog
+    cookies_path = (
+        velog_cfg.cookies_path if velog_cfg else
+        config.config_dir / "velog-cookies.json"
+    )
+    if not cookies_path.exists():
+        raise DependencyError(
+            f"velog cookies not found: {cookies_path}\n"
+            "Run: velog-login"
+        )
+
+
+def _offline_verify_ghpages(config: Config) -> None:
+    if config.ghpages is None or not config.ghpages.repo:
+        raise DependencyError(
+            "GitHub Pages config missing. Add [ghpages] repo=\"owner/name\" "
+            "to ~/.config/backlink-publisher/config.toml"
+        )
+    if not config.ghpages_token_path.exists():
+        raise DependencyError(
+            "GitHub Pages PAT not stored. Write "
+            f"{{\"token\": \"<pat>\"}} to {config.ghpages_token_path} "
+            "(chmod 600). PAT needs Contents:Read+Write on the target repo."
+        )
+
+
+def _offline_verify_hashnode(config: Config) -> None:
+    if config.hashnode is None or not config.hashnode.publication_id:
+        raise DependencyError(
+            "Hashnode config missing. Add [hashnode] publication_id=\"<id>\" "
+            "to ~/.config/backlink-publisher/config.toml"
+        )
+    if not config.hashnode_token_path.exists():
+        raise DependencyError(
+            "Hashnode PAT not stored. Write "
+            f"{{\"token\": \"<pat>\"}} to {config.hashnode_token_path} "
+            "(chmod 600). Generate at hashnode.com/settings/developer."
+        )
+
+
+def _offline_verify_writeas(config: Config) -> None:
+    if config.writeas is None:
+        raise DependencyError(
+            "Write.as config missing. Add [writeas] section to "
+            "~/.config/backlink-publisher/config.toml"
+        )
+    if not config.writeas_token_path.exists():
+        raise DependencyError(
+            "Write.as token not stored. Write "
+            f"{{\"token\": \"<access_token>\"}} to {config.writeas_token_path} "
+            "(chmod 600). Obtain via POST /api/auth/login or writeas-login CLI."
+        )
+
+
+def _offline_verify_notion(config: Config) -> None:
+    if not NotionAPIAdapter.available(config):
+        raise DependencyError(
+            "Notion integration token or database_id not configured. "
+            f"Write {{\"integration_token\": \"secret_...\", \"database_id\": "
+            f"\"...\"}} to {config.notion_token_path} (chmod 600). "
+            "Create an Integration at https://www.notion.so/my-integrations."
+        )
+
+
+def _offline_verify_devto(config: Config) -> None:
+    if not DevtoAPIAdapter.available(config):
+        raise DependencyError(
+            "Dev.to API key not configured. "
+            f"Write {{\"api_key\": \"<key>\"}} to {config.devto_token_path} "
+            "(chmod 600). Generate at https://dev.to/settings/extensions."
+        )
+
+
+def _offline_verify_wordpress(config: Config) -> None:
+    if config.wordpress is None or not config.wordpress.site:
+        raise DependencyError(
+            "WordPress.com config missing. Add [wordpress] site=\"<slug>\" "
+            "to ~/.config/backlink-publisher/config.toml"
+        )
+    if not config.wordpress_token_path.exists():
+        raise DependencyError(
+            "WordPress.com token not stored. "
+            f"Write {{\"token\": \"<bearer_token>\"}} to "
+            f"{config.wordpress_token_path} "
+            "(chmod 600). Generate at wordpress.com/me/security."
+        )
+
+
+def _offline_verify_tumblr(config: Config) -> None:
+    if config.tumblr is None:
+        raise DependencyError(
+            "Tumblr config missing. Add [tumblr] section to "
+            "~/.config/backlink-publisher/config.toml"
+        )
+    if not config.tumblr.blog_identifier:
+        raise DependencyError(
+            "Tumblr blog_identifier not set. "
+            "Add blog_identifier=\"<blog>\" to [tumblr] in config.toml."
+        )
+    if not config.tumblr.consumer_key:
+        raise DependencyError(
+            "Tumblr consumer_key not set. "
+            "Add consumer_key=\"<key>\" to [tumblr] in config.toml "
+            "(get it from https://www.tumblr.com/oauth/apps)."
+        )
+    if not config.tumblr.consumer_secret:
+        raise DependencyError(
+            "Tumblr consumer_secret not set. "
+            "Add consumer_secret=\"<secret>\" to [tumblr] in config.toml "
+            "(get it from https://www.tumblr.com/oauth/apps)."
+        )
+    if not config.tumblr_token_path.exists():
+        raise DependencyError(
+            "Tumblr OAuth token not stored. "
+            f"Write {{\"oauth_token\": \"...\", \"oauth_token_secret\": \"...\"}} "
+            f"to {config.tumblr_token_path} "
+            "(chmod 600)."
+        )
+
+
+_OFFLINE_VERIFY: dict[str, Callable[[Config], None]] = {
+    "blogger": _offline_verify_blogger,
+    "medium": _offline_verify_medium,
+    "telegraph": _offline_verify_telegraph,
+    "velog": _offline_verify_velog,
+    "ghpages": _offline_verify_ghpages,
+    "hashnode": _offline_verify_hashnode,
+    "writeas": _offline_verify_writeas,
+    "notion": _offline_verify_notion,
+    "devto": _offline_verify_devto,
+    "wordpress": _offline_verify_wordpress,
+    "tumblr": _offline_verify_tumblr,
+}
 
 
 def publish(
@@ -200,127 +402,10 @@ def verify_adapter_setup(
         return _verify_dry_run(platform, config, payload or {})
 
     # mode == "offline" — backward-compat path
-    if platform == "blogger":
-        if not config.blogger_oauth:
-            raise DependencyError(
-                "Blogger OAuth not configured. "
-                "Add [blogger.oauth] to ~/.config/backlink-publisher/config.toml"
-            )
-        return
-
-    if platform == "medium":
-        # verify_adapter_setup is a library-availability check, not an auth
-        # check — the four-state badge in /settings is the real auth signal.
-        has_token = bool(config.medium_integration_token)
-        from backlink_publisher.config import load_medium_token
-        has_oauth = bool(load_medium_token())   # existing medium-token.json
-        from .medium_browser import sync_playwright as _spw
-        has_playwright = _spw is not None
-        # has_brave intentionally excluded: MediumBraveAdapter.available()
-        # only checks platform.system(), not whether Brave.app is installed.
-        # AppleScript failure raises ExternalServiceError (not DependencyError),
-        # which does NOT fall through the chain — so counting Brave as ready
-        # here would let verify pass but publish crash non-recoverably.
-
-        if not (has_token or has_oauth or has_playwright):
-            raise DependencyError(
-                "Medium adapter not ready: no integration_token, no OAuth token file, "
-                "and Playwright is not installed. "
-                "Run 'playwright install chromium' or configure a token in /settings."
-            )
-        return
-
-    if platform == "telegraph":
-        # Telegraph has no required prerequisites: the adapter auto-creates
-        # an anonymous account on first publish.  verify_telegraph_setup
-        # only raises if the config_dir cannot be created (filesystem-level
-        # fault) or an existing token file is malformed / wrong perms.
-        verify_telegraph_setup(config)
-        return
-
-    if platform == "velog":
-        velog_cfg = config.velog
-        cookies_path = (
-            velog_cfg.cookies_path if velog_cfg else
-            config.config_dir / "velog-cookies.json"
-        )
-        if not cookies_path.exists():
-            raise DependencyError(
-                f"velog cookies not found: {cookies_path}\n"
-                "Run: velog-login"
-            )
-        return
-
-    if platform == "ghpages":
-        if config.ghpages is None or not config.ghpages.repo:
-            raise DependencyError(
-                "GitHub Pages config missing. Add [ghpages] repo=\"owner/name\" "
-                "to ~/.config/backlink-publisher/config.toml"
-            )
-        if not config.ghpages_token_path.exists():
-            raise DependencyError(
-                "GitHub Pages PAT not stored. Write "
-                f"{{\"token\": \"<pat>\"}} to {config.ghpages_token_path} "
-                "(chmod 600). PAT needs Contents:Read+Write on the target repo."
-            )
-        return
-
-    if platform == "hashnode":
-        if config.hashnode is None or not config.hashnode.publication_id:
-            raise DependencyError(
-                "Hashnode config missing. Add [hashnode] publication_id=\"<id>\" "
-                "to ~/.config/backlink-publisher/config.toml"
-            )
-        if not config.hashnode_token_path.exists():
-            raise DependencyError(
-                "Hashnode PAT not stored. Write "
-                f"{{\"token\": \"<pat>\"}} to {config.hashnode_token_path} "
-                "(chmod 600). Generate at hashnode.com/settings/developer."
-            )
-        return
-
-    if platform == "writeas":
-        # Offline verify mirrors the API-adapter contract (config + token);
-        # WriteAsCdpAdapter's `available()` only checks for a Chrome binary,
-        # so short-circuiting on it would let a machine with Chrome but no
-        # writeas-token pass verify and crash at publish-time when the
-        # dispatch chain falls through to WriteAsAPIAdapter without a
-        # token. The CDP adapter is still registered in the chain and
-        # remains tryable by the dispatcher; verify gates on the
-        # API-path prerequisites that the chain ultimately depends on.
-        if config.writeas is None:
-            raise DependencyError(
-                "Write.as config missing. Add [writeas] section to "
-                "~/.config/backlink-publisher/config.toml"
-            )
-        if not config.writeas_token_path.exists():
-            raise DependencyError(
-                "Write.as token not stored. Write "
-                f"{{\"token\": \"<access_token>\"}} to {config.writeas_token_path} "
-                "(chmod 600). Obtain via POST /api/auth/login or writeas-login CLI."
-            )
-        return
-
-    if platform == "notion":
-        if not NotionAPIAdapter.available(config):
-            raise DependencyError(
-                "Notion integration token or database_id not configured. "
-                f"Write {{\"integration_token\": \"secret_...\", \"database_id\": \"...\"}} "
-                f"to {config.notion_token_path} (chmod 600). "
-                "Create an Integration at https://www.notion.so/my-integrations."
-            )
-        return
-
-    if platform == "devto":
-        if not DevtoAPIAdapter.available(config):
-            raise DependencyError(
-                "Dev.to API key not configured. "
-                f"Write {{\"api_key\": \"<key>\"}} to {config.devto_token_path} "
-                "(chmod 600). Generate at https://dev.to/settings/extensions."
-            )
-        return
-
-    raise DependencyError(f"No adapter configured for platform: {platform}")
+    fn = _OFFLINE_VERIFY.get(platform)
+    if fn is None:
+        raise DependencyError(f"No adapter configured for platform: {platform}")
+    fn(config)
 
 
 def _verify_live(platform: str, config: Config) -> VerifyResult:
@@ -348,23 +433,9 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
         )
 
     # Per-platform live verify dispatch.
-    if platform == "telegraph":
-        return _verify_telegraph_live(config)
-
-    if platform == "ghpages":
-        return _verify_ghpages_live(config)
-
-    if platform == "blogger":
-        return _verify_blogger_live(config)
-
-    if platform == "velog":
-        return _verify_velog_live(config)
-
-    if platform == "hashnode":
-        return _verify_hashnode_live(config)
-
-    if platform == "writeas":
-        return _verify_writeas_live(config)
+    fn = _LIVE_VERIFY.get(platform)
+    if fn is not None:
+        return fn(config)
 
     # Bound but live-verify-endpoint not yet wired. Surface honestly rather
     # than fake-green. Per-adapter live impls (Medium /me) land in follow-up PRs.
@@ -376,305 +447,86 @@ def _verify_live(platform: str, config: Config) -> VerifyResult:
 
 
 def _verify_telegraph_live(config: Config) -> VerifyResult:
-    """POST ``/getAccountInfo`` to confirm the stored access_token still works.
+    from .telegraph_api import TELEGRAPH_API, _HTTP_TIMEOUT_S, _INVALID_TOKEN_MARKERS, _load_token
 
-    Plan 2026-05-19-006 Unit 6a — replaces the stub for telegraph. Reads the
-    token from the existing ``_load_token`` loader in telegraph_api.
-    200 + ``ok:true`` → identity = short_name.  Telegraph error markers
-    (ACCESS_TOKEN_INVALID / INVALID_ACCESS_TOKEN) → ``token_expired``.
-    ``requests.Timeout`` → ``timeout``. Other errors → ``never`` with
-    blocker text.
+    timeout = min(5, _HTTP_TIMEOUT_S)
 
-    Read-only by design: NEVER triggers token rotation. Rotation belongs
-    to the publish path; live verify must not write token files.
-    """
-    import requests
-    from .telegraph_api import (
-        TELEGRAPH_API,
-        _HTTP_TIMEOUT_S,
-        _INVALID_TOKEN_MARKERS,
-        _load_token,
+    def _extract(raw):
+        return raw.get("access_token") if raw else None
+
+    def _endpoint(token):
+        return (f"{TELEGRAPH_API}/getAccountInfo", None,
+                {"access_token": token, "fields": '["short_name","author_name","page_count"]'})
+
+    def _identity(body):
+        if not body.get("ok"):
+            err = str(body.get("error", "unknown"))
+            if any(marker in err for marker in _INVALID_TOKEN_MARKERS):
+                raise ValueError(f"telegraph token rejected: {err}")
+            raise RuntimeError(f"telegraph API error: {err}")
+        return (body.get("result") or {}).get("short_name")
+
+    return _verify_live_generic(
+        config, platform="telegraph",
+        token_loader=_load_token,
+        token_extractor=_extract,
+        token_missing_msg="telegraph token not yet created (publish once to auto-create)",
+        endpoint_builder=_endpoint,
+        identity_extractor=_identity,
+        timeout=timeout,
     )
-
-    try:
-        token_data = _load_token(config)
-    except Exception as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"telegraph token file unreadable: {e}"],
-        )
-
-    access_token = token_data.get("access_token") if token_data else None
-    if not access_token:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["telegraph token not yet created (publish once to auto-create)"],
-        )
-
-    # 5s server-side hard cap per Unit 4 SLA. telegraph_api uses 15s for
-    # publish, but live verify is a dashboard-facing snappy call.
-    verify_timeout = min(5, _HTTP_TIMEOUT_S)
-
-    try:
-        resp = requests.post(
-            f"{TELEGRAPH_API}/getAccountInfo",
-            data={
-                "access_token": access_token,
-                "fields": '["short_name","author_name","page_count"]',
-            },
-            timeout=verify_timeout,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[f"telegraph getAccountInfo timed out after {verify_timeout}s"],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"telegraph network failure: {e}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["telegraph returned non-JSON response"],
-        )
-
-    if not body.get("ok"):
-        err = str(body.get("error", "unknown"))
-        if any(marker in err for marker in _INVALID_TOKEN_MARKERS):
-            return VerifyResult(
-                ok=False,
-                last_verify_result="token_expired",
-                blockers=[f"telegraph token rejected: {err}"],
-            )
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"telegraph API error: {err}"],
-        )
-
-    result_data = body.get("result") or {}
-    identity = result_data.get("short_name") or token_data.get("short_name")
-
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
-    )
-
-
-_GHPAGES_VERIFY_TIMEOUT_S = 5
 
 
 def _verify_ghpages_live(config: Config) -> VerifyResult:
-    """GET ``api.github.com/user`` to confirm the PAT is still valid.
+    from .ghpages import GITHUB_API, _load_token as _load_ghpages_token, _required_headers
 
-    Plan 2026-05-19-006 Unit 7 — ships GitHub Pages adapter with live
-    verify built in.
+    def _extract(raw):
+        return raw if isinstance(raw, str) else None
 
-    Strict read-only: ``ghpages-token.json`` is never mutated. Verify just
-    reads the PAT and pings the user endpoint. Token rotation is the
-    operator's job (PAT regeneration in github.com/settings/tokens).
+    def _endpoint(token):
+        return (f"{GITHUB_API}/user", {}, _required_headers(token))
 
-    Status mapping:
-      - 200 → ``ok``, identity = ``login``, dofollow=True (Jekyll default)
-      - 401 → ``token_expired`` (PAT revoked or scope removed)
-      - 403 → ``never`` (rate-limit / scope mismatch — not auth-fixable)
-      - ``requests.Timeout`` → ``timeout``
-      - other (5xx / connection / parse) → ``never``
-    """
-    import requests as _r
-    from .ghpages import GITHUB_API, _load_token, _required_headers
+    def _identity(body):
+        return body.get("login") or body.get("name")
 
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
-
-    try:
-        resp = _r.get(
-            f"{GITHUB_API}/user",
-            headers=_required_headers(token),
-            timeout=_GHPAGES_VERIFY_TIMEOUT_S,
-        )
-    except _r.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"github.com/user timed out after {_GHPAGES_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except _r.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"github network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "GitHub PAT rejected (HTTP 401) — regenerate at "
-                "github.com/settings/tokens and re-save to ghpages-token.json"
-            ],
-        )
-
-    if resp.status_code == 403:
-        retry_after = resp.headers.get("retry-after")
-        suffix = f" (retry-after={retry_after}s)" if retry_after else ""
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[
-                f"GitHub /user forbidden (HTTP 403){suffix} — token missing scope "
-                "or hit secondary rate limit"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"GitHub /user returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["GitHub /user returned non-JSON response"],
-        )
-
-    identity = body.get("login") or body.get("name")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
+    return _verify_live_generic(
+        config, platform="ghpages",
+        token_loader=_load_ghpages_token,
+        token_extractor=_extract,
+        token_missing_msg="GitHub token not configured — save PAT to ghpages-token.json",
+        endpoint_builder=_endpoint,
+        identity_extractor=_identity,
+        status_map={401: "token_expired", 403: "never"},
+        timeout=5.0,
     )
 
 
-_BLOGGER_USERS_SELF = "https://www.googleapis.com/blogger/v3/users/self"
-_BLOGGER_VERIFY_TIMEOUT_S = 5
-
-
 def _verify_blogger_live(config: Config) -> VerifyResult:
-    """GET ``blogger/v3/users/self`` with the stored access_token as Bearer.
+    _token_timeout = 5.0
 
-    Plan 2026-05-19-006 Unit 6c — replaces the stub for blogger.
+    def _loader(cfg):
+        from backlink_publisher.config import load_blogger_token
+        return load_blogger_token(cfg.blogger_token_path)
 
-    Strict read-only: the stored ``blogger-token.json`` is NEVER mutated.
-    OAuth refresh (and the corresponding ``save_blogger_token`` write) is a
-    publish-path concern — verify reads whatever access_token is currently
-    on disk and reports the outcome. Practical consequence: an operator who
-    has not published in over an hour will see ``token_expired`` until they
-    re-bind or publish once. The dashboard surfaces a hint to re-bind; this
-    is the deliberate trade for the read-only invariant that protects token
-    files from being rotated by an observe-only UI action.
+    def _extract(raw):
+        return (raw or {}).get("token")
 
-    Status mapping:
-      - 200 → ``ok`` with identity=displayName, dofollow=True
-      - 401 → ``token_expired`` (operator action: re-bind)
-      - ``requests.Timeout`` → ``timeout``
-      - everything else (403/5xx/connection/parse) → ``never``
-    """
-    import requests
-    from backlink_publisher.config import load_blogger_token
+    def _endpoint(token):
+        return ("https://www.googleapis.com/blogger/v3/users/self", {},
+                {"Authorization": f"Bearer {token}"})
 
-    try:
-        token_data = load_blogger_token(config.blogger_token_path)
-    except Exception as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"blogger token file unreadable: {e}"],
-        )
+    def _identity(body):
+        return body.get("displayName") or body.get("id")
 
-    access_token = (token_data or {}).get("token")
-    if not access_token:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[
-                "blogger access token not stored yet (bind via /settings or publish once)"
-            ],
-        )
-
-    try:
-        resp = requests.get(
-            _BLOGGER_USERS_SELF,
-            headers={"Authorization": f"Bearer {access_token}"},
-            timeout=_BLOGGER_VERIFY_TIMEOUT_S,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"blogger users.self timed out after {_BLOGGER_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"blogger network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "blogger access token expired or revoked — re-bind from /settings "
-                "(access tokens are 1h; refresh happens on publish)"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"blogger users.self returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["blogger returned non-JSON response"],
-        )
-
-    identity = body.get("displayName") or body.get("id")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
+    return _verify_live_generic(
+        config, platform="blogger",
+        token_loader=_loader,
+        token_extractor=_extract,
+        token_missing_msg="blogger access token not stored yet (bind via /settings or publish once)",
+        endpoint_builder=_endpoint,
+        identity_extractor=_identity,
+        status_map={401: "token_expired"},
+        timeout=_token_timeout,
     )
 
 
@@ -787,226 +639,313 @@ def _verify_velog_live(config: Config) -> VerifyResult:
     )
 
 
-_HASHNODE_VERIFY_TIMEOUT_S = 5
-
-
 def _verify_hashnode_live(config: Config) -> VerifyResult:
-    """POST ``query { me { ... } }`` to confirm the PAT is still valid.
-
-    Plan 2026-05-19-006 Unit 8 — first-class live verify built in with
-    the adapter (same model as ghpages Unit 7).
-
-    Strict read-only: ``hashnode-token.json`` is never mutated. The PAT
-    is bearer-equivalent (server-side rotation only) so the adapter has
-    nothing to write back. Token rotation is the operator's job
-    (regenerate at hashnode.com/settings/developer).
-
-    Status mapping:
-      - 200 + ``data.me`` non-null → ``ok``, identity = username, dofollow=True
-        (Hashnode is confirmed dofollow on canonical post URLs)
-      - 200 + ``errors`` only       → ``token_expired`` when the message
-        mentions auth/unauthorized; otherwise ``never``
-      - 401                          → ``token_expired``
-      - ``requests.Timeout``         → ``timeout``
-      - other (4xx/5xx/connection/parse) → ``never`` with blocker text
-    """
-    import requests
     from .hashnode import HASHNODE_API, ME_QUERY, _required_headers, _load_token
 
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
+    def _endpoint(token):
+        return (HASHNODE_API, {"query": ME_QUERY}, _required_headers(token))
 
-    try:
-        resp = requests.post(
-            HASHNODE_API,
-            headers=_required_headers(token),
-            json={"query": ME_QUERY},
-            timeout=_HASHNODE_VERIFY_TIMEOUT_S,
-        )
-    except requests.Timeout:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"hashnode /me timed out after {_HASHNODE_VERIFY_TIMEOUT_S}s"
-            ],
-        )
-    except requests.RequestException as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"hashnode network failure: {e}"],
-        )
-
-    if resp.status_code == 401:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "Hashnode PAT rejected (HTTP 401) — regenerate at "
-                "hashnode.com/settings/developer and re-save to hashnode-token.json"
-            ],
-        )
-
-    if resp.status_code != 200:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode /me returned HTTP {resp.status_code}"],
-        )
-
-    try:
-        body = resp.json()
-    except Exception:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Hashnode returned non-JSON response"],
-        )
-
-    me = ((body or {}).get("data") or {}).get("me")
-    if me is None:
-        # GraphQL errors-only response. Classify by message content.
+    def _identity(body):
+        me = ((body or {}).get("data") or {}).get("me")
+        if me is not None:
+            return me.get("username") or me.get("name")
         errors = body.get("errors") or []
         msg = (errors[0].get("message") if errors else "") or "unknown"
         lowered = msg.lower()
         if any(k in lowered for k in ("unauthorized", "auth", "invalid token")):
-            return VerifyResult(
-                ok=False,
-                last_verify_result="token_expired",
-                blockers=[f"Hashnode auth error: {msg}"],
-            )
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Hashnode GraphQL error: {msg}"],
-        )
+            raise ValueError(f"Hashnode auth error: {msg}")
+        raise RuntimeError(f"Hashnode GraphQL error: {msg}")
 
-    identity = me.get("username") or me.get("name")
-    return VerifyResult(
-        ok=True,
-        identity=identity,
-        last_verified_at=_utc_now_iso(),
-        last_verify_result="ok",
-        dofollow=True,
+    return _verify_live_generic(
+        config, platform="hashnode",
+        token_loader=_load_token,
+        token_extractor=lambda raw: raw if isinstance(raw, str) else None,
+        token_missing_msg="Hashnode PAT not configured — save to hashnode-token.json",
+        endpoint_builder=_endpoint,
+        identity_extractor=_identity,
+        status_map={401: "token_expired"},
+        timeout=5.0,
     )
 
 
-_WRITEAS_VERIFY_TIMEOUT_S = 5
-
-
 def _verify_writeas_live(config: Config) -> VerifyResult:
-    """GET ``/api/me`` to confirm the stored token still works.
-
-    Plan 2026-05-19-006 Unit 9 — replaces the stub for writeas. Reads
-    the token via the adapter's standard ``_load_token`` helper.
-
-    Strict read-only: ``writeas-token.json`` is never mutated. Write.as
-    tokens are revoked on operator logout (or on server policy) — verify
-    never rotates the token, that's a re-login concern.
-
-    Status mapping:
-      - 200 + ``data`` non-null → ``ok``, identity = username, dofollow=True
-        (Write.as collection-bound posts confirmed dofollow per Phase 3 roster)
-      - 401 → ``token_expired`` (signals operator must re-login)
-      - ``requests.Timeout`` → ``timeout``
-      - other (4xx/5xx/connection/parse) → ``never``
-    """
-    import requests
     from .writeas import _load_token, _required_headers, DEFAULT_API_BASE
-
-    try:
-        token = _load_token(config)
-    except DependencyError as e:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[str(e)],
-        )
 
     wa_cfg = config.writeas
     api_base = (wa_cfg.api_base if wa_cfg else DEFAULT_API_BASE) or DEFAULT_API_BASE
 
-    try:
-        resp = requests.get(
-            f"{api_base.rstrip('/')}/me",
-            headers=_required_headers(token),
-            timeout=_WRITEAS_VERIFY_TIMEOUT_S,
+    def _endpoint(token):
+        return (f"{api_base.rstrip('/')}/me", {}, _required_headers(token))
+
+    def _identity(body):
+        data = (body or {}).get("data")
+        if not data:
+            raise RuntimeError("Write.as /me returned empty data")
+        return data.get("username") or data.get("email")
+
+    return _verify_live_generic(
+        config, platform="writeas",
+        token_loader=_load_token,
+        token_extractor=lambda raw: raw if isinstance(raw, str) else None,
+        token_missing_msg="Write.as token not configured — re-login and save to writeas-token.json",
+        endpoint_builder=_endpoint,
+        identity_extractor=_identity,
+        status_map={401: "token_expired"},
+        timeout=5.0,
+    )
+
+
+def _verify_wordpress_live(config: Config) -> VerifyResult:
+    """GET /sites/<site> to confirm the WordPress.com bearer token still works.
+
+    Plan 2026-05-21-006 — live-verify stub for WordPress.com.
+    Read-only by design: NEVER triggers token rotation. Reads
+    ``wordpress-token.json`` (0o600, SEC-3).
+    """
+    from backlink_publisher.config.loader import _config_dir
+    from backlink_publisher.config.tokens import _load_token as _lt
+    import requests
+
+    wp_cfg = config.wordpress
+    if not (wp_cfg and wp_cfg.site):
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=["WordPress.com site not configured — add site=\"<slug>\" to [wordpress] in config.toml"],
         )
+
+    data = _lt(None, "wordpress-token.json")
+    token = (data or {}).get("token") if data else None
+    if not token:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=["WordPress.com token missing — create wordpress-token.json (chmod 600)"],
+        )
+
+    url = f"https://public-api.wordpress.com/rest/v1.1/sites/{wp_cfg.site}"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=5.0)
     except requests.Timeout:
         return VerifyResult(
-            ok=False,
-            last_verify_result="timeout",
-            blockers=[
-                f"write.as /me timed out after {_WRITEAS_VERIFY_TIMEOUT_S}s"
-            ],
+            ok=False, last_verify_result="timeout",
+            blockers=[f"WordPress.com /sites/{wp_cfg.site} timed out"],
         )
-    except requests.RequestException as e:
+    except requests.RequestException as exc:
         return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"write.as network failure: {e}"],
+            ok=False, last_verify_result="never",
+            blockers=[f"WordPress.com network failure: {exc}"],
         )
 
     if resp.status_code == 401:
         return VerifyResult(
-            ok=False,
-            last_verify_result="token_expired",
-            blockers=[
-                "Write.as token rejected (HTTP 401) — re-login at write.as "
-                "and re-save to writeas-token.json"
-            ],
+            ok=False, last_verify_result="token_expired",
+            blockers=["WordPress.com token rejected (HTTP 401) — re-save bearer token"],
         )
-
+    if resp.status_code == 403:
+        return VerifyResult(
+            ok=False, last_verify_result="token_expired",
+            blockers=["WordPress.com forbidden (HTTP 403) — check site slug or token scope"],
+        )
     if resp.status_code != 200:
         return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=[f"Write.as /me returned HTTP {resp.status_code}"],
+            ok=False, last_verify_result="never",
+            blockers=[f"WordPress.com returned HTTP {resp.status_code}"],
         )
 
     try:
         body = resp.json()
     except Exception:
         return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Write.as returned non-JSON response"],
+            ok=False, last_verify_result="never",
+            blockers=["WordPress.com returned non-JSON response"],
         )
 
-    data = (body or {}).get("data")
-    if not data:
-        return VerifyResult(
-            ok=False,
-            last_verify_result="never",
-            blockers=["Write.as /me returned empty data"],
-        )
-
-    identity = data.get("username") or data.get("email")
     return VerifyResult(
         ok=True,
-        identity=identity,
+        identity=body.get("title") or wp_cfg.site,
         last_verified_at=_utc_now_iso(),
         last_verify_result="ok",
         dofollow=True,
     )
 
 
-def _utc_now_iso() -> str:
-    """UTC iso8601 timestamp for last_verified_at.
+def _verify_tumblr_live(config: Config) -> VerifyResult:
+    """GET /v2/blog/<host>/info to confirm the Tumblr OAuth1a token still works.
 
-    Always UTC — never local time (per project_velog_adapter_pr75 lesson:
-    TZ regressions bit daily-cap; same trap applies to verify timestamps
-    crossing midnight boundaries).
+    Plan 2026-05-21-006 — live-verify stub for Tumblr.
+    v2.4 authorization header: ``Authorization: Bearer <oauth_token>``.
+    Read-only by design: NEVER writes token files.
     """
+    from backlink_publisher.config.tokens import _load_token as _lt
+    from requests_oauthlib import OAuth1
+    import requests
+
+    tum_cfg = config.tumblr
+    if not (tum_cfg and tum_cfg.blog_identifier):
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=["Tumblr blog_identifier not configured — add to [tumblr] in config.toml"],
+        )
+
+    oauth_data = _lt(None, "tumblr-token.json")
+    if not oauth_data:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=["Tumblr OAuth token missing — create tumblr-token.json (chmod 600)"],
+        )
+
+    oauth_token = str(oauth_data.get("oauth_token", ""))
+    if not oauth_token:
+        return VerifyResult(
+            ok=False, last_verify_result="token_expired",
+            blockers=["Tumblr OAuth token is empty in tumblr-token.json"],
+        )
+
+    blog = tum_cfg.blog_identifier
+    url = f"https://api.tumblr.com/v2/blog/{blog}/info"
+    auth = OAuth1(client_key=tum_cfg.consumer_key or "", client_secret=tum_cfg.consumer_secret or "",
+                  resource_owner_key=oauth_token, resource_owner_secret=str(oauth_data.get("oauth_token_secret", "")))
+    try:
+        resp = requests.get(url, auth=auth, timeout=5.0)
+    except requests.Timeout:
+        return VerifyResult(
+            ok=False, last_verify_result="timeout",
+            blockers=[f"Tumblr /v2/blog/{blog}/info timed out"],
+        )
+    except requests.RequestException as exc:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=[f"Tumblr network failure: {exc}"],
+        )
+
+    if resp.status_code == 401:
+        return VerifyResult(
+            ok=False, last_verify_result="token_expired",
+            blockers=["Tumblr OAuth token rejected (HTTP 401) — re-bind"],
+        )
+    if resp.status_code == 404:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=[f"Tumblr blog not found (HTTP 404): {blog} — check blog_identifier"],
+        )
+    if resp.status_code != 200:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=[f"Tumblr returned HTTP {resp.status_code}"],
+        )
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(
+            ok=False, last_verify_result="never",
+            blockers=["Tumblr returned non-JSON response"],
+        )
+
+    blog_info = ((body or {}).get("response") or {}).get("blog", {})
+    return VerifyResult(
+        ok=True,
+        identity=blog_info.get("title") or blog_info.get("name") or blog,
+        last_verified_at=_utc_now_iso(),
+        last_verify_result="ok",
+        dofollow=False,
+    )
+
+
+_LIVE_VERIFY: dict[str, Callable[[Config], VerifyResult]] = {
+    "telegraph": _verify_telegraph_live,
+    "ghpages": _verify_ghpages_live,
+    "blogger": _verify_blogger_live,
+    "velog": _verify_velog_live,
+    "hashnode": _verify_hashnode_live,
+    "writeas": _verify_writeas_live,
+    "wordpress": _verify_wordpress_live,
+    "tumblr": _verify_tumblr_live,
+}
+
+
+def _utc_now_iso() -> str:
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _verify_live_generic(
+    config: Config,
+    *,
+    platform: str,
+    token_loader: Callable[[Config], Any],
+    token_extractor: Callable[[Any], str | None],
+    token_missing_msg: str,
+    endpoint_builder: Callable[[str], tuple[str, dict | None, dict]],
+    identity_extractor: Callable[[dict], str | None],
+    status_map: dict[int, str] | None = None,
+    timeout: float = 5.0,
+) -> VerifyResult:
+    """Generic live-verify skeleton shared across platform adapters.
+
+    ``endpoint_builder(token)`` returns ``(url, json_data, headers)``.
+    ``json_data=None`` → POST with ``data=`` form-encoded.
+    ``json_data={}`` (empty dict) → GET.
+    ``json_data`` non-empty dict → POST with ``json=json_data``.
+    ``status_map`` maps HTTP status → result string for non-200 responses.
+    ``identity_extractor`` raises ``ValueError`` for ``token_expired``,
+    ``RuntimeError`` for ``never``.
+    """
+    import requests
+
+    try:
+        raw = token_loader(config)
+    except DependencyError as e:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[str(e)])
+    except Exception as e:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[f"{platform} token unreadable: {e}"])
+
+    token = token_extractor(raw)
+    if not token:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[token_missing_msg])
+
+    url, json_data, headers = endpoint_builder(token)
+    try:
+        if json_data is None:
+            resp = requests.post(url, data=headers, timeout=timeout)
+        elif json_data:
+            resp = requests.post(url, json=json_data, headers=headers, timeout=timeout)
+        else:
+            resp = requests.get(url, headers=headers, timeout=timeout)
+    except requests.Timeout:
+        return VerifyResult(ok=False, last_verify_result="timeout", blockers=[f"{platform} timed out after {timeout}s"])
+    except requests.RequestException as e:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[f"{platform} network failure: {e}"])
+
+    if status_map:
+        result = status_map.get(resp.status_code)
+        if result is not None:
+            return VerifyResult(ok=False, last_verify_result=result, blockers=[_status_blocker(platform, resp.status_code)])
+
+    if resp.status_code != 200:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[f"{platform} returned HTTP {resp.status_code}"])
+
+    try:
+        body = resp.json()
+    except Exception:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[f"{platform} returned non-JSON response"])
+
+    try:
+        identity = identity_extractor(body)
+    except ValueError as e:
+        return VerifyResult(ok=False, last_verify_result="token_expired", blockers=[str(e)])
+    except RuntimeError as e:
+        return VerifyResult(ok=False, last_verify_result="never", blockers=[str(e)])
+    now = _utc_now_iso()
+    return VerifyResult(ok=True, identity=identity, last_verified_at=now, last_verify_result="ok", dofollow=True)
+
+
+def _status_blocker(platform: str, code: int) -> str:
+    blockers = {
+        401: f"{platform} auth rejected (HTTP 401) — re-bind or re-save token (expired or revoked)",
+        403: f"{platform} forbidden (HTTP 403) — check token scope or rate limit",
+    }
+    return blockers.get(code, f"{platform} returned HTTP {code}")
 
 
 def _verify_dry_run(

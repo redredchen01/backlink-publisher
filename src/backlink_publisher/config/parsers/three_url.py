@@ -8,6 +8,7 @@ from typing import Any
 from ..._util.logger import plan_logger
 from ..._util.url import validate_https_url, validate_main_domain_url
 from ..types import (
+    Config,
     DEFAULT_WORK_TEMPLATES,
     ThreeUrlConfig,
 )

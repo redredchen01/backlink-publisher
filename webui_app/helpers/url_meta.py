@@ -17,6 +17,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from backlink_publisher.config import _domain_label
+from backlink_publisher._util.net_safety import _check_url_for_ssrf
 from backlink_publisher.content import fetch as content_fetch
 
 
@@ -55,9 +56,11 @@ def _verify_urls_or_error(
 
 
 def _fetch_page(url, timeout=10):
+    _check_url_for_ssrf(url)
     headers = {'User-Agent':
                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'}
-    resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
+    verify = not os.environ.get("BACKLINK_PUBLISHER_INSECURE_SSL", "").strip().lower() in _TRUTHY_BYPASS
+    resp = requests.get(url, headers=headers, timeout=timeout, verify=verify)
     resp.raise_for_status()
     return BeautifulSoup(resp.text, 'html.parser')
 

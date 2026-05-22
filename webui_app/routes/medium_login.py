@@ -13,6 +13,8 @@ import secrets
 from flask import Blueprint, redirect, request, session
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+
+from ..helpers.security import _safe_flash_redirect
 from backlink_publisher.config import load_config
 
 from ..medium_login import (
@@ -48,10 +50,10 @@ def _validate_csrf() -> bool:
 def _csrf_check() -> None:
     if request.method == "POST":
         if not _validate_csrf():
-            return redirect(
-                "/settings?flash_type=danger"
-                "&flash_msg=CSRF token 无效，请刷新页面后重试#channel-medium"
-            )
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg='CSRF token 无效，请刷新页面后重试',
+                fragment='channel-medium')
 
 
 # Jinja global so templates can call {{ medium_csrf_token() }}
@@ -69,18 +71,20 @@ def medium_launch_browser_login():
     try:
         result = launch_login_window(cfg)
         session["medium_probe_logged_in"] = result.get("logged_in", False)
-        return redirect(
-            "/settings?flash_type=success"
-            "&flash_msg=Medium 浏览器登录完成！#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='Medium 浏览器登录完成！',
+            fragment='channel-medium')
     except DependencyError as e:
-        return redirect(
-            f"/settings?flash_type=warning&flash_msg={e}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='warning',
+            msg=f'{e}',
+            fragment='channel-medium')
     except ExternalServiceError as e:
-        return redirect(
-            f"/settings?flash_type=danger&flash_msg={e}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'{e}',
+            fragment='channel-medium')
 
 
 @bp.route("/settings/medium/probe-browser-login", methods=["POST"])
@@ -96,17 +100,20 @@ def medium_probe_browser_login():
         else:
             session.pop("medium_probe_logged_in", None)
             msg = "Medium 未登录，请点击「打开浏览器登录」完成登录"
-        return redirect(
-            f"/settings?flash_type=info&flash_msg={msg}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='info',
+            msg=msg,
+            fragment='channel-medium')
     except DependencyError as e:
-        return redirect(
-            f"/settings?flash_type=warning&flash_msg={e}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='warning',
+            msg=f'{e}',
+            fragment='channel-medium')
     except ExternalServiceError as e:
-        return redirect(
-            f"/settings?flash_type=warning&flash_msg={e}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='warning',
+            msg=f'{e}',
+            fragment='channel-medium')
 
 
 @bp.route("/settings/medium/clear-browser-login", methods=["POST"])
@@ -116,11 +123,12 @@ def medium_clear_browser_login():
     try:
         clear_browser_profile(cfg)
         session.pop("medium_probe_logged_in", None)
-        return redirect(
-            "/settings?flash_type=success"
-            "&flash_msg=浏览器登录已清除；下次发布前请重新登录#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='浏览器登录已清除；下次发布前请重新登录',
+            fragment='channel-medium')
     except Exception as e:
-        return redirect(
-            f"/settings?flash_type=danger&flash_msg=清除失败: {e}#channel-medium"
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'清除失败: {e}',
+            fragment='channel-medium')

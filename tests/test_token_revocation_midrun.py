@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from backlink_publisher.cli.publish_backlinks import _run_resume
+from backlink_publisher.cli._resume import _run_resume
 from backlink_publisher.config.tokens import save_blogger_token
 
 
@@ -24,16 +24,15 @@ def test_token_drift_aborts_mid_run(tmp_path, monkeypatch):
             {
                 "id": "r0",
                 "status": "pending",
-                "payload": {"target_url": "https://x.com/a"},
+                "payload": {"target_url": "https://x.com/a", "main_domain": "https://x.com", "platform": "blogger"},
             },
             {
                 "id": "r1",
                 "status": "pending",
-                "payload": {"target_url": "https://x.com/b"},
+                "payload": {"target_url": "https://x.com/b", "main_domain": "https://x.com", "platform": "blogger"},
             },
         ],
     }
-
     # Mock adapter_publish to increment the token_rev on the first call
     call_count = {"n": 0}
 
@@ -45,10 +44,10 @@ def test_token_drift_aborts_mid_run(tmp_path, monkeypatch):
         from backlink_publisher.publishing.adapters import AdapterResult
         return AdapterResult(status="drafted", adapter="blogger-api", platform="blogger")
 
-    with patch("backlink_publisher.cli.publish_backlinks.adapter_publish", side_effect=fake_publish):
-        with patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup"):
+    with patch("backlink_publisher.cli._resume.adapter_publish", side_effect=fake_publish):
+        with patch("backlink_publisher.cli._resume.verify_adapter_setup"):
             with patch("backlink_publisher.checkpoint.load_checkpoint", return_value=ckpt):
-                with patch("backlink_publisher.cli.publish_backlinks._acquire_publish_leases"):
+                with patch("backlink_publisher.cli._resume._acquire_publish_leases"):
                     with patch("backlink_publisher.checkpoint.update_item"):
                         class DummyArgs:
                             resume = "20260101T000000Z-deadbeef"

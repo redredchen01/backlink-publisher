@@ -45,9 +45,9 @@ _ALLOWED: dict[str, tuple] = {
 def save_channel_token():
     channel = (request.form.get('channel', '') or '').strip()
     if channel not in _ALLOWED:
-        return redirect(
-            f'/settings?flash_type=danger&flash_msg='
-            f'unknown channel "{channel}" — allowed: {sorted(_ALLOWED)}'
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'unknown channel "{channel}" — allowed: {sorted(_ALLOWED)}'
         )
 
     save_fn, token_basename, token_field_key = _ALLOWED[channel]
@@ -61,14 +61,14 @@ def save_channel_token():
         try:
             if token_path.exists():
                 token_path.unlink()
-                return redirect(
-                    f'/settings?flash_type=success&flash_msg='
-                    f'{channel} token 已清除{anchor}'
-                )
-            return redirect(
-                f'/settings?flash_type=info&flash_msg='
-                f'{channel} token 文件不存在，无需清除{anchor}'
-            )
+                return _safe_flash_redirect(
+                    '/settings', flash_type='success',
+                    msg=f'{channel} token 已清除',
+                    fragment=f'channel-{channel}')
+            return _safe_flash_redirect(
+                '/settings', flash_type='info',
+                msg=f'{channel} token 文件不存在，无需清除',
+                fragment=f'channel-{channel}')
         except OSError as e:
             return _safe_flash_redirect(
                 '/settings', flash_type='danger',
@@ -78,10 +78,10 @@ def save_channel_token():
     # Save button — token can be empty (means "leave as-is").
     token = (request.form.get('token', '') or '').strip()
     if not token:
-        return redirect(
-            f'/settings?flash_type=info&flash_msg='
-            f'未填入 token，{channel} 配置未变更{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='info',
+            msg=f'未填入 token，{channel} 配置未变更',
+            fragment=f'channel-{channel}')
 
     try:
         save_fn({token_field_key: token})
@@ -90,18 +90,17 @@ def save_channel_token():
         cfg = load_config()
         token_path = cfg.config_dir / token_basename
         if not token_path.exists():
-            return redirect(
-                f'/settings?flash_type=danger&flash_msg='
-                f'保存 {channel} token 失败（文件未创建）{anchor}'
-            )
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg=f'保存 {channel} token 失败（文件未创建）',
+                fragment=f'channel-{channel}')
         mode = stat.S_IMODE(token_path.stat().st_mode)
         if os.name != "nt" and mode != 0o600:
-            # save_fn should have set 0600; if it didn't, fix it now.
             os.chmod(token_path, 0o600)
-        return redirect(
-            f'/settings?flash_type=success&flash_msg='
-            f'{channel} token 已绑定 ✓{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg=f'{channel} token 已绑定 ✓',
+            fragment=f'channel-{channel}')
     except Exception as e:
         return _safe_flash_redirect(
             '/settings', flash_type='danger',
@@ -129,35 +128,35 @@ def save_notion_channel_token():
         try:
             if token_path.exists():
                 token_path.unlink()
-                return redirect(
-                    f'/settings?flash_type=success&flash_msg='
-                    f'notion token 已清除{anchor}'
-                )
-            return redirect(
-                f'/settings?flash_type=info&flash_msg='
-                f'notion token 文件不存在，无需清除{anchor}'
-            )
+                return _safe_flash_redirect(
+                    '/settings', flash_type='success',
+                    msg='notion token 已清除',
+                    fragment='channel-notion')
+            return _safe_flash_redirect(
+                '/settings', flash_type='info',
+                msg='notion token 文件不存在，无需清除',
+                fragment='channel-notion')
         except OSError as e:
-            return redirect(
-                f'/settings?flash_type=danger&flash_msg='
-                f'清除 notion token 失败: {e}{anchor}'
-            )
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg=f'清除 notion token 失败: {e}',
+                fragment='channel-notion')
 
     if not integration_token and not database_id:
-        return redirect(
-            f'/settings?flash_type=info&flash_msg='
-            f'未填入 Notion 凭据，配置未变更{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='info',
+            msg='未填入 Notion 凭据，配置未变更',
+            fragment='channel-notion')
     if not integration_token:
-        return redirect(
-            f'/settings?flash_type=danger&flash_msg='
-            f'Integration Token 不能为空{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg='Integration Token 不能为空',
+            fragment='channel-notion')
     if not database_id:
-        return redirect(
-            f'/settings?flash_type=danger&flash_msg='
-            f'Database ID 不能为空{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg='Database ID 不能为空',
+            fragment='channel-notion')
 
     try:
         save_notion_token({
@@ -168,19 +167,19 @@ def save_notion_channel_token():
         cfg = load_config()
         token_path = cfg.notion_token_path
         if not token_path.exists():
-            return redirect(
-                f'/settings?flash_type=danger&flash_msg='
-                f'保存 notion token 失败（文件未创建）{anchor}'
-            )
+            return _safe_flash_redirect(
+                '/settings', flash_type='danger',
+                msg='保存 notion token 失败（文件未创建）',
+                fragment='channel-notion')
         mode = stat.S_IMODE(token_path.stat().st_mode)
         if os.name != "nt" and mode != 0o600:
             os.chmod(token_path, 0o600)
-        return redirect(
-            f'/settings?flash_type=success&flash_msg='
-            f'notion token 已绑定 ✓{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='success',
+            msg='notion token 已绑定 ✓',
+            fragment='channel-notion')
     except Exception as e:
-        return redirect(
-            f'/settings?flash_type=danger&flash_msg='
-            f'保存 notion token 失败: {e}{anchor}'
-        )
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'保存 notion token 失败: {e}',
+            fragment='channel-notion')

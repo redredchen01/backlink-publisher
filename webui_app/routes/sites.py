@@ -29,7 +29,7 @@ from ..helpers.cli_runner import (
     _parse_lines,
     run_pipe,
 )
-from ..helpers.security import _ensure_csrf_token
+from ..helpers.security import _ensure_csrf_token, _safe_flash_redirect
 from ..helpers.url_meta import (
     _derive_branded_pool,
     _derive_exact_pool,
@@ -253,9 +253,9 @@ def sites_run():
     try:
         result = run_pipe(["plan-backlinks", "--work-count", "10"], seed_jsonl)
     except Exception as exc:
-        return redirect(
-            "/sites?flash_type=danger&flash_msg=" + f"plan-backlinks 失败：{exc}"
-        )
+        return _safe_flash_redirect(
+            '/sites', flash_type='danger',
+            msg=f'plan-backlinks 失败：{exc}')
 
     rows = _parse_run_result_local(result["stdout"], entry)
     summary = {

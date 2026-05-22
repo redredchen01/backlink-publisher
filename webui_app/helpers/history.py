@@ -92,7 +92,7 @@ def _push_history_per_row(
             item["error"] = raw_error
         new_items.append(item)
     return _history_store.update(
-        lambda hist: [*new_items, *hist][:_HISTORY_MAX_ITEMS]
+        lambda hist: _apply_history_cap([*new_items, *hist])
     )
 
 
@@ -120,7 +120,7 @@ def _push_history_single_failure(
         "error": error or "publish failed",
     }
     return _history_store.update(
-        lambda hist: [item, *hist][:_HISTORY_MAX_ITEMS]
+        lambda hist: _apply_history_cap([item, *hist])
     )
 
 

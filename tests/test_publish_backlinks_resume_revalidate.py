@@ -77,9 +77,9 @@ def _run_resume(run_id: str) -> tuple[str, str, int]:
         out, err = StringIO(), StringIO()
         sys.stdout, sys.stderr = out, err
         try:
-            with patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup"):
+            with patch("backlink_publisher.publishing.adapters.verify_adapter_setup"):
                 with patch(
-                    "backlink_publisher.cli.publish_backlinks.adapter_publish"
+                    "backlink_publisher.publishing.adapters.publish"
                 ) as mock_pub:
                     from backlink_publisher.publishing.adapters.base import AdapterResult
                     mock_pub.return_value = AdapterResult(

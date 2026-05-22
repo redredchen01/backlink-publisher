@@ -37,21 +37,17 @@ def _seed_telegraph_token(config_dir: Path, access_token: str = "tg-token-abc",
 
 
 def _ok_response(short_name: str = "test-account") -> MagicMock:
-    resp = MagicMock()
+    resp = MagicMock(status_code=200)
     resp.raise_for_status = MagicMock()
     resp.json.return_value = {
         "ok": True,
-        "result": {
-            "short_name": short_name,
-            "author_name": "Test Author",
-            "page_count": 7,
-        },
+        "result": {"short_name": short_name, "author_name": "Test Author", "page_count": 7},
     }
     return resp
 
 
 def _err_response(error: str) -> MagicMock:
-    resp = MagicMock()
+    resp = MagicMock(status_code=200)
     resp.raise_for_status = MagicMock()
     resp.json.return_value = {"ok": False, "error": error}
     return resp

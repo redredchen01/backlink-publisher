@@ -16,10 +16,9 @@ single source of truth (Plan 2026-05-21-001 Unit 1). ``_chrome_port`` and
 ``ChromeSessionError`` upstream) to preserve the bind error contract.
 """
 
-from __future__ import annotations
-
 import json
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -35,6 +34,28 @@ from backlink_publisher.publishing.browser_publish.chrome_session import (
     _chrome_profile_dir as _shared_chrome_profile_dir,
     _websocket_available as _shared_websocket_available,
 )
+
+DEFAULT_CHROME_PORT = 9222
+
+
+def _find_free_port(start_port: int) -> int:
+    """Find a free TCP port starting from start_port."""
+    for port in range(start_port, start_port + 100):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                # Set SO_REUSEADDR to avoid "Address already in use" errors
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    return start_port
+
+
+def discover_chrome_binary() -> str | None:
+    return _shared_chrome_binary()
+
+
 from .driver import BIND_TIMEOUT_MS, ChromeLaunchError
 
 
