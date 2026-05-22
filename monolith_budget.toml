@@ -52,3 +52,7 @@ rationale = "Plan-claims drift gate CLI (Plan 2026-05-19-009). SLOC 572 at seed 
 [files."src/backlink_publisher/cli/validate_backlinks.py"]
 ceiling = 200
 rationale = "_enhance_payload (101 lines) + its exclusive helpers (_HrefCollector, _extract_hrefs_from_html, _check_main_domain_in_html, _resolve_branded_pool, _nfc_normalize_in_place, _detect_row_body_language) extracted to _validate_payload.py (2026-05-22). validate_backlinks.py dropped from 323 to 168 SLOC — holds _row_field_text, re-exports from _validate_payload, and main() only. Ceiling 200 = round_up_to_10(168+30)."
+
+[files."src/backlink_publisher/cli/report_anchors.py"]
+ceiling = 130
+rationale = "Formatting helpers (_markdown_table, _json_output, _build_report, _build_profile_report, _format_alarm_markdown, _format_profile_report_markdown, _format_profile_report_json) and _compute_alarm extracted to _report_format.py (2026-05-22). report_anchors.py dropped from 353 to 94 SLOC — holds main() only plus re-export imports. Ceiling 130 = round_up_to_10(94+30) with headroom for argparse additions."
