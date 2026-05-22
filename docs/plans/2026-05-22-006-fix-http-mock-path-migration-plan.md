@@ -3,6 +3,7 @@ title: "fix: update test mock paths after http.py extraction (PR #194)"
 type: fix
 status: completed
 date: 2026-05-22
+claims: {}
 ---
 
 # fix: update test mock paths after http.py extraction (PR #194)

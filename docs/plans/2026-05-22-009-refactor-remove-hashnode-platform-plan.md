@@ -4,6 +4,7 @@ type: refactor
 status: completed
 date: 2026-05-22
 deepened: 2026-05-22
+claims: {}
 ---
 
 # refactor: Remove Hashnode platform completely
