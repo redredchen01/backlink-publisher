@@ -12,6 +12,7 @@ from flask import session
 from google.oauth2.credentials import Credentials
 
 from backlink_publisher.config import load_blogger_token, load_config
+from ._request_cache import _g_cache
 from backlink_publisher.publishing.adapters.medium_browser import (
     sync_playwright as _spw,
 )
@@ -65,7 +66,7 @@ def _image_gen_status(cfg) -> dict:
 def _get_blogger_token_status() -> dict:
     """Return token health status without making network calls."""
     try:
-        cfg = load_config()
+        cfg = _g_cache('config', load_config)
         token_data = load_blogger_token(cfg.blogger_token_path)
         if not token_data:
             return {'state': 'none', 'label': '未授权', 'days_left': None}
@@ -100,7 +101,7 @@ def _get_blogger_token_status() -> dict:
 def _get_velog_status() -> dict:
     """Return velog channel status for the WebUI badge (6 states)."""
     try:
-        cfg = load_config()
+        cfg = _g_cache('config', load_config)
         from backlink_publisher.publishing.adapters.velog_graphql import (
             _effective_cap,
             _read_count,
