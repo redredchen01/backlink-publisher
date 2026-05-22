@@ -23,11 +23,10 @@ import json
 import logging
 import re
 import sqlite3
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 from .._util.url import canonicalize_url
@@ -65,7 +64,6 @@ def flush_for(
     path: Path,
     *,
     store: EventStore | None = None,
-    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> ProjectionResult:
     """Project the JSON source at ``path`` into the event store.
 
@@ -79,7 +77,7 @@ def flush_for(
     if source_kind == "checkpoint":
         return _project_checkpoint(path, store)
     if source_kind == "history":
-        return _project_history(path, store, sleep_fn=sleep_fn)
+        return _project_history(path, store)
     if source_kind == "drafts":
         return _project_drafts(path, store)
     raise ProjectionError(f"unknown source for path: {path}")

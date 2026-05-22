@@ -106,63 +106,16 @@ def test_failed_history_row_emits_scrubbed_publish_failed(tmp_path):
     assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in payload["error_message_clean"]
 
 
-def test_history_retries_json_decode_error_up_to_four_times(tmp_path):
-    path = tmp_path / "publish-history.json"
-    path.write_text("not-json", encoding="utf-8")
-
-    call_log: list[int] = []
-    valid_payload = json.dumps([
-        {
-            "id": "h-late",
-            "target_url": "https://example.com/y",
-            "platform": "blogger",
-            "language": "en",
-            "status": "published",
-            "created_at": "2026-05-18 12:30",
-            "article_urls": ["https://blog.example.org/post"],
-        }
-    ])
-    original_read_text = Path.read_text
-
-    def _flaky(self, *args, **kwargs):
-        if self == path:
-            call_log.append(len(call_log))
-            if len(call_log) <= 4:
-                return "still-not-json"
-            return valid_payload
-        return original_read_text(self, *args, **kwargs)
-
-    sleep_calls: list[float] = []
-    import backlink_publisher.events.projector as projector_mod
-    orig = projector_mod.Path.read_text  # type: ignore[attr-defined]
-    projector_mod.Path.read_text = _flaky  # type: ignore[assignment]
-    try:
-        result = flush_for(path, sleep_fn=sleep_calls.append)
-    finally:
-        projector_mod.Path.read_text = orig  # type: ignore[assignment]
-
-    assert result.cursor_updated is True
-    assert result.events_inserted == 1
-    assert len(call_log) == 5  # 4 fails + 1 success
-    assert len(sleep_calls) == 4
-    events = _query_events(EventStore())
-    assert events[0]["kind"] == "publish.confirmed"
-
-
-def test_history_retry_exhaustion_leaves_cursor_untouched(tmp_path):
+def test_corrupt_history_leaves_cursor_untouched(tmp_path):
     path = tmp_path / "publish-history.json"
     path.write_text("garbage", encoding="utf-8")
 
-    sleep_calls: list[float] = []
-    result = flush_for(path, sleep_fn=sleep_calls.append)
+    result = flush_for(path)
 
     assert result.cursor_updated is False
     assert result.events_inserted == 0
     assert result.articles_inserted == 0
-    # 5 reads, 4 sleeps between them.
-    assert len(sleep_calls) == 4
 
-    # Cursor row should not exist.
     with EventStore().connect() as conn:
         row = conn.execute(
             "SELECT COUNT(*) FROM projection_cursor WHERE source = ?",
