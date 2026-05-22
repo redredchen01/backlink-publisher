@@ -99,7 +99,8 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         try:
             from backlink_publisher.config import load_config
             from .binding_status import get_channel_status, HIDDEN_FROM_UI
-            cfg = load_config()
+            from .helpers._request_cache import _g_cache
+            cfg = _g_cache('config', load_config)
             bound_platforms = [
                 {"slug": s, "display_name": s.title()}
                 for s in all_slugs
