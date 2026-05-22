@@ -4,6 +4,7 @@ type: refactor
 status: completed
 date: 2026-05-22
 origin: docs/plans/2026-05-21-006-refactor-webui-comprehensive-optimization-plan.md
+claims: {}
 ---
 
 # Plan B — index.html Template Split
