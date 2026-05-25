@@ -11,6 +11,11 @@ coverage. ``_oauthlib_insecure_transport`` is already covered in
 ``tests/test_webui_unit3_security.py`` so we do NOT re-test it (only exercise it
 transitively through the routes).
 
+Three callback security gaps this suite originally surfaced (PKCE verifier not
+popped, no OAuth-CSRF ``state`` comparison, transport-gate refusal mis-reported
+as a generic failure) are now fixed in ``oauth.py`` and asserted by
+``TestCallbackSecurityFixes`` + ``test_non_loopback_callback_reported_distinctly``.
+
 CSRF note (see reference_webui_csrf_architecture): these POST routes are gated by
 the app-level ``_global_csrf_guard`` (``session['csrf_token']`` vs form
 ``csrf_token`` / ``X-CSRFToken``). We seed ``session['csrf_token']`` directly —
@@ -361,6 +366,7 @@ class TestOauthCallback:
         with client.session_transaction() as sess:
             assert "oauth_state" not in sess
             assert "oauth_client_config" not in sess
+            assert "oauth_code_verifier" not in sess
 
     def test_error_param_reports_danger(self, client):
         resp = client.get(f"{CB_PATH}?error=access_denied")
@@ -383,13 +389,11 @@ class TestOauthCallback:
         assert resp.status_code == 302
         assert _flash_type(resp) == "danger"
 
-    def test_non_loopback_callback_misreported_as_generic(self, client):
-        # R2/R7 (current behavior): the callback wraps its transport gate in a
-        # broad `except Exception`, so a non-loopback security refusal is
-        # reported as the generic "授权处理失败" — indistinguishable from a
-        # token-exchange failure. We assert the CURRENT behavior and flag it.
-        # TODO(O4-followup): the callback should distinguish a security refusal
-        # (RuntimeError from the loopback gate) from a token-exchange failure.
+    def test_non_loopback_callback_reported_distinctly(self, client):
+        # R2: a non-loopback callback URI makes the transport gate raise
+        # RuntimeError; the dedicated `except RuntimeError` reports it as a
+        # distinct transport-security failure (not the generic "授权处理失败"),
+        # and no token is written.
         _seed_oauth_session(client)
         flow_cls, mocks = _callback_mocks()
         with mocks[0], mocks[1] as save_tok, mocks[2], \
@@ -398,20 +402,20 @@ class TestOauthCallback:
             resp = client.get(f"{CB_PATH}?state=state-xyz&code=abc")
         assert resp.status_code == 302
         assert _flash_type(resp) == "danger"
+        # distinct, legible transport-security message (not generic)
+        assert quote("传输安全") in _location(resp)
         # the gate fired before token exchange — no token written
         save_tok.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# Known-bug surfacing (xfail — flips to xpass when the source bug is fixed)
+# Callback security fixes (were O4-surfaced bugs; now fixed in oauth.py)
 # ---------------------------------------------------------------------------
 
 
-class TestKnownGaps:
-    @pytest.mark.xfail(reason="O4 finding: oauth_code_verifier (PKCE) never popped "
-                              "from session after callback — oauth.py:226-227 pops "
-                              "only oauth_state + oauth_client_config", strict=False)
-    def test_callback_should_pop_code_verifier(self, client):
+class TestCallbackSecurityFixes:
+    def test_callback_pops_code_verifier(self, client):
+        # PKCE verifier must not linger in the session after a successful flow.
         _seed_oauth_session(client)
         flow_cls, mocks = _callback_mocks()
         with mocks[0], mocks[1], mocks[2]:
@@ -419,15 +423,16 @@ class TestKnownGaps:
         with client.session_transaction() as sess:
             assert "oauth_code_verifier" not in sess
 
-    @pytest.mark.xfail(reason="O4 finding: callback never compares returned ?state "
-                              "to session['oauth_state'] (missing canonical OAuth-CSRF "
-                              "check) — a mismatched state still exchanges the token",
-                       strict=False)
-    def test_callback_should_reject_state_mismatch(self, client):
+    def test_callback_rejects_state_mismatch(self, client):
+        # OAuth-CSRF: a returned ?state that differs from session['oauth_state']
+        # must be refused before any token exchange.
         _seed_oauth_session(client, state="A")
         flow_cls, mocks = _callback_mocks()
         with mocks[0], mocks[1] as save_tok, mocks[2]:
-            client.get(f"{CB_PATH}?state=B&code=abc")
+            resp = client.get(f"{CB_PATH}?state=B&code=abc")
+        assert resp.status_code == 302
+        assert _flash_type(resp) == "danger"
+        assert quote("state 校验失败") in _location(resp)
         save_tok.assert_not_called()
 
 
