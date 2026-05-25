@@ -290,6 +290,62 @@ register("yourplatform", YourPlatformAdapter, dofollow=True)
 
 `dofollow=` is a **required** keyword argument (Plan 2026-05-20-009). Legal values are `True`, `False`, or `"uncertain"`. Anything other than `True` additionally requires `rationale=` of ≥80 stripped chars explaining why a non-dofollow platform is shipping (mirrors `monolith_budget.toml` rationale discipline; length-only — content is reviewer concern). The gate is enforced at import time (missing `dofollow=` raises `TypeError`) and at CI time by `tests/test_adapter_dofollow_gate.py`.
 
+### 3b. Declare manifest metadata (Plan 2026-05-25-002)
+
+The same `register()` call accepts four optional declarative kwargs that collapse channel-specific wiring across `binding_status.py`, `webui_app/__init__.py`, `helpers/contexts.py`, and templates into a single SSoT. Reference: the **Velog pilot** at `adapters/__init__.py` (lines starting `register("velog", ...)`).
+
+```python
+from .._manifest_types import BindDescriptor, Policy, UiMeta
+
+register(
+    "yourplatform",
+    YourPlatformAdapter,
+    dofollow=True,
+    ui=UiMeta(
+        display_name="Your Platform",         # used by inject_platforms
+        domain="yourplatform.com",
+        category="dev-blog",                  # or "social", "wiki", ...
+        icon="bi-globe2",                     # Bootstrap icon name
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",            # or "cookie", "oauth", "chrome", "cdp"
+            storage_state_path="<config_dir>/yourplatform-token.json",
+            login_endpoint="/api/yourplatform/login",  # if applicable
+            card_template="_settings_channel_yourplatform.html",  # under webui_app/templates/
+            extras={                          # escape hatch for platform-specific paths
+                "browser_recipe": "backlink_publisher.publishing.browser_publish.recipes.yourplatform",
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=(60, 180),              # tuple[int, int] seconds
+        env_keys={"min": "YOURPLATFORM_THROTTLE_MIN",
+                  "max": "YOURPLATFORM_THROTTLE_MAX"},
+        retry_id="default",
+        liveness_probe_sec=900,
+        language_whitelist=("en", "ko"),      # () = no restriction
+    ),
+    visibility="active",                      # default; or "experimental" / "hidden" / "retired"
+)
+```
+
+**Why bother**:
+- `inject_platforms()` automatically picks up `display_name` from `UiMeta` (no template edit)
+- `hidden_from_ui()` / `_settings_context.dashboard_channels` filter automatically via `visibility="hidden"` / `"retired"` (no second wire site)
+- `tests/test_manifest_contract.py` validates the manifest shape on every CI run and prints a migration progress board
+
+**`visibility` lifecycle**:
+
+| state | behaviour |
+|---|---|
+| `"active"` | default; listed everywhere |
+| `"experimental"` | opt-in only (CLI `--include-experimental`, WebUI advanced mode) |
+| `"hidden"` | UI suppressed; existing bound configs still work (PR #136 write.as pattern) |
+| `"retired"` | UI suppressed + `save_config` stops round-tripping its TOML sections (Unit 2b — pending) |
+
+**All four kwargs are optional**. Omitting them is the "legacy" path — channel still registers, but won't benefit from the reverse-lookup wiring. `tests/test_manifest_contract.py` prints `legacy_platforms()` count to surface migration progress.
+
 If the platform name appears in `publishing.registry._REJECTED_PLATFORMS` (the negative-knowledge map seeded from PR #108→#109's `devto` / `mastodon` / `wordpresscom` reverts), `register()` raises `RegistryError` at import time. Un-rejection path: delete the entry from `_REJECTED_PLATFORMS` in the same PR as the new `register()` call — the deletion diff makes the un-rejection visible to reviewers; no `accept_rejection_override` kwarg exists.
 
 Do NOT edit:
