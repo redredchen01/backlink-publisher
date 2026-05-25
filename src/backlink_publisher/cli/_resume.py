@@ -20,6 +20,7 @@ from backlink_publisher._util.errors import (
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher._util.logger import publish_logger
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
+from backlink_publisher.publishing.adapters.base import carry_link_attr_verification
 from backlink_publisher.publishing.registry import registered_platforms
 from ..schema import supported_platforms, validate_publish_payload
 
@@ -57,11 +58,9 @@ def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
     # Forward-compatible: emit the link-attribute verdict if a checkpoint item
     # carries it. The checkpoint does not persist _provider_meta today, so a
     # resumed publish will not have it — the canary must be run as a single
-    # fresh (non-resumed) publish (see the canary-closeout runbook).
-    lav = item.get("link_attr_verification")
-    if lav is not None:
-        out["link_attr_verification"] = lav
-    return out
+    # fresh (non-resumed) publish (see the canary-closeout runbook). Shares the
+    # emitter helper with the fresh path so the two stay byte-identical.
+    return carry_link_attr_verification(out, item)
 
 
 def _record_resume_failure(
