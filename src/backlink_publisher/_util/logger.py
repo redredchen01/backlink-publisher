@@ -41,6 +41,21 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset({
     "token",  # bare 'token' — sometimes used as alias
     "authorization",  # http header pasted into extra
     "bearer",
+    # LiveJournal XML-RPC (Plan 2026-05-25-001 R15): the plaintext-equivalent
+    # authenticator, the per-call challenge-response, and the raw challenge
+    # value are all secret-equivalent — must never appear in extra dict or logs.
+    "hpassword",
+    "auth_response",
+    "challenge",
+    # Browser cookie / storage-state secrets (cross-platform, R15).
+    "cookie",
+    "storage_state",
+    # Anonymous POST form fields (Unit 7, R15): form_body and post_data carry
+    # user content that may include personal info or de-anonymisation signals.
+    "form_body",
+    "post_data",
+    "formhash",
+    "sid",
 })
 
 #: Cap for the recursive walk so a pathological extra dict (cycle, deep
