@@ -277,3 +277,165 @@ def test_ts_raw_preserves_offset_and_ts_utc_normalises_to_utc(tmp_path):
     assert events[0]["ts_raw"] == "2026-05-18T20:00:00+08:00"
     # 20:00 +08:00 == 12:00 UTC
     assert events[0]["ts_utc"] == "2026-05-18T12:00:00+00:00"
+
+
+# ── Plan 005 / U1: production success status is "done", not "succeeded" ──
+
+
+def _make_done(
+    item_id: str,
+    target_url: str,
+    *,
+    published_url: str = "https://blog.example.org/post-1",
+    verified: bool | None = True,
+    **overrides,
+) -> dict[str, Any]:
+    """A checkpoint item shaped like a real production success.
+
+    Production writes status="done" (publish_backlinks.py:264 / _resume.py:254),
+    not "succeeded". When ``verified`` is None the key is omitted entirely to
+    model a legacy (pre-D5) checkpoint.
+    """
+    base = _make_pending(item_id, target_url, **overrides)
+    base.update(
+        status="done",
+        published_url=published_url,
+        completed_at="2026-05-18T12:05:00+00:00",
+    )
+    if verified is not None:
+        base["verified"] = verified
+    return base
+
+
+def test_done_status_emits_confirmed_and_article(tmp_path):
+    """D1: a real production `done` success projects to publish.confirmed."""
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json",
+        items=[_make_done("a", "https://example.com/a")],
+    )
+
+    result = flush_for(ckpt)
+
+    assert result.events_inserted == 1
+    assert result.articles_inserted == 1
+    events = _query_events(EventStore())
+    confirmed = [e for e in events if e["kind"] == "publish.confirmed"]
+    assert len(confirmed) == 1
+    assert json.loads(confirmed[0]["payload_json"])["live_url"] == (
+        "https://blog.example.org/post-1"
+    )
+
+
+def test_done_unverified_emits_publish_unverified_not_confirmed(tmp_path):
+    """D5: a `done` whose run failed verification (exit 5) MUST NOT count as
+    a confirmed success — it projects to publish.unverified instead."""
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json",
+        items=[_make_done("a", "https://example.com/a", verified=False)],
+    )
+
+    flush_for(ckpt)
+
+    events = _query_events(EventStore())
+    kinds = [e["kind"] for e in events]
+    assert "publish.confirmed" not in kinds
+    assert kinds.count("publish.unverified") == 1
+
+
+def test_done_without_verified_key_defaults_to_confirmed(tmp_path):
+    """Backward compat: legacy `done` items (no `verified` field) project as
+    confirmed — pre-D5 checkpoints were not distinguishable."""
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json",
+        items=[_make_done("a", "https://example.com/a", verified=None)],
+    )
+
+    flush_for(ckpt)
+
+    events = _query_events(EventStore())
+    assert [e["kind"] for e in events] == ["publish.confirmed"]
+
+
+def test_done_legacy_succeeded_status_still_works(tmp_path):
+    """Regression guard: the legacy `succeeded` status keeps projecting."""
+    item = _make_pending("a", "https://example.com/a")
+    item.update(
+        status="succeeded",
+        published_url="https://blog.example.org/post-1",
+        completed_at="2026-05-18T12:05:00+00:00",
+    )
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=[item]
+    )
+
+    flush_for(ckpt)
+
+    confirmed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.confirmed"]
+    assert len(confirmed) == 1
+
+
+# ── Plan 005 / U2 (D2): publishing-platform attribution in payloads ──
+
+
+def test_confirmed_event_carries_platform_from_adapter(tmp_path):
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json",
+        items=[_make_done("a", "https://example.com/a", adapter="medium")],
+    )
+
+    flush_for(ckpt)
+
+    confirmed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.confirmed"]
+    assert json.loads(confirmed[0]["payload_json"])["platform"] == "medium"
+
+
+def test_failed_event_carries_platform_from_adapter(tmp_path):
+    item = _make_pending("a", "https://example.com/a", adapter="velog")
+    item.update(status="failed", error="boom", error_class="X")
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=[item]
+    )
+
+    flush_for(ckpt)
+
+    failed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.failed"]
+    assert json.loads(failed[0]["payload_json"])["platform"] == "velog"
+
+
+def test_predispatch_failure_platform_is_none_not_absent(tmp_path):
+    """A failure with no adapter resolved → platform present and None
+    (the 'unattributed' representation), never a missing key."""
+    item = _make_pending("a", "https://example.com/a", adapter=None)
+    item.update(status="failed", error="validation", error_class="V")
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=[item]
+    )
+
+    flush_for(ckpt)
+
+    failed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.failed"]
+    payload = json.loads(failed[0]["payload_json"])
+    assert "platform" in payload
+    assert payload["platform"] is None
+
+
+def test_no_publish_event_missing_platform_key(tmp_path):
+    """Every publish.* event row carries a `platform` key (None or value),
+    so the dashboard's GROUP BY never sees a third 'key absent' state."""
+    items = [
+        _make_pending("p", "https://example.com/p"),  # intent
+        _make_done("d", "https://example.com/d", adapter="medium"),
+        dict(_make_pending("f", "https://example.com/f", adapter="velog"),
+             status="failed", error="e", error_class="C"),
+    ]
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=items
+    )
+
+    flush_for(ckpt)
+
+    pub_events = [e for e in _query_events(EventStore())
+                  if e["kind"].startswith("publish.")]
+    assert pub_events
+    for e in pub_events:
+        assert "platform" in json.loads(e["payload_json"]), e["kind"]

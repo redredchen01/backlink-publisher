@@ -157,9 +157,19 @@ def _run_resume(args: Any) -> None:
             )
 
     if not to_process:
-        all_done = [item_to_publish_output(i) for i in ckpt["items"] if i["status"] == "done"]
+        all_done = []
+        for i in ckpt["items"]:
+            if i["status"] == "done":
+                out = item_to_publish_output(i)
+                if not i.get("verified", True):
+                    out["status"] += "_unverified"
+                all_done.append(out)
         write_jsonl(all_done)
         sys.stdout.flush()
+        # R2: project even on a no-op resume so a run whose checkpoint was
+        # written but never projected (crash-before-projection) is recovered.
+        from ..events import project_run_safe
+        project_run_safe(run_id)
         checkpoint.mark_complete(run_id)
         raise SystemExit(0)
 
@@ -257,16 +267,11 @@ def _run_resume(args: Any) -> None:
             continue
 
         completed_at = datetime.now(timezone.utc).isoformat()
-        from .. import checkpoint as _ckpt
-        _ckpt.update_item(
-            run_id, item["id"], "done",
-            published_url=result.published_url,
-            adapter=result.adapter,
-            completed_at=completed_at,
-        )
-        if result.post_publish_delay_seconds > 0:
-            last_medium_success_idx = item_idx
-
+        # Verify before the checkpoint write so the `done` record carries the
+        # verification verdict (Plan 005 / D5). Previously verification ran
+        # after the write and only updated the transient `unverified_ids` set,
+        # so the projector could never tell a verified `done` from an
+        # unverified one — and counted unverified publishes as successes.
         row = item["payload"]
         verify_ok, verify_reason = _do_verify(
             getattr(args, "no_verify", False), False, result, row
@@ -278,6 +283,17 @@ def _run_resume(args: Any) -> None:
                 extra={"id": item["id"], "adapter": result.adapter},
             )
 
+        from .. import checkpoint as _ckpt
+        _ckpt.update_item(
+            run_id, item["id"], "done",
+            published_url=result.published_url,
+            adapter=result.adapter,
+            completed_at=completed_at,
+            verified=verify_ok,
+        )
+        if result.post_publish_delay_seconds > 0:
+            last_medium_success_idx = item_idx
+
         publish_logger.info(
             f"published: id={item['id']} status={result.status}",
             extra={"id": item["id"], "status": result.status},
@@ -285,11 +301,20 @@ def _run_resume(args: Any) -> None:
 
     from .. import checkpoint as _ckpt
     updated_ckpt = _ckpt.load_checkpoint(run_id)
+
+    # R2: project the resumed run's outcomes into events.db before the
+    # unverified SystemExit(5) below. Fail-safe; never affects the exit code.
+    from ..events import project_run_safe
+    project_run_safe(run_id)
+
     all_done = []
     for i in updated_ckpt["items"]:
         if i["status"] == "done":
             out = item_to_publish_output(i)
-            if i["id"] in unverified_ids:
+            # Suffix from the current resume's transient set OR the persisted
+            # `verified` flag — so items completed unverified in a *prior*
+            # resume keep the marker on re-emit (not just this run's items).
+            if i["id"] in unverified_ids or not i.get("verified", True):
                 out["status"] += "_unverified"
             all_done.append(out)
     write_jsonl(all_done)

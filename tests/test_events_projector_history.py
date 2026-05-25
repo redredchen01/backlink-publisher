@@ -74,6 +74,8 @@ def test_published_history_row_emits_confirmed_and_article(tmp_path):
     assert events[0]["ts_raw"] == "2026-05-18 12:30"
     # ts_utc round-tripped through local TZ; just verify shape.
     assert events[0]["ts_utc"].endswith("+00:00")
+    # Plan 005 / U2 (D2): history confirmed events carry platform from the row.
+    assert json.loads(events[0]["payload_json"])["platform"] == "medium"
 
     articles = _query_articles(EventStore())
     assert articles[0]["live_url"] == "https://medium.com/@op/post-1"
@@ -104,6 +106,63 @@ def test_failed_history_row_emits_scrubbed_publish_failed(tmp_path):
     payload = json.loads(events[0]["payload_json"])
     assert "<REDACTED>" in payload["error_message_clean"]
     assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" not in payload["error_message_clean"]
+
+
+# ── Plan 005 / U3 (D3): consistent error_class across both sources ──
+
+
+def test_failed_history_row_carries_error_class_key(tmp_path):
+    """History failed events MUST carry an `error_class` key (None when the
+    row lacks one → the explicit 'unclassified' bucket), matching the
+    checkpoint reducer's failed-event shape."""
+    path = _write_history(
+        tmp_path / "publish-history.json",
+        [{
+            "id": "h-fail", "target_url": "https://example.com/x",
+            "platform": "blogger", "status": "failed",
+            "created_at": "2026-05-18 12:30", "article_urls": [],
+            "error": "boom",
+        }],
+    )
+
+    flush_for(path)
+    payload = json.loads(_query_events(EventStore())[0]["payload_json"])
+    assert "error_class" in payload  # present even when the row has none
+    assert payload["error_class"] is None
+
+
+def test_failed_history_row_preserves_present_error_class(tmp_path):
+    path = _write_history(
+        tmp_path / "publish-history.json",
+        [{
+            "id": "h-fail", "target_url": "https://example.com/x",
+            "platform": "blogger", "status": "failed",
+            "created_at": "2026-05-18 12:30", "article_urls": [],
+            "error": "boom", "error_class": "AuthExpiredError",
+        }],
+    )
+
+    flush_for(path)
+    payload = json.loads(_query_events(EventStore())[0]["payload_json"])
+    assert payload["error_class"] == "AuthExpiredError"
+
+
+def test_failed_event_shape_parity_checkpoint_vs_history(tmp_path):
+    """The publish.failed payload key set is identical whether projected from
+    the checkpoint or the history source (D3 shape parity)."""
+    expected_keys = {"error_class", "error_message_clean", "scrub_hits", "platform"}
+    path = _write_history(
+        tmp_path / "publish-history.json",
+        [{
+            "id": "h-fail", "target_url": "https://example.com/x",
+            "platform": "blogger", "status": "failed",
+            "created_at": "2026-05-18 12:30", "article_urls": [],
+            "error": "boom",
+        }],
+    )
+    flush_for(path)
+    payload = json.loads(_query_events(EventStore())[0]["payload_json"])
+    assert set(payload.keys()) == expected_keys
 
 
 def test_corrupt_history_leaves_cursor_untouched(tmp_path):

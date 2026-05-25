@@ -39,6 +39,11 @@ _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _HISTORY_FILENAME = "publish-history.json"
 _DRAFTS_FILENAME = "draft-queue.json"
 
+# Checkpoint success statuses. Production writes "done"
+# (cli/publish_backlinks.py / cli/_resume.py); "succeeded" is the legacy/test
+# form. Both project to a success event. (Plan 005 / D1.)
+_SUCCESS_STATUSES = ("succeeded", "done")
+
 
 
 class ProjectionError(RuntimeError):
@@ -81,6 +86,64 @@ def flush_for(
     if source_kind == "drafts":
         return _project_drafts(path, store)
     raise ProjectionError(f"unknown source for path: {path}")
+
+
+# Reserved projection_cursor key for the projection-health marker (Plan 005 /
+# U4). Reuses the existing table — no schema migration — so the dashboard and
+# an operator can see whether the projection is fresh or silently failing.
+_HEALTH_SOURCE = "__projection_health__"
+
+
+def record_projection_health(
+    store: EventStore, *, ok: bool, error: str | None = None
+) -> None:
+    """Persist the last projection outcome so swallowed failures are visible.
+
+    Fail-safe in its own right: never raises (the DB may be the thing that is
+    locked/broken). Stored under a reserved ``projection_cursor`` row.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with store.connect() as conn:
+            state = dict(_cursor_load(conn, _HEALTH_SOURCE))
+            if ok:
+                state["last_ok_at"] = now
+                state["last_error"] = None
+            else:
+                state["last_error"] = error
+                state["last_error_at"] = now
+            _cursor_save(conn, _HEALTH_SOURCE, state, mtime=None)
+    except Exception as exc:  # noqa: BLE001 — health recording is best-effort
+        _log.warning("projector: could not record projection health: %s", exc)
+
+
+def project_run_safe(
+    run_id: str, *, store: EventStore | None = None
+) -> ProjectionResult | None:
+    """Project a finished run's checkpoint into ``events.db`` — fail-safe.
+
+    Called inline at the end of publish/resume (Plan 005 / R2). It MUST NOT
+    raise: a projection failure (a locked DB ``sqlite3.OperationalError`` from a
+    concurrent writer, a ``ProjectionError``, a missing checkpoint) is logged
+    and swallowed so the publish result is unaffected. ``flush_for`` is
+    idempotent, so the dashboard's project-on-read remains a safe backstop.
+    """
+    store = store or EventStore()
+    try:
+        from ..checkpoint import checkpoint_path
+
+        result = flush_for(checkpoint_path(run_id), store=store)
+        record_projection_health(store, ok=True)
+        return result
+    except Exception as exc:  # noqa: BLE001 — projection must never fail publish
+        _log.warning(
+            "projector: projection after run %s failed (non-fatal): %s",
+            run_id, exc,
+        )
+        record_projection_health(
+            store, ok=False, error=f"{type(exc).__name__}: {exc}"
+        )
+        return None
 
 
 # ── Source detection ──────────────────────────────────────────────
@@ -262,7 +325,11 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 seen_intent_or_failed.add(dedup_key)
                 store.append(
                     "publish.intent",
-                    {"target_url": target_url, "title": item.get("title")},
+                    {
+                        "target_url": target_url,
+                        "title": item.get("title"),
+                        "platform": item.get("adapter"),
+                    },
                     run_id=run_id,
                     target_url=target_url,
                     host=host,
@@ -272,7 +339,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            elif status == "succeeded":
+            elif status in _SUCCESS_STATUSES:
                 live_host = _host_of(published_url) or host
                 payload = item.get("payload") or {}
                 _body = payload.get("content_markdown") if isinstance(payload, dict) else None
@@ -303,8 +370,16 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     skipped_due_to_dedup += 1
                     continue
                 articles_inserted += 1
+                # D5: a `done` whose run failed verification (CLI exits 5)
+                # writes `verified=False` into the checkpoint item. Such a
+                # publish MUST NOT count as a confirmed success — emit a
+                # distinct `publish.unverified` so a naive "WHERE
+                # kind='publish.confirmed'" count stays honest. Legacy items
+                # without the key default to verified (pre-D5 indistinguishable).
+                _verified = item.get("verified", True)
+                _kind = "publish.confirmed" if _verified else "publish.unverified"
                 store.append(
-                    "publish.confirmed",
+                    _kind,
                     {
                         "live_url": published_url,
                         "target_url": target_url,
@@ -312,6 +387,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                             canonicalize_url(published_url)
                             if published_url else None
                         ),
+                        "platform": item.get("adapter"),
                     },
                     run_id=run_id,
                     target_url=target_url,
@@ -337,6 +413,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                         "error_class": error_class,
                         "error_message_clean": cleaned,
                         "scrub_hits": hits or {},
+                        "platform": item.get("adapter"),
                     },
                     run_id=run_id,
                     target_url=target_url,
@@ -469,7 +546,11 @@ def _project_history(
                     # row, but article row is skipped.
                     store.append(
                         "publish.confirmed",
-                        {"live_url": None, "target_url": target_url},
+                        {
+                            "live_url": None,
+                            "target_url": target_url,
+                            "platform": row.get("platform"),
+                        },
                         target_url=target_url,
                         host=host,
                         ts_raw=ts_raw,
@@ -500,7 +581,11 @@ def _project_history(
                     articles_inserted += 1
                     store.append(
                         "publish.confirmed",
-                        {"live_url": live_url, "target_url": target_url},
+                        {
+                            "live_url": live_url,
+                            "target_url": target_url,
+                            "platform": row.get("platform"),
+                        },
                         target_url=target_url,
                         host=_host_of(live_url),
                         article_id=article_id,
@@ -520,8 +605,13 @@ def _project_history(
                 store.append(
                     "publish.failed",
                     {
+                        # D3: always present so checkpoint- and history-sourced
+                        # failed events share one shape; None when the row has
+                        # no class → the explicit "unclassified" bucket.
+                        "error_class": row.get("error_class"),
                         "error_message_clean": cleaned,
                         "scrub_hits": hits or {},
+                        "platform": row.get("platform"),
                     },
                     target_url=target_url,
                     host=host,
