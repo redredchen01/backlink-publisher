@@ -240,6 +240,15 @@ def register(
                 f"candidate). Leaving it unset is the silent gap this gate "
                 f"closes."
             )
+    # Runtime-validate the value against _ReferralValue. The Literal type is
+    # static-only; a typo like referral_value="HIGH" would otherwise pass the
+    # None-check, store an out-of-band value, and silently fall into the
+    # report's "unclassified" bucket (review finding — project-standards).
+    if referral_value is not None and referral_value not in ("high", "low"):
+        raise RegistryError(
+            f"`register({platform!r}, ..., referral_value={referral_value!r})` "
+            f"— referral_value must be 'high' or 'low' (got {referral_value!r})."
+        )
     _REGISTRY[platform] = list(publishers)
     _DOFOLLOW_BY_PLATFORM[platform] = dofollow
     if referral_value is not None:

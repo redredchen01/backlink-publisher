@@ -107,6 +107,29 @@ class TestDofollowFalseRequiresRationale:
         with pytest.raises(RegistryError, match="rationale"):
             register("foo_false_none", FakeAdapter, dofollow=False)
 
+    def test_register_with_invalid_referral_value_raises(self) -> None:
+        # The _ReferralValue Literal is static-only; a typo must be caught
+        # at runtime, not silently stored and mis-bucketed downstream.
+        with pytest.raises(RegistryError, match="referral_value must be"):
+            register(
+                "foo_bad_referral",
+                FakeAdapter,
+                dofollow=False,
+                rationale=RATIONALE_PAD,
+                referral_value="HIGH",  # type: ignore[arg-type]
+            )
+
+    def test_register_dofollow_true_rejects_invalid_referral_value(self) -> None:
+        # Even when referral_value is optional (dofollow=True), a provided
+        # out-of-band value is rejected rather than stored.
+        with pytest.raises(RegistryError, match="referral_value must be"):
+            register(
+                "foo_true_bad_referral",
+                FakeAdapter,
+                dofollow=True,
+                referral_value="medium",  # type: ignore[arg-type]
+            )
+
 
 class TestDofollowUncertainRequiresRationale:
     def test_register_with_uncertain_and_long_rationale_succeeds(self) -> None:

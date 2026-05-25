@@ -80,6 +80,62 @@ def test_json_output_omits_tier_key_when_summary_none() -> None:
     assert "_dofollow_tiers" not in data
 
 
+def test_nofollow_signal_with_no_referral_falls_into_unclassified() -> None:
+    # A nofollow-signal row whose referral_value is unset (neither high nor
+    # low) must land in the "unclassified" sub-bucket, not high/low.
+    rows = [
+        _row(
+            "anyplatform",
+            anchors=2,
+            metadata={"dofollow_tier": "nofollow-signal", "referral_value": None},
+        )
+    ]
+    summary = _build_tier_summary(rows)
+    ref = summary["nofollow-signal"]["referral"]
+    assert ref["unclassified"] == {"articles": 1, "anchors": 2}
+    assert ref["high"]["articles"] == 0 and ref["low"]["articles"] == 0
+
+
+def test_markdown_omits_unknown_row_when_zero_unknown_articles() -> None:
+    # The unknown row is suppressed when no rows fell into the unknown tier.
+    rows = [_row("blogger")]
+    stats = {
+        "https://a.com": {
+            "total_articles": 1,
+            "anchors": collections.Counter({"kw0": 1}),
+            "fallback_count": 0,
+        }
+    }
+    md = _markdown_table(stats, top_n=5, tier_summary=_build_tier_summary(rows))
+    assert "| unknown |" not in md
+
+
+def test_markdown_shows_unknown_row_when_unknown_present() -> None:
+    rows = [_row(None, anchors=1)]
+    stats = {
+        "https://a.com": {
+            "total_articles": 1,
+            "anchors": collections.Counter({"kw0": 1}),
+            "fallback_count": 0,
+        }
+    }
+    md = _markdown_table(stats, top_n=5, tier_summary=_build_tier_summary(rows))
+    assert "| unknown |" in md
+
+
+def test_markdown_omits_tier_section_when_summary_none() -> None:
+    # Backward-compat: no tier_summary → no breakdown section appended.
+    stats = {
+        "https://a.com": {
+            "total_articles": 1,
+            "anchors": collections.Counter({"kw0": 1}),
+            "fallback_count": 0,
+        }
+    }
+    md = _markdown_table(stats, top_n=5)
+    assert "Dofollow tier breakdown" not in md
+
+
 def test_markdown_appends_tier_breakdown_section() -> None:
     rows = [_row("blogger"), _row("devto")]
     stats = {

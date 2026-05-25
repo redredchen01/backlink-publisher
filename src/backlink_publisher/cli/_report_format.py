@@ -151,9 +151,16 @@ def _resolve_row_tier(row: dict[str, Any]) -> tuple[str, str | None]:
 
     Prefers the ``metadata`` mark stamped by plan-backlinks (Unit 2);
     falls back to a live registry join on ``row["platform"]`` for rows
-    that predate the mark. Registry stays the single source of truth —
-    nothing is stored here. Rows with no resolvable platform/status fall
+    that predate the mark. Rows with no resolvable platform/status fall
     into the ``"unknown"`` tier.
+
+    Note the deliberate precedence: the plan-time mark wins over the live
+    registry. This means the report reflects the tier **as classified
+    when the row was planned**, not the registry's current state — so if
+    a platform is re-classified between plan and report, the older mark
+    persists. This is intentional (the report describes what was planned);
+    it is not a live registry read. ``register()`` remains the only writer
+    of tier state — this function reads, never stores.
     """
     meta = row.get("metadata") or {}
     tier = meta.get("dofollow_tier")
