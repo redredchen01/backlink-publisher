@@ -172,3 +172,71 @@ def test_publish_cli_populates_events_db_end_to_end(mock_pub, mock_verify, mock_
 
     # The publish outcome reached events.db through the inline projection.
     assert "publish.confirmed" in _kinds()
+
+
+@patch("backlink_publisher.cli._publish_helpers.verify_published")
+@patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
+@patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
+def test_publish_cli_verification_failure_projects_unverified(mock_pub, mock_verify, mock_vp):
+    """D5 end-to-end through the real CLI: a publish whose verification FAILS
+    writes verified=False to the checkpoint and projects publish.unverified
+    (NOT publish.confirmed), and the CLI exits 5."""
+    import sys
+    from io import StringIO
+    from backlink_publisher.publishing.adapters.base import AdapterResult
+    from backlink_publisher.linkcheck.verify import VerificationResult
+    from backlink_publisher.cli.publish_backlinks import main
+
+    mock_pub.return_value = AdapterResult(
+        status="drafted", adapter="blogger-api", platform="blogger",
+        published_url="https://blogger.example.com/p0",
+    )
+    mock_vp.return_value = VerificationResult(ok=False, reason="link not found")
+
+    old_stdin, old_out, old_err = sys.stdin, sys.stdout, sys.stderr
+    sys.stdin = StringIO(json.dumps(_full_payload()))
+    sys.stdout, sys.stderr = StringIO(), StringIO()
+    code = 0
+    try:
+        try:
+            main(["--mode", "draft", "--platform", "blogger"])
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+    finally:
+        sys.stdin, sys.stdout, sys.stderr = old_stdin, old_out, old_err
+
+    kinds = _kinds()
+    assert "publish.unverified" in kinds       # projected as unverified
+    assert "publish.confirmed" not in kinds     # NOT counted as a success
+    assert code == 5                            # CLI signals unverified
+
+
+@patch("backlink_publisher.cli._resume.verify_adapter_setup")
+def test_resume_noop_reemits_unverified_suffix_and_projects(mock_setup):
+    """A no-op resume (all items already done) re-emits a prior-resume
+    unverified item WITH the _unverified suffix (from the persisted `verified`
+    flag, not just this run's transient set) AND projects it (R2 recovery)."""
+    import sys
+    from io import StringIO
+    from backlink_publisher.cli.publish_backlinks import main
+
+    run_id = _seed_done_run(verified=False)  # one done item, verified=False
+
+    old_stdin, old_out, old_err = sys.stdin, sys.stdout, sys.stderr
+    sys.stdin = StringIO("")
+    sys.stdout, sys.stderr = StringIO(), StringIO()
+    out = sys.stdout
+    try:
+        try:
+            main(["--resume", run_id])
+        except SystemExit:
+            pass
+        stdout_val = out.getvalue()
+    finally:
+        sys.stdin, sys.stdout, sys.stderr = old_stdin, old_out, old_err
+
+    # Output JSONL marks the prior-resume done item as unverified...
+    rows = [json.loads(line) for line in stdout_val.splitlines() if line.strip()]
+    assert rows and all(r["status"].endswith("_unverified") for r in rows)
+    # ...and the no-op resume still projected it (recovery path).
+    assert "publish.unverified" in _kinds()

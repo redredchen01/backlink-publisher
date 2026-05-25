@@ -157,9 +157,19 @@ def _run_resume(args: Any) -> None:
             )
 
     if not to_process:
-        all_done = [item_to_publish_output(i) for i in ckpt["items"] if i["status"] == "done"]
+        all_done = []
+        for i in ckpt["items"]:
+            if i["status"] == "done":
+                out = item_to_publish_output(i)
+                if not i.get("verified", True):
+                    out["status"] += "_unverified"
+                all_done.append(out)
         write_jsonl(all_done)
         sys.stdout.flush()
+        # R2: project even on a no-op resume so a run whose checkpoint was
+        # written but never projected (crash-before-projection) is recovered.
+        from ..events import project_run_safe
+        project_run_safe(run_id)
         checkpoint.mark_complete(run_id)
         raise SystemExit(0)
 
@@ -301,7 +311,10 @@ def _run_resume(args: Any) -> None:
     for i in updated_ckpt["items"]:
         if i["status"] == "done":
             out = item_to_publish_output(i)
-            if i["id"] in unverified_ids:
+            # Suffix from the current resume's transient set OR the persisted
+            # `verified` flag — so items completed unverified in a *prior*
+            # resume keep the marker on re-emit (not just this run's items).
+            if i["id"] in unverified_ids or not i.get("verified", True):
                 out["status"] += "_unverified"
             all_done.append(out)
     write_jsonl(all_done)

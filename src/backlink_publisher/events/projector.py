@@ -130,9 +130,9 @@ def project_run_safe(
     """
     store = store or EventStore()
     try:
-        from ..checkpoint import _checkpoint_path
+        from ..checkpoint import checkpoint_path
 
-        result = flush_for(_checkpoint_path(run_id), store=store)
+        result = flush_for(checkpoint_path(run_id), store=store)
         record_projection_health(store, ok=True)
         return result
     except Exception as exc:  # noqa: BLE001 — projection must never fail publish

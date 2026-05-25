@@ -36,6 +36,15 @@ def _checkpoint_path(run_id: str) -> Path:
     return _checkpoint_dir() / f"{run_id}.json"
 
 
+def checkpoint_path(run_id: str) -> Path:
+    """Public accessor for a run's checkpoint file path.
+
+    Lets the events projector resolve a run_id without importing the private
+    ``_checkpoint_path``. Does not validate or require the file to exist.
+    """
+    return _checkpoint_path(run_id)
+
+
 def _atomic_write(path: Path, data: dict) -> None:
     # Preserved as a module-private alias so existing call sites and tests that
     # patch ``checkpoint._atomic_write`` keep working. New code should import

@@ -5,6 +5,7 @@ status: active
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/brainstorms/2026-05-25-publishing-health-dashboard-requirements.md
+claims: {}  # opt-out: branch SHAs not yet merged; drift gate not applicable pre-merge
 ---
 
 # fix: Events projector correctness (D1–D4 + R2)
