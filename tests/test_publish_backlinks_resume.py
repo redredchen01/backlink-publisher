@@ -434,6 +434,26 @@ def test_item_to_publish_output_has_all_fields():
     assert out["article_urls"] == ["https://x.com"]
 
 
+def test_item_to_publish_output_omits_verdict_when_absent():
+    """Checkpoint items lack _provider_meta today → no verification key emitted."""
+    from backlink_publisher.cli.publish_backlinks import item_to_publish_output
+    item = {"id": "r1", "platform": "txtfyi", "status": "done",
+            "published_url": "https://txt.fyi/a", "adapter": "txtfyi-form"}
+    out = item_to_publish_output(item)
+    assert "link_attr_verification" not in out
+
+
+def test_item_to_publish_output_emits_verdict_when_checkpoint_carries_it():
+    """Forward-compatible: emit the verdict if a checkpoint item ever carries it."""
+    from backlink_publisher.cli.publish_backlinks import item_to_publish_output
+    verdict = {"verification": "ok", "nofollow_detected": False}
+    item = {"id": "r2", "platform": "txtfyi", "status": "done",
+            "published_url": "https://txt.fyi/b", "adapter": "txtfyi-form",
+            "link_attr_verification": verdict}
+    out = item_to_publish_output(item)
+    assert out["link_attr_verification"] == verdict
+
+
 # ── integration: Unit 2 → Unit 3 ──────────────────────────────────────────────
 
 @patch("backlink_publisher.checkpoint._cache_dir")

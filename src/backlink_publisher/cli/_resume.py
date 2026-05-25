@@ -41,7 +41,7 @@ def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
             item.get("published_url") or "",
             item.get("draft_url") or "",
         ) if u]
-    return {
+    out = {
         "id": item.get("id", ""),
         "platform": item.get("platform", ""),
         "status": item.get("status", ""),
@@ -54,6 +54,14 @@ def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
         "adapter": item.get("adapter") or "",
         "error": None,
     }
+    # Forward-compatible: emit the link-attribute verdict if a checkpoint item
+    # carries it. The checkpoint does not persist _provider_meta today, so a
+    # resumed publish will not have it — the canary must be run as a single
+    # fresh (non-resumed) publish (see the canary-closeout runbook).
+    lav = item.get("link_attr_verification")
+    if lav is not None:
+        out["link_attr_verification"] = lav
+    return out
 
 
 def _record_resume_failure(

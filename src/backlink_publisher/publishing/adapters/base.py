@@ -34,7 +34,7 @@ class AdapterResult:
     def to_publish_output(self, row: dict[str, Any], created_at: str) -> dict[str, Any]:
         """Convert to the JSONL output shape expected by publish_backlinks."""
         article_urls = _resolve_article_urls(row, self.draft_url, self.published_url)
-        return {
+        out = {
             "id": row.get("id", ""),
             "platform": self.platform,
             "status": self.status,
@@ -47,3 +47,9 @@ class AdapterResult:
             "adapter": self.adapter,
             "error": self.error,
         }
+        # Surface the post-publish link-attribute verdict (R4 canary loop) when an
+        # adapter attached it. Emit only when present so draft mode and adapters
+        # that do not verify keep an unchanged output shape.
+        if self._provider_meta and "link_attr_verification" in self._provider_meta:
+            out["link_attr_verification"] = self._provider_meta["link_attr_verification"]
+        return out
