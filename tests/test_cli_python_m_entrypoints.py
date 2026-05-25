@@ -34,6 +34,7 @@ _CLI_MODULES = {
     "validate-backlinks": "backlink_publisher.cli.validate_backlinks",
     "footprint": "backlink_publisher.cli.footprint",
     "report-anchors": "backlink_publisher.cli.report_anchors",
+    "equity-ledger": "backlink_publisher.cli.equity_ledger",
 }
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
