@@ -61,19 +61,11 @@ def _get_index_html(client) -> str:
 
 # ── Velog canary: every platform-rendering site must include velog ───────────
 #
-# These tests assume velog is registered.  When this branch is rebased
-# onto a base where PR #75 (settings-browser-binding stack adding velog)
-# has landed, they auto-activate.  Until then they skip — the reverse-
-# driven contract is still proven by the telegraph + DummyAdapter
-# canaries below.
+# velog is a permanently registered adapter (landed via PR #75); these run
+# unconditionally. If velog ever drops from the registry the contract is
+# broken and these SHOULD fail rather than skip.
 
 
-def _velog_in_registry() -> bool:
-    from backlink_publisher.publishing.registry import registered_platforms
-    return "velog" in registered_platforms()
-
-
-@pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_appears_in_publish_form_select(client):
     """index.html publish form `<select name="platform">` must include velog."""
     html = _get_index_html(client)
@@ -81,14 +73,12 @@ def test_velog_appears_in_publish_form_select(client):
     assert "Velog" in html
 
 
-@pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_appears_in_filter_chip_row(client):
     """Filter chip row must have a velog chip (data-filter-value="velog")."""
     html = _get_index_html(client)
     assert 'data-filter-value="velog"' in html
 
 
-@pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_appears_in_js_counter_dict(client):
     """platform_slugs in window.__indexBootstrap must include velog for initCounts."""
     import json, re
@@ -103,7 +93,6 @@ def test_velog_appears_in_js_counter_dict(client):
     )
 
 
-@pytest.mark.skipif(not _velog_in_registry(), reason="velog not registered (PR #75 not landed)")
 def test_velog_in_norm_platform_tuple(client):
     """velog must appear in window.__indexBootstrap.platform_slugs (norm_platform contract)."""
     import json, re
@@ -149,7 +138,7 @@ def test_detect_platform_known_routes_unchanged():
     assert detect_platform("https://blog.blogspot.com/post") == "blogger"
 
 
-# ── Telegraph appears too (when U1 has landed) ───────────────────────────────
+# ── Telegraph appears too ────────────────────────────────────────────────────
 
 
 def test_telegraph_appears_in_select_after_u1():
@@ -159,12 +148,6 @@ def test_telegraph_appears_in_select_after_u1():
     containing telegraph, the WebUI auto-renders it — no separate HTML
     edit needed.
     """
-    from backlink_publisher.publishing.registry import registered_platforms
-
-    # Defensive: skip if U1 hasn't landed in this branch.
-    if "telegraph" not in registered_platforms():
-        pytest.skip("U1 (telegraph adapter) not present in registry")
-
     from webui_app import create_app
 
     app = create_app(start_scheduler=False)
@@ -175,11 +158,6 @@ def test_telegraph_appears_in_select_after_u1():
 
 
 def test_telegraph_appears_in_filter_chip_after_u1():
-    from backlink_publisher.publishing.registry import registered_platforms
-
-    if "telegraph" not in registered_platforms():
-        pytest.skip("U1 (telegraph adapter) not present in registry")
-
     from webui_app import create_app
 
     app = create_app(start_scheduler=False)
