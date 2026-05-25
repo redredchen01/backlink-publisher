@@ -267,6 +267,7 @@ def main(argv: list[str] | None = None) -> None:
                         article_urls=[u for u in (result.published_url, result.draft_url) if u],
                         adapter=result.adapter,
                         completed_at=datetime.now(timezone.utc).isoformat(),
+                        verified=verify_ok,
                     )
                 except Exception as ckpt_exc:
                     print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)

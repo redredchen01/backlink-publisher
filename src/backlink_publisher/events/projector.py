@@ -39,6 +39,11 @@ _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _HISTORY_FILENAME = "publish-history.json"
 _DRAFTS_FILENAME = "draft-queue.json"
 
+# Checkpoint success statuses. Production writes "done"
+# (cli/publish_backlinks.py / cli/_resume.py); "succeeded" is the legacy/test
+# form. Both project to a success event. (Plan 005 / D1.)
+_SUCCESS_STATUSES = ("succeeded", "done")
+
 
 
 class ProjectionError(RuntimeError):
@@ -272,7 +277,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            elif status == "succeeded":
+            elif status in _SUCCESS_STATUSES:
                 live_host = _host_of(published_url) or host
                 payload = item.get("payload") or {}
                 _body = payload.get("content_markdown") if isinstance(payload, dict) else None
@@ -303,8 +308,16 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     skipped_due_to_dedup += 1
                     continue
                 articles_inserted += 1
+                # D5: a `done` whose run failed verification (CLI exits 5)
+                # writes `verified=False` into the checkpoint item. Such a
+                # publish MUST NOT count as a confirmed success — emit a
+                # distinct `publish.unverified` so a naive "WHERE
+                # kind='publish.confirmed'" count stays honest. Legacy items
+                # without the key default to verified (pre-D5 indistinguishable).
+                _verified = item.get("verified", True)
+                _kind = "publish.confirmed" if _verified else "publish.unverified"
                 store.append(
-                    "publish.confirmed",
+                    _kind,
                     {
                         "live_url": published_url,
                         "target_url": target_url,

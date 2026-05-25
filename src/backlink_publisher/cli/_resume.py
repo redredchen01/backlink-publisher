@@ -257,16 +257,11 @@ def _run_resume(args: Any) -> None:
             continue
 
         completed_at = datetime.now(timezone.utc).isoformat()
-        from .. import checkpoint as _ckpt
-        _ckpt.update_item(
-            run_id, item["id"], "done",
-            published_url=result.published_url,
-            adapter=result.adapter,
-            completed_at=completed_at,
-        )
-        if result.post_publish_delay_seconds > 0:
-            last_medium_success_idx = item_idx
-
+        # Verify before the checkpoint write so the `done` record carries the
+        # verification verdict (Plan 005 / D5). Previously verification ran
+        # after the write and only updated the transient `unverified_ids` set,
+        # so the projector could never tell a verified `done` from an
+        # unverified one — and counted unverified publishes as successes.
         row = item["payload"]
         verify_ok, verify_reason = _do_verify(
             getattr(args, "no_verify", False), False, result, row
@@ -277,6 +272,17 @@ def _run_resume(args: Any) -> None:
                 f"verification failed: id={item['id']} reason={verify_reason}",
                 extra={"id": item["id"], "adapter": result.adapter},
             )
+
+        from .. import checkpoint as _ckpt
+        _ckpt.update_item(
+            run_id, item["id"], "done",
+            published_url=result.published_url,
+            adapter=result.adapter,
+            completed_at=completed_at,
+            verified=verify_ok,
+        )
+        if result.post_publish_delay_seconds > 0:
+            last_medium_success_idx = item_idx
 
         publish_logger.info(
             f"published: id={item['id']} status={result.status}",
