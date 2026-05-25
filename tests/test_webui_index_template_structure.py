@@ -125,3 +125,15 @@ def test_no_flash_args_renders_no_alert_block(client):
     # No empty 'alert alert-' (flash type interpolated into class) should appear
     # from the flash block when flash.msg is absent.
     assert 'role="alert">\n            </div>' not in body
+
+
+def test_flash_msg_is_html_escaped(client):
+    """ce:review (security): flash_msg/flash_type are operator-controlled query
+    params reflected into the page — a payload must be HTML-escaped (Jinja2
+    autoescape), never injected as live markup."""
+    resp = client.get("/?flash_type=danger&flash_msg=<img src=x onerror=alert(1)>")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    # The raw tag must not appear; its escaped form must.
+    assert "<img src=x onerror=alert(1)>" not in body
+    assert "&lt;img src=x onerror=alert(1)&gt;" in body
