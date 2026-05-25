@@ -1,7 +1,7 @@
 ---
 title: "test: Dedicated route-level coverage for Blogger/Medium OAuth WebUI routes (O4)"
 type: test
-status: active
+status: completed
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/ideation/2026-05-25-codebase-optimization-backlog.md  # backlog item O4
