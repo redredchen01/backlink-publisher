@@ -83,29 +83,53 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         # Importing adapters at first request populates the registry
         # side-effect — same idiom as plan_backlinks.py / publish_backlinks.py.
         import backlink_publisher.publishing.adapters  # noqa: F401
-        from backlink_publisher.publishing.registry import registered_platforms
+        from backlink_publisher.publishing.registry import (
+            bound_platforms as registry_bound_platforms,
+            registered_platforms,
+            ui_meta,
+        )
+
+        # Plan 2026-05-25-002 Unit 4a — display name reverse-lookup.
+        # When the channel's manifest declares a UiMeta, use its
+        # display_name (e.g. ghpages -> "GitHub Pages", devto -> "Dev.to").
+        # Otherwise fall back to the legacy ``s.title()`` derivation.
+        # Legacy behaviour preserved for the 7 non-velog channels until
+        # Phase 2 migrations populate their UiMeta.
+        def _display(slug: str) -> str:
+            meta = ui_meta(slug)
+            return meta.display_name if meta is not None else slug.title()
 
         all_slugs = list(registered_platforms())
+        # History filter chips still need the FULL list (per
+        # ``feedback_platforms_vs_bound_platforms_split``) — already-
+        # published unbound channels stay filterable.
         platforms = [
-            {"slug": s, "display_name": s.title()} for s in all_slugs
+            {"slug": s, "display_name": _display(s)} for s in all_slugs
         ]
 
-        # `bound_platforms` is the publish-form filter: only channels whose
-        # offline binding check passes (and that aren't UI-hidden) are shown
-        # in the platform <select>. History filter chips still consume the
-        # full `platforms` list so already-published unbound channels remain
-        # filterable. Falls back to the full list on any load failure so the
-        # form never breaks mid-render.
+        # `bound_platforms` is the publish-form filter: only channels
+        # whose offline binding check passes (and that aren't hidden /
+        # retired per manifest visibility) appear in the platform select.
+        # Falls back to the full list on any load failure so the form
+        # never breaks mid-render.
+        #
+        # Plan U4a: ``registry.bound_platforms(cfg, is_bound)`` composes
+        # ``active_platforms()`` (drops hidden + retired + experimental)
+        # with the injected ``is_bound`` predicate. The predicate stays
+        # at this call site to avoid the publishing -> webui_app layer
+        # inversion (see registry.py:bound_platforms docstring).
         try:
             from backlink_publisher.config import load_config
-            from .binding_status import get_channel_status, HIDDEN_FROM_UI
+            from .binding_status import get_channel_status
             from .helpers._request_cache import _g_cache
             cfg = _g_cache('config', load_config)
+
+            def _is_bound(_cfg, name: str) -> bool:
+                return bool(get_channel_status(name, _cfg).get("bound"))
+
+            bound_slugs = registry_bound_platforms(cfg, _is_bound)
             bound_platforms = [
-                {"slug": s, "display_name": s.title()}
-                for s in all_slugs
-                if s not in HIDDEN_FROM_UI
-                and get_channel_status(s, cfg).get("bound")
+                {"slug": s, "display_name": _display(s)} for s in bound_slugs
             ]
         except Exception:
             bound_platforms = platforms
