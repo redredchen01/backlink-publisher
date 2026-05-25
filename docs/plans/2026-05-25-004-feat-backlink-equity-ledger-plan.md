@@ -4,6 +4,7 @@ type: feat
 status: active
 date: 2026-05-25
 origin: docs/brainstorms/2026-05-25-backlink-equity-ledger-requirements.md
+claims: {}  # opt-out: not yet merged; plan-claims-gate satisfied without SHA claims
 ---
 
 # feat: Backlink Equity Ledger — per-target read-only scorecard

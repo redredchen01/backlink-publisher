@@ -37,7 +37,7 @@ Flask app at `webui_app/` (20 route modules, `create_app()` factory). State pers
 
 App-level CSRF guard `_global_csrf_guard` (PR #143, `webui_app/__init__.py`) enforces a token on every POST/PUT/PATCH/DELETE. Tests opt out via `app.config['CSRF_ENABLED'] = False` (or the legacy `WTF_CSRF_ENABLED` flag — both honored). The `_check_csrf_or_abort` helper has a single production call site inside the global guard; PR #148 removed all inline per-route calls.
 
-### CLI entrypoints (6)
+### CLI entrypoints (7)
 
 ```bash
 cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode draft
@@ -49,6 +49,7 @@ cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode
 | `validate-backlinks` | `cli/validate_backlinks.py` | Validate + enrich |
 | `publish-backlinks` | `cli/publish_backlinks.py` | Publish via platform adapters |
 | `report-anchors` | `cli/report_anchors.py` | Post-hoc anchor profile |
+| `equity-ledger` | `cli/equity_ledger.py` | Per-target backlink scorecard (read-only JSONL) |
 | `footprint` | `cli/footprint.py` | Link footprint analysis |
 | `phase0-seal` | `cli/phase0_seal.py` | Phase0 seal operations |
 

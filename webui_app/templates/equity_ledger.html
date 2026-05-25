@@ -67,7 +67,13 @@
 const ROWS = {{ rows|tojson }};
 const EXACT_THRESHOLD = {{ exact_match_threshold|tojson }};
 const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+const STALE_DAYS = {{ stale_days|tojson }};
 const LIVE_RANK = { failed: 3, stale: 2, live: 1, unverified: 0 };
+// HTML-escape any value-derived string before it goes into innerHTML.
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 let sortKey = 'live_dofollow', sortDir = 1;  // weakest first
 
 function truncMiddle(s, n = 48) {
@@ -141,7 +147,7 @@ function render() {
     if (r.live_dofollow === 0) tr.className = 'row-weak';
     tr.innerHTML =
       `<td><button class="btn btn-sm btn-link p-0 expand" aria-expanded="false" title="Details"><i class="bi bi-chevron-right"></i></button></td>` +
-      `<td class="target-cell" title="${r.target_url}">${truncMiddle(r.target_url)}</td>` +
+      `<td class="target-cell" title="${esc(r.target_url)}">${esc(truncMiddle(r.target_url))}</td>` +
       `<td class="text-end">${liveLabel(r)}</td>` +
       `<td class="text-end fw-semibold">${r.live_dofollow}</td>` +
       `<td class="text-end small">${d.dofollow}<span class="text-muted">/</span>${d.uncertain}<span class="text-muted">/</span>${d.nofollow}<span class="text-muted">/</span>${d.unknown}</td>` +
@@ -159,7 +165,7 @@ function render() {
       `<th>uncertain</th><td>${d.uncertain}</td>` +
       `<th>nofollow</th><td>${d.nofollow} (high ${d.nofollow_high} / low ${d.nofollow_low})</td>` +
       `<th>unknown</th><td>${d.unknown}</td>` +
-      `<th>platforms</th><td>${(r.platforms || []).join(', ') || '—'}</td>` +
+      `<th>platforms</th><td>${esc((r.platforms || []).join(', ')) || '—'}</td>` +
       `</tr></table></td>`;
     body.appendChild(detail);
 
@@ -186,7 +192,7 @@ async function recheck(r, tr) {
     const resp = await fetch('/ce:equity-ledger/recheck', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ target_url: r.target_url }),
+      body: JSON.stringify({ target_url: r.target_url, stale_days: STALE_DAYS }),
     });
     const ct = resp.headers.get('content-type') || '';
     if (!resp.ok || !ct.includes('application/json')) throw new Error('recheck failed (' + resp.status + ')');

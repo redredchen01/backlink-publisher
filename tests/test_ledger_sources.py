@@ -103,6 +103,18 @@ def test_anchor_profile_attaches_per_target(store):
     assert buckets[T2].has_anchor_data is False
 
 
+def test_orphan_history_link_attaches_under_target(store):
+    # A history item whose article_url has no matching article row still counts
+    # as a published link, attached under the item's target.
+    hist = HISTORY + [{
+        "id": "h9", "platform": "velog", "target_url": T1,
+        "article_urls": ["https://orphan.example/x"], "status": "published",
+    }]
+    buckets = build_target_buckets(store=store, history=hist)
+    assert "https://orphan.example/x" in buckets[T1].links
+    assert buckets[T1].links["https://orphan.example/x"].platform == "velog"
+
+
 def test_empty_stores_yield_empty(tmp_path):
     empty = EventStore(path=tmp_path / "empty.db")
     assert build_target_buckets(store=empty, history=[]) == {}

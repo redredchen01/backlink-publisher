@@ -80,6 +80,40 @@ def test_link_liveness_states():
     ) == "failed"  # failed wins over a present verified_at
 
 
+def test_link_liveness_tz_aware_does_not_crash():
+    # Regression: some writers emit tz-aware UTC; naive `now` minus aware must
+    # not raise. It folds to naive local before the subtraction.
+    now = datetime(2026, 5, 25)
+    assert _link_liveness(
+        LinkRecord("u", verified_at="2026-05-24T00:00:00+00:00"), now, 30
+    ) == "live"
+    assert _link_liveness(
+        LinkRecord("u", verified_at="2026-01-01T00:00:00+00:00"), now, 30
+    ) == "stale"
+
+
+def test_link_liveness_unparseable_is_unverified():
+    now = datetime(2026, 5, 25)
+    assert _link_liveness(LinkRecord("u", verified_at="not-a-date"), now, 30) == "unverified"
+    assert _link_liveness(LinkRecord("u", verified_at=""), now, 30) == "unverified"
+
+
+def test_liveness_row_level_flag(tmp_path):
+    # A single history row bundling two links → row-level evidence (R7a).
+    s = EventStore(path=tmp_path / "e.db")
+    _article(s, "https://medium.com/a")
+    _article(s, "https://medium.com/b")
+    hist = [{"id": "h", "platform": "medium", "target_url": T,
+             "article_urls": ["https://medium.com/a", "https://medium.com/b"]}]
+    rows = build_ledger(store=s, history=hist)
+    assert rows[0].liveness_row_level is True
+
+
+def test_single_link_rows_not_row_level(store):
+    rows = build_ledger(store=store, history=_hist())  # 3 single-url items
+    assert rows[0].liveness_row_level is False
+
+
 def test_stale_boundary(store):
     now = datetime.now()
     just_stale = (now - timedelta(days=31)).isoformat(timespec="seconds")

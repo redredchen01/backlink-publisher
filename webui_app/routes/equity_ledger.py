@@ -64,9 +64,17 @@ def equity_ledger_recheck():
     target = data.get("target_url")
     if not target:
         return jsonify({"error": "target_url required"}), 400
+    # Honor the same staleness window the table was rendered with, so the
+    # refreshed row's stale flag matches the rest of the view.
+    try:
+        stale_days = int(data.get("stale_days", 30))
+    except (TypeError, ValueError):
+        stale_days = 30
+    if stale_days <= 0:
+        stale_days = 30
     canon = canonicalize_url(target)
 
-    row = next((r for r in build_ledger() if r.target_url == canon), None)
+    row = next((r for r in build_ledger(stale_days=stale_days) if r.target_url == canon), None)
     if row is None:
         return jsonify({"error": "target not found"}), 404
 
@@ -74,14 +82,20 @@ def equity_ledger_recheck():
     for item_id in row.history_item_ids:
         item = history_store.get_item(item_id)
         if not item:
+            counts["skipped"] += 1  # deleted between snapshot and recheck
             continue
-        mutation = recheck_one(item)
+        try:
+            mutation = recheck_one(item)
+        except Exception as exc:  # one bad item must not abort the whole batch
+            history_store.update_item(item_id, status="failed", verify_error=str(exc))
+            counts["failed"] += 1
+            continue
         outcome = mutation.pop("_outcome", None)
         history_store.update_item(item_id, **mutation)
         counts[_OUTCOME_LABELS.get(outcome, "skipped")] += 1
 
     # Recompute the target's row from the freshly mutated history.
-    refreshed = next((r for r in build_ledger() if r.target_url == canon), row)
+    refreshed = next((r for r in build_ledger(stale_days=stale_days) if r.target_url == canon), row)
     summary = (
         f"{counts['confirmed']} confirmed, "
         f"{counts['failed']} failed, {counts['skipped']} skipped"

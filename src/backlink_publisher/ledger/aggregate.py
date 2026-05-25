@@ -57,6 +57,11 @@ def _link_liveness(link: LinkRecord, now: datetime, stale_days: int) -> str:
         verified = datetime.fromisoformat(link.verified_at)
     except (ValueError, TypeError):
         return "unverified"  # unparseable timestamp ⇒ no reliable evidence
+    if verified.tzinfo is not None:
+        # Writers are inconsistent (recheck uses naive-local; some bind paths
+        # emit tz-aware UTC). Fold to naive local so the subtraction against a
+        # naive ``now`` can never raise "can't subtract offset-naive/aware".
+        verified = verified.astimezone().replace(tzinfo=None)
     return "stale" if (now - verified).days > stale_days else "live"
 
 

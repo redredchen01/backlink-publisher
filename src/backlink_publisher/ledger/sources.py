@@ -53,7 +53,6 @@ class LinkRecord:
     history_item_id: str | None = None
     verified_at: str | None = None
     verify_error: str | None = None
-    status: str | None = None
 
 
 @dataclass
@@ -131,7 +130,6 @@ def build_target_buckets(
         item_id = item.get("id")
         verified_at = item.get("verified_at")
         verify_error = item.get("verify_error")
-        status = item.get("status")
         item_target = _canon(item.get("target_url"))
         for raw_url in item.get("article_urls") or []:
             live = _canon(raw_url)
@@ -151,7 +149,6 @@ def build_target_buckets(
             link.history_item_id = item_id
             link.verified_at = verified_at
             link.verify_error = verify_error
-            link.status = status
 
     # 4. Anchor profiles → per-target ProfileEntry lists (re-keyed canonical).
     for state in anchor_profile.iter_profiles():
