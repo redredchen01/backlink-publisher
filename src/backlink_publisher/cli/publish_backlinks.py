@@ -6,7 +6,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from ._resume import _run_resume, item_to_publish_output
+from ._resume import _run_resume  # noqa: F401
 
 from backlink_publisher.config import load_config
 from backlink_publisher._util.errors import (

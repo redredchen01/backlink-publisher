@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import logging
 import os
-import stat
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-from backlink_publisher._util.errors import InputValidationError
 from backlink_publisher._util.logger import plan_logger
 from .types import (
     Config,
@@ -27,7 +24,6 @@ from .loader import load_config
 from ._config_io import _resolve_config_dir, _snapshot_config, _atomic_write_text
 from ._toml_utils import (
     _SAVE_CONFIG_KNOWN_ROOTS,
-    _canon_subsection_key,
     _preserve_unknown_sections,
     _toml_str,
     _toml_list,

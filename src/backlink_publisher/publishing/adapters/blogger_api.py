@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_id, load_blogger_token, save_blogger_token
+from backlink_publisher.config import Config, resolve_blog_id, load_blogger_token, save_blogger_token
 from backlink_publisher._util.errors import (
     AuthExpiredError,
     BannerUploadError,
@@ -65,8 +65,6 @@ def _refresh_lock(token_path: Path) -> Iterator[None]:
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
-
-
 
 
 def _near_expiry(creds, window_secs: int) -> bool:

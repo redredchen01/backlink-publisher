@@ -13,7 +13,7 @@ from backlink_publisher.anchor import profile as anchor_profile
 from backlink_publisher.anchor import resolver as anchor_resolver
 from backlink_publisher.anchor import scheduler as anchor_scheduler
 from backlink_publisher._util import markdown as markdown_utils
-from backlink_publisher.config import Config, get_anchor_keywords, get_anchor_pool_v2
+from backlink_publisher.config import Config, get_anchor_pool_v2
 from backlink_publisher._util.errors import InputValidationError
 from backlink_publisher._util.logger import plan_logger
 from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider

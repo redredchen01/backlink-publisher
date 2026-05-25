@@ -28,11 +28,19 @@ def snapshot_token_revs() -> dict[str, int]:
         ("ghpages", "ghpages-token.json"),
         ("notion", "notion-token.json"),
         ("devto", "devto-token.json"),
+        ("wordpresscom", "wordpresscom-token.json"),
+        ("hashnode", "hashnode-token.json"),
+        ("writeas", "writeas-token.json"),
+        ("tumblr", "tumblr-credentials.json"),
+        ("linkedin", "linkedin-token.json"),
+        ("ghost", "ghost-token.json"),
+        ("beehiiv", "beehiiv-token.json"),
     ]:
         token = _load_token(None, filename)
         if token:
             revs[plat] = token.get("token_rev", 0)
     return revs
+
 
 def _load_token(path: Path | None, default_filename: str) -> dict[str, Any] | None:
     token_path = path or (_resolve_config_dir() / default_filename)
@@ -91,7 +99,6 @@ def save_ghpages_token(data: dict[str, Any], path: Path | None = None) -> None:
     _save_token(data, path, "ghpages-token.json")
 
 
-
 def load_notion_token(path: Path | None = None) -> dict[str, Any] | None:
     """Load Notion integration token JSON ({integration_token: "...", database_id: "..."}).
 
@@ -108,6 +115,14 @@ def save_notion_token(data: dict[str, Any], path: Path | None = None) -> None:
     _save_token(data, path, "notion-token.json")
 
 
+def load_wordpresscom_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load WordPress.com OAuth token JSON ({token: "...", site: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "wordpresscom-token.json")
+
+
 def load_devto_token(path: Path | None = None) -> dict[str, Any] | None:
     """Load Dev.to API key JSON ({api_key: "..."}).
 
@@ -122,3 +137,59 @@ def save_devto_token(data: dict[str, Any], path: Path | None = None) -> None:
     Expected keys: api_key (str).
     """
     _save_token(data, path, "devto-token.json")
+
+
+def save_wordpresscom_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save WordPress.com OAuth token dict to JSON file with mode 0600.
+
+    Expected keys: token (str), site (str).
+    """
+    _save_token(data, path, "wordpresscom-token.json")
+
+
+def load_hashnode_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Hashnode PAT JSON ({personal_access_token: "...", publication_id: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "hashnode-token.json")
+
+
+def save_hashnode_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Hashnode PAT dict to JSON file with mode 0600.
+
+    Expected keys: personal_access_token (str), publication_id (str).
+    """
+    _save_token(data, path, "hashnode-token.json")
+
+
+def load_writeas_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load Write.as API token JSON ({token: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "writeas-token.json")
+
+
+def save_writeas_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save Write.as API token dict to JSON file with mode 0600.
+
+    Expected keys: token (str).
+    """
+    _save_token(data, path, "writeas-token.json")
+
+
+def load_linkedin_token(path: Path | None = None) -> dict[str, Any] | None:
+    """Load LinkedIn OAuth token JSON ({token: "...", person_id: "..."}).
+
+    Returns None if the file is absent — callers treat None as unbound.
+    """
+    return _load_token(path, "linkedin-token.json")
+
+
+def save_linkedin_token(data: dict[str, Any], path: Path | None = None) -> None:
+    """Save LinkedIn OAuth token dict to JSON file with mode 0600.
+
+    Expected keys: token (str), person_id (str).
+    """
+    _save_token(data, path, "linkedin-token.json")

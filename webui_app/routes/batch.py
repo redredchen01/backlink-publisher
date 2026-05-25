@@ -1,25 +1,26 @@
-"""/ce:batch + /ce:publish-real — Plan Unit 3."""
+"""/ce:batch + /ce:publish-real — Plan Unit 3.
+
+Phase A refactoring: uses ``PipelineAPI`` for all CLI invocations.
+"""
 
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 
 from flask import Blueprint, request, session
 
 from backlink_publisher.config import load_config as _load_cfg, resolve_blog_id as _resolve
 
+from ..api import PipelineAPI
 from ..helpers.contexts import _render
-from ..helpers.cli_runner import _REPO_ROOT, _rewrite_cli_cmd, run_pipe, strip_cli_diagnostic_banner
 from ..helpers.history import (
-    _parse_publish_results,
     _push_history_per_row,
     _push_history_single_failure,
 )
 from ..helpers.url_meta import get_main_domain
 
 bp = Blueprint("batch", __name__)
+_api = PipelineAPI()
 
 
 def _check_blogger_blog_id(domain: str) -> str | None:
@@ -79,30 +80,18 @@ def ce_batch():
         for u in urls
     )
 
-    try:
-        plan_res = run_pipe(['plan-backlinks'], seed_jsonl)
-    except Exception as e:
-        return _render('index.html', error=f"计划阶段失败: {e}", batch_tab=True,
+    plan_res = _api.plan(seed_jsonl)
+    if not plan_res.success:
+        return _render('index.html', error=f"计划阶段失败: {plan_res.error}", batch_tab=True,
                        batch_urls=urls_text, config={})
 
-    try:
-        val_res = run_pipe(['validate-backlinks', '--no-check-urls'], plan_res['stdout'])
-    except Exception as e:
-        return _render('index.html', error=f"验证阶段失败: {e}", batch_tab=True,
+    val_res = _api.validate(plan_res.stdout, no_check_urls=True)
+    if not val_res.success:
+        return _render('index.html', error=f"验证阶段失败: {val_res.error}", batch_tab=True,
                        batch_urls=urls_text, config={})
 
-    pub_cmd, pub_env = _rewrite_cli_cmd(
-        ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
-    )
-    pub_result = subprocess.run(
-        pub_cmd,
-        input=val_res['stdout'],
-        capture_output=True,
-        text=True,
-        cwd=_REPO_ROOT or os.getcwd(),
-        env=pub_env,
-    )
-    publish_results = _parse_publish_results(pub_result.stdout)
+    pub_res = _api.publish(val_res.stdout, platform, publish_mode)
+    publish_results = pub_res.rows
 
     result_by_url = {r.get('target_url', ''): r for r in publish_results}
     results = []
@@ -121,17 +110,13 @@ def ce_batch():
                 'title': r.get('title', ''), 'error': r.get('error', ''),
             })
         else:
-            err_hint = pub_result.stderr[:200] if pub_result.stderr else 'no output'
             results.append({
                 'url': url, 'status': 'failed', 'article_url': '',
-                'title': '', 'error': err_hint,
+                'title': '', 'error': pub_res.stderr_cleaned or 'no output',
             })
 
     # Plan 2026-05-19-006 Unit 1: per-row history with real status carried
-    # forward (including `*_unverified` suffixes). The CLI stdout already
-    # only contains rows whose adapter did not raise — `_unverified` rows
-    # are written with error=None, which is precisely the assumption we
-    # used to drop. Now we keep them as their real status.
+    # forward (including `*_unverified` suffixes).
     if publish_results:
         _push_history_per_row(
             publish_results,
@@ -159,39 +144,33 @@ def ce_publish_real():
                 return _render('index.html', error=err,
                                config=config, history_active=True)
 
-    try:
-        cmd = ['publish-backlinks', '--platform', platform, '--mode', 'publish']
-        result = run_pipe(cmd, validated)
-        published = result['stdout']
-
-        if not published.strip():
-            return _render('index.html',
-                error=result['stderr'] or "发布失败",
-                config=config, history_active=True)
-
-        publish_results = _parse_publish_results(published)
-        # Plan 2026-05-19-006 Unit 1: per-row truth-propagation. Previously
-        # one history row hard-coded status='success' regardless of per-row
-        # outcome (notably `*_unverified` rows showed as ✓ on UI).
-        history = _push_history_per_row(
-            publish_results,
-            target_url_fallback=config.get('target_url', 'unknown'),
-            platform_fallback=platform,
-            language_fallback=config.get('target_language', 'zh-CN'),
-        )
-
-        return _render('index.html', published=published,
-            publish_results=publish_results, config=config,
-            history=history, history_active=True)
-
-    except Exception as e:
-        msg = strip_cli_diagnostic_banner(str(e)) or str(e)
+    result = _api.publish(validated, platform, "publish")
+    if not result.success:
+        msg = result.error or "发布失败"
         history = _push_history_single_failure(
             target_url=config.get('target_url', 'unknown'),
             platform=platform,
             language=config.get('target_language', 'zh-CN'),
             error=msg,
         )
-
         return _render('index.html', error=f"发布失败: {msg}",
             config=config, history=history, history_active=True)
+
+    published = result.stdout
+    if not published.strip():
+        return _render('index.html',
+            error=result.stderr_cleaned or "发布失败",
+            config=config, history_active=True)
+
+    publish_results = result.rows
+    # Plan 2026-05-19-006 Unit 1: per-row truth-propagation.
+    history = _push_history_per_row(
+        publish_results,
+        target_url_fallback=config.get('target_url', 'unknown'),
+        platform_fallback=platform,
+        language_fallback=config.get('target_language', 'zh-CN'),
+    )
+
+    return _render('index.html', published=published,
+        publish_results=publish_results, config=config,
+        history=history, history_active=True)

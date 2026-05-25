@@ -395,3 +395,64 @@ MEDIUM_MANIFEST: dict[str, Any] = dict(
         language_whitelist=(),
     ),
 )
+
+# ── Phase-2 placeholder stubs ──────────────────────────────────────────────
+# WIP: adapters/__init__.py already imports these but the manifest authors
+# haven't shipped full metadata yet.  Minimal UiMeta keeps the import chain
+# alive and satisfies the display-name contract until each channel gets a
+# proper manifest with BindDescriptor + Policy.
+
+BEEHIIV_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Beehiiv", domain="beehiiv.com", category="newsletter"),
+)
+CNBLOGS_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="博客园", domain="cnblogs.com", category="dev-blog"),
+)
+CSDN_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="CSDN", domain="csdn.net", category="dev-blog"),
+)
+GHOST_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Ghost", domain="ghost.org", category="general-blog"),
+)
+HABR_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Habr", domain="habr.com", category="dev-blog"),
+)
+HASHNODE_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Hashnode", domain="hashnode.com", category="dev-blog"),
+)
+JIANSHU_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="简书", domain="jianshu.com", category="general-blog"),
+)
+JUEJIN_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="掘金", domain="juejin.cn", category="dev-blog"),
+)
+LINKEDIN_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="LinkedIn", domain="linkedin.com", category="social"),
+)
+NOTE_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Note", domain="note.com", category="general-blog"),
+)
+PIKABU_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Pikabu", domain="pikabu.ru", category="social"),
+)
+RENTRY_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Rentry", domain="rentry.co", category="wiki"),
+)
+SEGMENTFAULT_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="SegmentFault", domain="segmentfault.com", category="dev-blog"),
+)
+SUBSTACK_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Substack", domain="substack.com", category="newsletter"),
+)
+TUMBLR_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Tumblr", domain="tumblr.com", category="social"),
+)
+WORDPRESSCOM_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="WordPress", domain="wordpress.com", category="general-blog"),
+)
+WRITEAS_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="Write.as", domain="write.as", category="general-blog"),
+)
+ZHIHU_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(display_name="知乎", domain="zhihu.com", category="dev-blog"),
+)

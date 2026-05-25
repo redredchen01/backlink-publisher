@@ -53,6 +53,27 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "throwaway account; the secret cannot be revoked except by changing "
         "the password."
     ),
+    "tumblr": (
+        "Tumblr rewrites all outbound <a> href via t.umblr.com/redirect "
+        "which strips link equity — server-side and compulsory for all "
+        "accounts. The adapter is retained for referral traffic and "
+        "topical signal from a platform with high DA and strong "
+        "content-discovery reach. OAuth 1.0a credentials (consumer_key, "
+        "consumer_secret, oauth_token, oauth_token_secret) plus blog_name "
+        "are stored in a 0600 JSON file. Post body is HTML rendered from "
+        "content_markdown. Tags are comma-separated, capped at 20."
+    ),
+    "linkedin": (
+        "LinkedIn applies rel=\"nofollow ugc\" to outbound links in user posts "
+        "and articles server-side irrespective of account type — verified across "
+        "multiple accounts and post formats. The platform is retained for brand "
+        "exposure, B2B referral traffic, and topical relevance signalling rather "
+        "than direct PageRank transfer. DA ~95. LinkedIn's w_member_social OAuth "
+        "scope requires LinkedIn-app verification (operator responsibility; the "
+        "adapter raises DependencyError when the token file is absent or has "
+        "insufficient scope). Post body is HTML; max commentary length is 3000 "
+        "chars enforced server-side."
+    ),
     "txtfyi": (
         "Registered dofollow=\"uncertain\" pending the R4 canary loop "
         "(Plan 2026-05-25-001 Unit 7): Phase 0 probe confirmed txt.fyi serves "

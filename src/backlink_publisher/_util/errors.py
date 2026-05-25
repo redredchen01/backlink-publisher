@@ -61,8 +61,8 @@ class AntiBotChallengeError(ExternalServiceError):
     challenge surfaced as ``DependencyError`` it would be re-raised verbatim by
     the registry dispatch loop and become indistinguishable from "platform not
     configured". Propagating it as a service-rejection (semantics mirror
-    ``instant_web``'s ``content_is_blocked``) keeps "the site blocked us" cleanly
-    separate from "the operator never set this up".
+    ``instant_web``'s ``content_is_blocked``) keeps "the site blocked us"
+    cleanly separate from "the operator never set this up".
 
     Never carries the POST body or response HTML in its message — see the log
     scrubber contract in ``_util.logger``.
@@ -142,12 +142,13 @@ class BannerUploadError(DependencyError):
 
 
 class ContentRejectedError(DependencyError):
-    """Server accepted the request but rejected the content — cookie is still valid.
+    """Server accepted the request but rejected the content — cookie valid.
 
     Sibling (NOT subclass) of ``AuthExpiredError``.  ``mark_expired`` must
     NOT fire on this exception: the credentials are fine, but the publish
-    was silently dropped for a non-auth reason (content validation, server-side
-    rate-limit, slug collision, or an undocumented velog restriction).
+    was silently dropped for a non-auth reason (content validation,
+    server-side rate-limit, slug collision, or an undocumented velog
+    restriction).
 
     The operator should inspect the debug artifact cited in the log line and
     fix the underlying content issue rather than re-binding the channel.

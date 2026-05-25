@@ -11,6 +11,7 @@ from ..types import (
 
 _log = logging.getLogger(__name__)
 
+
 def _parse_target_anchor_keywords(targets_section: Any) -> dict[str, list[str]]:
     """Parse ``[targets."<main_domain>"].anchor_keywords`` entries.
 
