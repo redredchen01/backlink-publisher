@@ -208,6 +208,13 @@ def _put_contents(
     )
 class _ShaRequired(Exception):
     """Internal sentinel — 422 from PUT contents means the file exists."""
+
+
+_JEKYLL_POST_RE = __import__("re").compile(
+    r"^_posts/(\d{4})-(\d{2})-(\d{2})-(.+?)\.(?:md|markdown)$"
+)
+
+
 def _published_url(repo: str, path: str) -> str:
     """Public URL for the committed post.
 
