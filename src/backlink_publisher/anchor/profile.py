@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -193,6 +194,30 @@ def load_profile(main_domain: str) -> ProfileState:
         main_domain=str(raw.get("main_domain", main_domain)),
         entries=entries,
     )
+
+
+def iter_profiles() -> "Iterator[ProfileState]":
+    """Yield every on-disk anchor profile (one per site).
+
+    There is no per-target index — profiles are keyed by the seed's
+    ``main_domain``. Consumers that need an all-sites view (e.g. the
+    Backlink Equity Ledger, which keys by per-entry ``target_url``) glob
+    the profile directory and load each file through the robust
+    :func:`load_profile` path. Missing directory ⇒ no profiles (cold start).
+    Files whose JSON lacks a ``main_domain`` key are skipped.
+    """
+    directory = _profile_dir()
+    if not directory.exists():
+        return
+    for path in sorted(directory.glob("*.json")):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        main_domain = raw.get("main_domain")
+        if not main_domain:
+            continue
+        yield load_profile(str(main_domain))
 
 
 def record_article(main_domain: str, new_entries: list[ProfileEntry]) -> None:
