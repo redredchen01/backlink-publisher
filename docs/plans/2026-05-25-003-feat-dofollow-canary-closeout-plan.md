@@ -5,6 +5,7 @@ status: completed
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/brainstorms/2026-05-25-remaining-channel-viability-expansion-requirements.md
+claims: {}
 ---
 
 # feat: Close the dofollow canary loop for livejournal + txt.fyi (lightweight)
