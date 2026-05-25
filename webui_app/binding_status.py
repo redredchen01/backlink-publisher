@@ -36,7 +36,64 @@ from backlink_publisher.config import Config
 # `test_settings_dashboard_rendering.py`. Adapter source stays in the repo
 # so CLI / tests continue to exercise the registry pattern; only the UI
 # surface is suppressed.
-HIDDEN_FROM_UI: frozenset[str] = frozenset()
+#
+# Plan 2026-05-25-002 Unit 2a — derived dynamically from
+# ``registry.visibility(name)`` instead of a hand-maintained frozenset.
+# A platform is hidden iff its manifest declares ``visibility="hidden"``
+# (UI hidden, existing bound configs still work — PR #136 write.as
+# pattern) or ``visibility="retired"`` (UI hidden + config sections no
+# longer round-tripped, Unit 2b). Default ``"active"`` => not hidden.
+#
+# Two access paths preserved:
+#   hidden_from_ui()        — explicit function call, recomputed each
+#                             call (cheap; the registry has ≤20 entries)
+#   HIDDEN_FROM_UI          — module-level attribute via PEP 562
+#                             ``__getattr__``. Existing call sites that
+#                             do ``from .binding_status import HIDDEN_FROM_UI``
+#                             keep working unchanged; each import binds
+#                             the *current* dynamic frozenset.
+#
+# Per ``feedback_invert_drift_check_when_invariant_becomes_dynamic``:
+# any module-import-time assertion against ``HIDDEN_FROM_UI`` would now
+# run before ``adapters/__init__.py`` finishes registering platforms,
+# so callers MUST use function-local or test-time imports. The drift
+# test in ``test_settings_dashboard_rendering.py`` already follows that
+# pattern (function-local import inside each test method).
+
+
+def hidden_from_ui() -> frozenset[str]:
+    """Return platforms whose manifest hides them from the WebUI."""
+    # Local import: registry → webui_app inversion is forbidden, so
+    # binding_status imports registry (not the other way around). Top-
+    # level import would still work but stays local for symmetry with
+    # ``get_channel_status`` below and to avoid pinning module-load
+    # order against ``adapters/__init__.py``.
+    from backlink_publisher.publishing.registry import (
+        registered_platforms,
+        visibility,
+    )
+
+    return frozenset(
+        name
+        for name in registered_platforms()
+        if visibility(name) in ("hidden", "retired")
+    )
+
+
+def __getattr__(name: str) -> object:
+    """PEP 562 module-level attribute hook.
+
+    Preserves the legacy ``HIDDEN_FROM_UI`` module-level name so existing
+    callers don't need to update their import + call syntax in lock-step
+    with Unit 2a. Each ``from .binding_status import HIDDEN_FROM_UI``
+    triggers this hook and gets a freshly computed frozenset bound to
+    the caller's namespace.
+    """
+    if name == "HIDDEN_FROM_UI":
+        return hidden_from_ui()
+    raise AttributeError(
+        f"module 'webui_app.binding_status' has no attribute {name!r}"
+    )
 
 # Dofollow / nofollow knowledge moved to publishing.registry (Plan 2026-05-20-009
 # U5): per-adapter declaration via register(..., dofollow=...) is the single
