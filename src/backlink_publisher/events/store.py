@@ -179,14 +179,12 @@ class EventStore:
         self.path: Path = path if path is not None else _default_db_path()
         self._sleep_fn = sleep_fn
 
-    @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        """Open a connection, apply PRAGMAs + schema, yield to caller.
+    def _connect_raw(self) -> sqlite3.Connection:
+        """Open a connection, apply PRAGMAs + schema + file hygiene, return it.
 
-        Acts as a transaction boundary: pending work is committed on
-        normal exit, rolled back on exception, and the connection is
-        always closed. Idempotent: schema upgrade runs every connect,
-        but is itself a no-op when the version is current.
+        Shared setup for ``connect`` and ``connect_immediate``. The schema
+        upgrade is committed before returning so the caller's own
+        transaction starts clean. Caller owns closing the connection.
 
         File hygiene: parent directory is tightened to 0o700 on first
         create regardless of any pre-existing mode (events.db sits next
@@ -208,37 +206,82 @@ class EventStore:
                 pass
 
         conn = sqlite3.connect(str(self.path), timeout=5.0)
-        try:
-            # Apply PRAGMAs before touching tables — WAL mode in particular
-            # must be set on a fresh connection.
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA synchronous = NORMAL")
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA foreign_keys = ON")
-            _schema.maybe_upgrade_schema(conn)
-            conn.commit()
+        # Apply PRAGMAs before touching tables — WAL mode in particular
+        # must be set on a fresh connection.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA foreign_keys = ON")
+        _schema.maybe_upgrade_schema(conn)
+        conn.commit()
 
-            if first_create:
-                # Mode + xattr only on the first creation; subsequent
-                # ``connect`` calls do not re-chmod (operator may have
-                # widened the mode intentionally).
-                try:
-                    os.chmod(self.path, 0o600)
-                except OSError:
-                    pass
-                _set_backup_exclude_xattr(self.path)
-
-            # WAL/SHM appear lazily on first write and inherit umask
-            # rather than the .db file's mode. Tighten every connect so
-            # post-checkpoint recreations stay locked down.
-            _tighten_wal_sidecars(self.path)
-
+        if first_create:
+            # Mode + xattr only on the first creation; subsequent
+            # ``connect`` calls do not re-chmod (operator may have
+            # widened the mode intentionally).
             try:
-                yield conn
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
+                os.chmod(self.path, 0o600)
+            except OSError:
+                pass
+            _set_backup_exclude_xattr(self.path)
+
+        # WAL/SHM appear lazily on first write and inherit umask
+        # rather than the .db file's mode. Tighten every connect so
+        # post-checkpoint recreations stay locked down.
+        _tighten_wal_sidecars(self.path)
+        return conn
+
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection, apply PRAGMAs + schema, yield to caller.
+
+        Acts as a transaction boundary: pending work is committed on
+        normal exit, rolled back on exception, and the connection is
+        always closed. Idempotent: schema upgrade runs every connect,
+        but is itself a no-op when the version is current.
+
+        Uses SQLite's default *deferred* isolation — the write lock is
+        acquired lazily on the first DML. For a read-modify-write critical
+        section that must not interleave with a concurrent writer, use
+        ``connect_immediate`` instead.
+        """
+        conn = self._connect_raw()
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @contextmanager
+    def connect_immediate(self) -> Iterator[sqlite3.Connection]:
+        """Like ``connect`` but opens the transaction with ``BEGIN IMMEDIATE``.
+
+        Acquires SQLite's RESERVED write-lock at transaction *start* rather
+        than lazily on first write, so a read-modify-write critical section
+        cannot interleave with a concurrent writer's cursor RMW (Plan 006 /
+        U1 single-flight). Commits on normal exit, rolls back on exception.
+
+        Caller MUST NOT open a second writing connection in the same thread
+        while this context is held — that self-deadlocks on the RESERVED
+        lock (busy_timeout → ``OperationalError: database is locked``).
+        """
+        conn = self._connect_raw()
+        # Take manual control of transactions so BEGIN IMMEDIATE is honored
+        # (Python's default isolation issues a lazy deferred BEGIN).
+        conn.isolation_level = None
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            yield conn
+            conn.execute("COMMIT")
+        except BaseException:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         finally:
             conn.close()
 
