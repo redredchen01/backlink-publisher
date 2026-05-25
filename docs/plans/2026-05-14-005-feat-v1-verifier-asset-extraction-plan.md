@@ -1,7 +1,8 @@
 ---
 title: V1 Verifier Asset Extraction (post-#1 close)
 type: feat
-status: active
+status: completed
+completed: 2026-05-25
 date: 2026-05-14
 origin: docs/plans/2026-05-14-004-refactor-pr-landing-roadmap-plan.md
 ---
