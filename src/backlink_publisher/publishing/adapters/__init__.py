@@ -27,7 +27,18 @@ from typing import Any, Literal, Optional
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
 from ..registry import dispatch, register, registered_platforms
-from .._manifests import BLOGGER_MANIFEST, TELEGRAPH_MANIFEST, VELOG_MANIFEST
+from .._manifests import (
+    BLOGGER_MANIFEST,
+    DEVTO_MANIFEST,
+    GHPAGES_MANIFEST,
+    LIVEJOURNAL_MANIFEST,
+    MASTODON_MANIFEST,
+    MEDIUM_MANIFEST,
+    NOTION_MANIFEST,
+    TELEGRAPH_MANIFEST,
+    TXTFYI_MANIFEST,
+    VELOG_MANIFEST,
+)
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
@@ -77,6 +88,7 @@ register(
     MediumBraveAdapter,
     MediumBrowserAdapter,
     dofollow=True,
+    **MEDIUM_MANIFEST,
 )
 register("telegraph", TelegraphAPIAdapter, dofollow=True, **TELEGRAPH_MANIFEST)
 register(
@@ -86,13 +98,19 @@ register(
     dofollow=True,
     **VELOG_MANIFEST,
 )
-register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
+register(
+    "ghpages",
+    GitHubPagesAPIAdapter,
+    dofollow=True,
+    **GHPAGES_MANIFEST,
+)
 register(
     "livejournal",
     LivejournalAPIAdapter,
     dofollow="uncertain",  # R4 canary pending; Phase 0 preliminary = dofollow
     rationale=_R["livejournal"],
     referral_value="high",  # established DA + referral if it turns out nofollow
+    **LIVEJOURNAL_MANIFEST,
 )
 register(
     "txtfyi",
@@ -100,6 +118,7 @@ register(
     dofollow="uncertain",  # R4 canary pending; Phase 0 preliminary = dofollow
     rationale=_R["txtfyi"],
     referral_value="low",  # anonymous pastebin; modest DA + R4 pending
+    **TXTFYI_MANIFEST,
 )
 register(
     "devto",
@@ -108,6 +127,7 @@ register(
     dofollow=False,
     rationale=_R["devto"],
     referral_value="high",  # high DA + referral traffic + topical signal
+    **DEVTO_MANIFEST,
 )
 register(
     "notion",
@@ -115,12 +135,14 @@ register(
     dofollow=False,
     rationale=_R["notion"],
     referral_value="high",  # DA ~75+, entity signal, indexation speed
+    **NOTION_MANIFEST,
 )
 register(
     "mastodon",
     BrowserPublishDispatcher.for_channel("mastodon"),
     dofollow=False,
     rationale=_R["mastodon"],
+    **MASTODON_MANIFEST,
     referral_value="high",  # Fediverse referral traffic + topical signal
 )
 

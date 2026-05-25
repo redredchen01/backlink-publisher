@@ -120,9 +120,14 @@ class TestUiMetaDisplayName:
             assert velog_entry is not None
             assert velog_entry["display_name"] == "Velog"
 
-    def test_legacy_platform_falls_back_to_title(self, app) -> None:
-        # Other 7 production platforms have no UiMeta. Falls back to
-        # slug.title() (the legacy behaviour preserved).
+    def test_every_platform_has_manifest_display_name(self, app) -> None:
+        # Plan 2026-05-25-002 Phase 2 finish — every production channel
+        # now declares a UiMeta. The legacy slug.title() fallback path
+        # is unreachable in production but still wired (the helper keeps
+        # it for forward-compat with newly-registered platforms that
+        # have not yet declared a manifest).
+        from backlink_publisher.publishing.registry import ui_meta
+
         with app.test_request_context("/"):
             from flask import current_app
 
@@ -130,10 +135,12 @@ class TestUiMetaDisplayName:
             for processor in current_app.template_context_processors[None]:
                 ctx.update(processor())
             for entry in ctx["platforms"]:
-                if entry["slug"] == "velog":
-                    continue
-                # blogger -> "Blogger", devto -> "Devto", etc.
-                assert entry["display_name"] == entry["slug"].title()
+                meta = ui_meta(entry["slug"])
+                assert meta is not None, (
+                    f"{entry['slug']!r}: no UiMeta — Phase 2 missed this "
+                    f"channel. Add a <SLUG>_MANIFEST to _manifests.py."
+                )
+                assert entry["display_name"] == meta.display_name
 
 
 class TestHiddenPlatformFiltered:

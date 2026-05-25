@@ -158,3 +158,240 @@ BLOGGER_MANIFEST: dict[str, Any] = dict(
         language_whitelist=(),
     ),
 )
+
+
+# ── ghpages ────────────────────────────────────────────────────────────────
+#
+# GitHub Pages adapter (Contents API + Bearer PAT). No OAuth flow — the
+# user pastes a personal access token into ``<config_dir>/ghpages-token.json``
+# ({"token": "<pat>"}). Token-paste backend; no card today (operators
+# edit the JSON directly). GitHub's 5000 req/hour PAT quota is not
+# adapter-enforced, so ``throttle_band=None``.
+
+GHPAGES_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="GitHub Pages",
+        domain="github.io",
+        category="static-site",
+        icon="bi-github",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",
+            storage_state_path="<config_dir>/ghpages-token.json",
+            extras={"token_loader": "backlink_publisher.config.load_ghpages_token"},
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── devto ──────────────────────────────────────────────────────────────────
+#
+# Dev.to / Forem REST API + secondary BrowserPublishDispatcher recipe.
+# Token-paste backend ({"api_key": "<key>"}) at
+# ``<config_dir>/devto-token.json``. dofollow=False (rationale lives at
+# register() call site).
+
+DEVTO_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="Dev.to",
+        domain="dev.to",
+        category="dev-blog",
+        icon="bi-code-slash",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",
+            storage_state_path="<config_dir>/devto-token.json",
+            extras={
+                "browser_recipe": (
+                    "backlink_publisher.publishing.browser_publish.recipes.devto"
+                ),
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── notion ─────────────────────────────────────────────────────────────────
+#
+# Notion Integration API — creates a Page in a database via Bearer token.
+# Secret JSON shape:
+# ``{"integration_token": "secret_...", "database_id": "..."}``.
+# dofollow=False (Notion strips dofollow from external links).
+
+NOTION_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="Notion",
+        domain="notion.so",
+        category="docs",
+        icon="bi-journals",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",
+            storage_state_path="<config_dir>/notion-token.json",
+            extras={"requires_database_id": "true"},
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── mastodon ───────────────────────────────────────────────────────────────
+#
+# Browser-only — no REST adapter today. Publication goes through the
+# BrowserPublishDispatcher.recipes.mastodon recipe. The session
+# state is recipe-managed; declared here so reverse-lookup works.
+
+MASTODON_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="Mastodon",
+        domain="mastodon.social",
+        category="microblog",
+        icon="bi-mastodon",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="cookie",
+            storage_state_path="<config_dir>/mastodon-cookies.json",
+            extras={
+                "browser_recipe": (
+                    "backlink_publisher.publishing.browser_publish."
+                    "recipes.mastodon"
+                ),
+                "selectors_module": (
+                    "backlink_publisher.publishing.browser_publish."
+                    "recipes._mastodon_selectors"
+                ),
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── livejournal ────────────────────────────────────────────────────────────
+#
+# XML-RPC ``postevent`` with challenge/response (md5-hpassword). The
+# stored ``hpassword`` is a password-equivalent authenticator — see
+# the livejournal_api module docstring: THROWAWAY accounts only.
+# Persisted at ``<config_dir>/livejournal-credentials.json`` (0o600);
+# shape is ``{username, hpassword}``. No settings card today; binding
+# lives in CLI.
+
+LIVEJOURNAL_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="LiveJournal",
+        domain="livejournal.com",
+        category="legacy-blog",
+        icon="bi-pencil-square",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",
+            storage_state_path="<config_dir>/livejournal-credentials.json",
+            extras={
+                "credential_shape": "username+hpassword",
+                "warning": "password-equivalent at rest; throwaway accounts only",
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── txtfyi ─────────────────────────────────────────────────────────────────
+#
+# txt.fyi is a minimalist anonymous pastebin — no accounts, no cookies,
+# no JavaScript, just a single form POST. ``bind=[]`` and every
+# credential field is empty.
+
+TXTFYI_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="txt.fyi",
+        domain="txt.fyi",
+        category="anonymous-paste",
+        icon="bi-file-earmark-text",
+    ),
+    bind=[],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
+# ── medium ─────────────────────────────────────────────────────────────────
+#
+# Three-adapter chain: MediumAPIAdapter (deprecated Integration Token)
+# → MediumBraveAdapter (AppleScript/Brave; macOS only) →
+# MediumBrowserAdapter (Playwright). Throttle band reflects the
+# documented MEDIUM_THROTTLE_MIN/MAX env defaults (60-300s) read in
+# cli/_publish_helpers.py. Card exists at
+# ``_settings_channel_medium.html``.
+
+MEDIUM_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="Medium",
+        domain="medium.com",
+        category="general-blog",
+        icon="bi-medium",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="cookie",
+            storage_state_path="<config_dir>/medium-cookies.json",
+            card_template="_settings_channel_medium.html",
+            extras={
+                "integration_token_path": "<config_dir>/medium-token.json",
+                "fallback_chain": "api -> brave (macOS) -> playwright",
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=(60, 300),
+        env_keys={
+            "min": "MEDIUM_THROTTLE_MIN",
+            "max": "MEDIUM_THROTTLE_MAX",
+        },
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)

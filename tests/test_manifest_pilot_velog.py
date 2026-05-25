@@ -161,7 +161,18 @@ class TestZeroBehaviourChange:
 # scope guard below excludes every already-migrated channel so it stays
 # meaningful as a regression net for the *remaining* legacy channels.
 # When you migrate a channel, add it to ``_MIGRATED`` here.
-_MIGRATED = {"velog", "telegraph", "blogger"}
+_MIGRATED = {
+    "velog",
+    "telegraph",
+    "blogger",
+    "ghpages",
+    "devto",
+    "notion",
+    "mastodon",
+    "livejournal",
+    "txtfyi",
+    "medium",
+}
 
 
 @pytest.mark.parametrize(
