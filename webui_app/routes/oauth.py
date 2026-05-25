@@ -202,6 +202,17 @@ def settings_blogger_oauth_callback():
             msg='授权会话已过期，请重新点击登入按钮',
             fragment='channel-blogger')
 
+    # Defense-in-depth OAuth-CSRF check: the returned ``state`` must match the
+    # value stored at oauth-start. google-auth-oauthlib also validates state
+    # inside fetch_token, but asserting it explicitly here makes the security
+    # property legible/testable and reports a mismatch as a clear auth failure
+    # rather than a generic token-exchange error.
+    if request.args.get('state') != state:
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg='OAuth state 校验失败，疑似跨站请求，请重新点击登入按钮',
+            fragment='channel-blogger')
+
     cb_uri = _oauth_callback_uri()
     try:
         from google_auth_oauthlib.flow import Flow
@@ -225,10 +236,18 @@ def settings_blogger_oauth_callback():
         save_blogger_token(json_from_creds(creds), cfg.blogger_token_path)
         session.pop('oauth_state', None)
         session.pop('oauth_client_config', None)
+        session.pop('oauth_code_verifier', None)  # PKCE verifier — clear it too
         return _safe_flash_redirect(
             '/settings', flash_type='success',
             msg='Google 帐号授权成功！Token 已保存。',
             fragment='channel-blogger')
+    except RuntimeError as exc:
+        # The loopback transport gate refused (non-loopback callback URI).
+        # Report distinctly from a generic token-exchange failure so an
+        # off-loopback TLS-bypass refusal is legible, not masked.
+        return _safe_flash_redirect(
+            '/settings', flash_type='danger',
+            msg=f'OAuth 回调传输安全检查失败: {exc}', fragment='channel-blogger')
     except Exception as exc:
         return _safe_flash_redirect(
             '/settings', flash_type='danger',
