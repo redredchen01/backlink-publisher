@@ -547,6 +547,10 @@ def _project_history(
                 store.append(
                     "publish.failed",
                     {
+                        # D3: always present so checkpoint- and history-sourced
+                        # failed events share one shape; None when the row has
+                        # no class → the explicit "unclassified" bucket.
+                        "error_class": row.get("error_class"),
                         "error_message_clean": cleaned,
                         "scrub_hits": hits or {},
                         "platform": row.get("platform"),
