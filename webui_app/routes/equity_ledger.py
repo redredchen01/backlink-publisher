@@ -8,14 +8,20 @@ Plan 2026-05-25-004.
 
 from __future__ import annotations
 
+from collections import Counter
+
 from flask import Blueprint, jsonify, request
 
+from backlink_publisher._util.url import canonicalize_url
 from backlink_publisher.config import load_config
 from backlink_publisher.ledger import build_ledger
 
 from ..helpers.contexts import _render
 
 bp = Blueprint("equity_ledger", __name__)
+
+# _outcome (from recheck_one) → delta-summary bucket.
+_OUTCOME_LABELS = {"confirmed": "confirmed", "downgraded": "failed", "skipped": "skipped"}
 
 
 def _resolve_stale_days() -> int:
@@ -39,3 +45,45 @@ def equity_ledger():
         stale_count=stale_count,
         exact_match_threshold=cfg.anchor_alarm.exact_ratio_ceiling,
     )
+
+
+@bp.route("/ce:equity-ledger/recheck", methods=["POST"])
+def equity_ledger_recheck():
+    """On-demand recheck of one target's links (operator-initiated, U6).
+
+    A canonical target can be backed by several history rows; recheck iterates
+    every backing row, calls ``recheck_one`` per row, and writes back via the
+    canonical ``update_item`` helper. The target's row is then recomputed and
+    returned for in-place refresh. No scheduler, no background job.
+    """
+    from webui_store import history_store
+
+    from ..services.recheck import recheck_one
+
+    data = request.get_json(silent=True) or {}
+    target = data.get("target_url")
+    if not target:
+        return jsonify({"error": "target_url required"}), 400
+    canon = canonicalize_url(target)
+
+    row = next((r for r in build_ledger() if r.target_url == canon), None)
+    if row is None:
+        return jsonify({"error": "target not found"}), 404
+
+    counts: Counter[str] = Counter()
+    for item_id in row.history_item_ids:
+        item = history_store.get_item(item_id)
+        if not item:
+            continue
+        mutation = recheck_one(item)
+        outcome = mutation.pop("_outcome", None)
+        history_store.update_item(item_id, **mutation)
+        counts[_OUTCOME_LABELS.get(outcome, "skipped")] += 1
+
+    # Recompute the target's row from the freshly mutated history.
+    refreshed = next((r for r in build_ledger() if r.target_url == canon), row)
+    summary = (
+        f"{counts['confirmed']} confirmed, "
+        f"{counts['failed']} failed, {counts['skipped']} skipped"
+    )
+    return jsonify({"row": refreshed.to_jsonl_dict(), "summary": summary})
