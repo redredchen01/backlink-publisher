@@ -267,7 +267,11 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 seen_intent_or_failed.add(dedup_key)
                 store.append(
                     "publish.intent",
-                    {"target_url": target_url, "title": item.get("title")},
+                    {
+                        "target_url": target_url,
+                        "title": item.get("title"),
+                        "platform": item.get("adapter"),
+                    },
                     run_id=run_id,
                     target_url=target_url,
                     host=host,
@@ -325,6 +329,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                             canonicalize_url(published_url)
                             if published_url else None
                         ),
+                        "platform": item.get("adapter"),
                     },
                     run_id=run_id,
                     target_url=target_url,
@@ -350,6 +355,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                         "error_class": error_class,
                         "error_message_clean": cleaned,
                         "scrub_hits": hits or {},
+                        "platform": item.get("adapter"),
                     },
                     run_id=run_id,
                     target_url=target_url,
@@ -482,7 +488,11 @@ def _project_history(
                     # row, but article row is skipped.
                     store.append(
                         "publish.confirmed",
-                        {"live_url": None, "target_url": target_url},
+                        {
+                            "live_url": None,
+                            "target_url": target_url,
+                            "platform": row.get("platform"),
+                        },
                         target_url=target_url,
                         host=host,
                         ts_raw=ts_raw,
@@ -513,7 +523,11 @@ def _project_history(
                     articles_inserted += 1
                     store.append(
                         "publish.confirmed",
-                        {"live_url": live_url, "target_url": target_url},
+                        {
+                            "live_url": live_url,
+                            "target_url": target_url,
+                            "platform": row.get("platform"),
+                        },
                         target_url=target_url,
                         host=_host_of(live_url),
                         article_id=article_id,
@@ -535,6 +549,7 @@ def _project_history(
                     {
                         "error_message_clean": cleaned,
                         "scrub_hits": hits or {},
+                        "platform": row.get("platform"),
                     },
                     target_url=target_url,
                     host=host,

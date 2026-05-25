@@ -74,6 +74,8 @@ def test_published_history_row_emits_confirmed_and_article(tmp_path):
     assert events[0]["ts_raw"] == "2026-05-18 12:30"
     # ts_utc round-tripped through local TZ; just verify shape.
     assert events[0]["ts_utc"].endswith("+00:00")
+    # Plan 005 / U2 (D2): history confirmed events carry platform from the row.
+    assert json.loads(events[0]["payload_json"])["platform"] == "medium"
 
     articles = _query_articles(EventStore())
     assert articles[0]["live_url"] == "https://medium.com/@op/post-1"

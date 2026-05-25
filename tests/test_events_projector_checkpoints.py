@@ -372,3 +372,70 @@ def test_done_legacy_succeeded_status_still_works(tmp_path):
 
     confirmed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.confirmed"]
     assert len(confirmed) == 1
+
+
+# ── Plan 005 / U2 (D2): publishing-platform attribution in payloads ──
+
+
+def test_confirmed_event_carries_platform_from_adapter(tmp_path):
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json",
+        items=[_make_done("a", "https://example.com/a", adapter="medium")],
+    )
+
+    flush_for(ckpt)
+
+    confirmed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.confirmed"]
+    assert json.loads(confirmed[0]["payload_json"])["platform"] == "medium"
+
+
+def test_failed_event_carries_platform_from_adapter(tmp_path):
+    item = _make_pending("a", "https://example.com/a", adapter="velog")
+    item.update(status="failed", error="boom", error_class="X")
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=[item]
+    )
+
+    flush_for(ckpt)
+
+    failed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.failed"]
+    assert json.loads(failed[0]["payload_json"])["platform"] == "velog"
+
+
+def test_predispatch_failure_platform_is_none_not_absent(tmp_path):
+    """A failure with no adapter resolved → platform present and None
+    (the 'unattributed' representation), never a missing key."""
+    item = _make_pending("a", "https://example.com/a", adapter=None)
+    item.update(status="failed", error="validation", error_class="V")
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=[item]
+    )
+
+    flush_for(ckpt)
+
+    failed = [e for e in _query_events(EventStore()) if e["kind"] == "publish.failed"]
+    payload = json.loads(failed[0]["payload_json"])
+    assert "platform" in payload
+    assert payload["platform"] is None
+
+
+def test_no_publish_event_missing_platform_key(tmp_path):
+    """Every publish.* event row carries a `platform` key (None or value),
+    so the dashboard's GROUP BY never sees a third 'key absent' state."""
+    items = [
+        _make_pending("p", "https://example.com/p"),  # intent
+        _make_done("d", "https://example.com/d", adapter="medium"),
+        dict(_make_pending("f", "https://example.com/f", adapter="velog"),
+             status="failed", error="e", error_class="C"),
+    ]
+    ckpt = _write_checkpoint(
+        tmp_path / "20260518T120000-abcd1234.json", items=items
+    )
+
+    flush_for(ckpt)
+
+    pub_events = [e for e in _query_events(EventStore())
+                  if e["kind"].startswith("publish.")]
+    assert pub_events
+    for e in pub_events:
+        assert "platform" in json.loads(e["payload_json"]), e["kind"]
