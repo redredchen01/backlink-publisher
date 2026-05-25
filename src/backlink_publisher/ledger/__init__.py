@@ -9,6 +9,7 @@ liveness freshness. Pure read-side aggregation — no publishing, no fetching.
 Plan: docs/plans/2026-05-25-004-feat-backlink-equity-ledger-plan.md
 """
 
+from .aggregate import build_ledger
 from .model import LedgerRow
 
-__all__ = ["LedgerRow"]
+__all__ = ["LedgerRow", "build_ledger"]

@@ -74,9 +74,9 @@ class LedgerRow:
     platform_count: int = 0
     platforms: list[str] = field(default_factory=list)
     exact_match_pct: float = 0.0
-    # True when exact_match_pct came from the pre-bump "" domain-rollup bucket
-    # rather than per-target anchor data (plan U3) — surface as "(domain-level)".
-    exact_match_is_domain_level: bool = False
+    # False when the target has no per-target anchor entries — U5 renders "—"
+    # rather than a misleading 0.0% (plan U3 / silent-0.0 guard).
+    has_anchor_data: bool = False
     liveness: LivenessStatus = "unverified"
     # ISO timestamp of the most recent successful verify backing ``liveness``,
     # always shown inline so a fresh label never implies present-tense rel.
