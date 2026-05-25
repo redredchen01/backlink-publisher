@@ -116,25 +116,36 @@ class TestPerPlatformContract:
 
 
 class TestMigrationProgressBoard:
-    """Prints the legacy/manifest split to stdout. Not a fail gate yet."""
+    """Phase 3 gate (Plan 2026-05-25-002): no production channel may be
+    legacy. After all 10 channels migrated in Phase 2 (PR #215), this
+    test flipped from stdout-print to hard CI fail gate. Any new
+    register() call without a manifest immediately fires.
+    """
+
+    def test_no_legacy_platforms_remain(self) -> None:
+        legacy = legacy_platforms()
+        assert legacy == [], (
+            f"Phase 3 gate breach: {legacy!r} declared register() "
+            f"without ui / bind / policy kwargs. Add a "
+            f"<SLUG>_MANIFEST dict to publishing/_manifests.py and "
+            f"splat it into the register() call. See the velog or "
+            f"telegraph manifest for reference, or AGENTS.md "
+            f"'Declare manifest metadata' section."
+        )
 
     def test_print_progress(self, capsys) -> None:
+        # Keep the progress board printed to stdout so CI logs surface
+        # the current count alongside the gate above. After Phase 3
+        # this always reads N/N + ∅; if it ever doesn't, the gate
+        # above will have already failed.
         total = len(registered_platforms())
         legacy = legacy_platforms()
         migrated = total - len(legacy)
-        # Print to real stdout so CI logs surface this even when
-        # other tests are quiet.
         print(
             f"\n=== Manifest migration progress ===\n"
             f"{migrated}/{total} channels migrated to full manifest.\n"
             f"Legacy (no ui/bind/policy): {legacy or '∅'}\n"
             f"==================================="
-        )
-        # Sanity assertion: at least 1 (the U3 velog pilot) is migrated.
-        # If this breaks, the velog manifest declaration regressed.
-        assert migrated >= 1, (
-            "Expected at least the velog pilot to be migrated — see "
-            "Plan 2026-05-25-002 Unit 3 and adapters/__init__.py."
         )
 
     def test_velog_is_not_legacy(self) -> None:
