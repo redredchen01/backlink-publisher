@@ -54,6 +54,14 @@ from backlink_publisher._util.errors import (
     ExternalServiceError,
     RegistryError,
 )
+from backlink_publisher.publishing._manifest_types import (
+    _BIND_BACKEND_VALUES,
+    _VISIBILITY_VALUES,
+    BindDescriptor,
+    Policy,
+    UiMeta,
+    Visibility,
+)
 
 if TYPE_CHECKING:
     # Importing AdapterResult at module top triggers loading of
@@ -166,6 +174,27 @@ _DOFOLLOW_BY_PLATFORM: dict[str, _DofollowStatus] = {}
 _RATIONALE_BY_PLATFORM: dict[str, str] = {}
 _REFERRAL_VALUE_BY_PLATFORM: dict[str, _ReferralValue] = {}
 
+# Plan 2026-05-25-002 Unit 1 — manifest metadata parallel dicts.
+#
+# Following the established convention in this module (see comment above
+# line 158-164): keep parallel dicts rather than migrating to a
+# ``RegistryEntry`` dataclass, so existing conftest snapshot fixtures
+# (``tests/conftest.py:191``) keep working with a minimal patch.
+#
+# IMPORTANT: every new dict added here MUST be added to the three
+# registry-isolation snapshot fixtures (per the line-158 comment) or
+# tests will leak state across runs. The four manifest dicts below
+# are snapshotted as one block by ``fake_platform_registered``.
+_UI_META_BY_PLATFORM: dict[str, UiMeta] = {}
+_BIND_BY_PLATFORM: dict[str, tuple[BindDescriptor, ...]] = {}
+_POLICY_BY_PLATFORM: dict[str, Policy] = {}
+# ``visibility`` defaults to ``"active"`` when a register() call omits
+# the kwarg, so the dict only stores explicit overrides. Lookups via
+# ``visibility(name)`` fall back to ``"active"`` for unset platforms.
+# This keeps the 8 pre-manifest register calls byte-identical in
+# behaviour.
+_VISIBILITY_BY_PLATFORM: dict[str, Visibility] = {}
+
 
 def register(
     platform: str,
@@ -173,6 +202,10 @@ def register(
     dofollow: _DofollowStatus,
     rationale: str | None = None,
     referral_value: _ReferralValue | None = None,
+    ui: UiMeta | None = None,
+    bind: list[BindDescriptor] | tuple[BindDescriptor, ...] | None = None,
+    policy: Policy | None = None,
+    visibility: Visibility = "active",
 ) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
@@ -249,6 +282,41 @@ def register(
             f"`register({platform!r}, ..., referral_value={referral_value!r})` "
             f"— referral_value must be 'high' or 'low' (got {referral_value!r})."
         )
+    # Plan 2026-05-25-002 Unit 1 — manifest kwarg validation. ``Literal``
+    # is static-only; same precedent as referral_value runtime check above.
+    if visibility not in _VISIBILITY_VALUES:
+        raise RegistryError(
+            f"`register({platform!r}, ..., visibility={visibility!r})` — "
+            f"visibility must be one of {sorted(_VISIBILITY_VALUES)} "
+            f"(got {visibility!r})."
+        )
+    if bind is not None:
+        bind_tuple = tuple(bind)
+        for idx, descriptor in enumerate(bind_tuple):
+            if not isinstance(descriptor, BindDescriptor):
+                raise RegistryError(
+                    f"`register({platform!r}, ..., bind=[...])` — entry "
+                    f"#{idx} is {type(descriptor).__name__}, expected "
+                    f"BindDescriptor. Use `BindDescriptor(backend=..., ...)`."
+                )
+            if descriptor.backend not in _BIND_BACKEND_VALUES:
+                raise RegistryError(
+                    f"`register({platform!r}, ..., bind=[...])` — entry "
+                    f"#{idx} has backend={descriptor.backend!r}, must be "
+                    f"one of {sorted(_BIND_BACKEND_VALUES)}."
+                )
+    else:
+        bind_tuple = ()
+    if ui is not None and not isinstance(ui, UiMeta):
+        raise RegistryError(
+            f"`register({platform!r}, ..., ui=...)` — expected UiMeta, "
+            f"got {type(ui).__name__}."
+        )
+    if policy is not None and not isinstance(policy, Policy):
+        raise RegistryError(
+            f"`register({platform!r}, ..., policy=...)` — expected Policy, "
+            f"got {type(policy).__name__}."
+        )
     _REGISTRY[platform] = list(publishers)
     _DOFOLLOW_BY_PLATFORM[platform] = dofollow
     if referral_value is not None:
@@ -259,6 +327,27 @@ def register(
         _RATIONALE_BY_PLATFORM[platform] = rationale
     else:
         _RATIONALE_BY_PLATFORM.pop(platform, None)
+    # Manifest dicts: store only when explicit; pop-on-None mirrors the
+    # rationale/referral_value pattern so re-register() without kwargs
+    # clears prior values rather than carrying stale state.
+    if ui is not None:
+        _UI_META_BY_PLATFORM[platform] = ui
+    else:
+        _UI_META_BY_PLATFORM.pop(platform, None)
+    if bind_tuple:
+        _BIND_BY_PLATFORM[platform] = bind_tuple
+    else:
+        _BIND_BY_PLATFORM.pop(platform, None)
+    if policy is not None:
+        _POLICY_BY_PLATFORM[platform] = policy
+    else:
+        _POLICY_BY_PLATFORM.pop(platform, None)
+    # ``"active"`` is the implicit default; don't store it so the dict
+    # only carries non-default overrides (smaller snapshots, clearer diffs).
+    if visibility != "active":
+        _VISIBILITY_BY_PLATFORM[platform] = visibility
+    else:
+        _VISIBILITY_BY_PLATFORM.pop(platform, None)
 
 
 def registered_platforms() -> list[str]:
@@ -294,6 +383,125 @@ def dofollow_rationale(name: str) -> str | None:
     Plan 2026-05-20-009 R5.
     """
     return _RATIONALE_BY_PLATFORM.get(name)
+
+
+# ---------------------------------------------------------------------------
+# Manifest helpers — Plan 2026-05-25-002 Unit 1
+# ---------------------------------------------------------------------------
+#
+# These six helpers are the reverse-lookup API the downstream layers
+# (binding_status.py, webui_app/__init__.py inject_platforms,
+# webui_app/helpers/contexts.py, config/_toml_utils.py, templates) will
+# call instead of carrying their own hardcoded channel lists.
+#
+# All helpers are pure-read; thread-safe; cheap (dict.get / list-comp on
+# ≤ 20 platforms). No caching needed at this layer — if downstream
+# call-frequency demands it (per [[flask-g-cache-pattern]]), the cache
+# belongs at the caller, not here.
+
+
+def ui_meta(name: str) -> UiMeta | None:
+    """Return the declared ``UiMeta`` for ``name``, or ``None``.
+
+    ``None`` for platforms registered without ``ui=`` (legacy platforms
+    pre-manifest). Callers wanting a fallback should use
+    ``ui_meta(name) or UiMeta(display_name=name, domain="", category="")``.
+    """
+    return _UI_META_BY_PLATFORM.get(name)
+
+
+def bind_descriptors(name: str) -> tuple[BindDescriptor, ...]:
+    """Return the declared bind backends for ``name``, in display order.
+
+    Returns ``()`` for platforms registered without ``bind=`` — the
+    legacy state where bind wiring is hardcoded across webui_app /
+    helpers / templates rather than declared. Callers iterating to
+    auto-build UI cards (Plan Unit 4) treat ``()`` as "fall back to
+    legacy per-channel wiring".
+    """
+    return _BIND_BY_PLATFORM.get(name, ())
+
+
+def policy(name: str) -> Policy | None:
+    """Return the declared ``Policy`` for ``name``, or ``None``.
+
+    ``None`` for legacy registrations. Downstream throttle / retry /
+    language machinery keeps its existing defaults when ``policy()`` is
+    ``None`` — the manifest is additive metadata, not a behaviour
+    rewrite (Plan Scope Boundaries: "不改 publish 業務邏輯").
+    """
+    return _POLICY_BY_PLATFORM.get(name)
+
+
+def visibility(name: str) -> Visibility:
+    """Return the visibility state for ``name``.
+
+    Always returns a valid ``Visibility`` literal. Unregistered or
+    default-active platforms return ``"active"`` — this is the
+    load-bearing default that lets Unit 2 swap ``HIDDEN_FROM_UI``
+    frozenset to ``visibility(name) in {"hidden","retired"}`` without
+    needing a per-platform opt-in.
+    """
+    return _VISIBILITY_BY_PLATFORM.get(name, "active")
+
+
+def active_platforms() -> list[str]:
+    """Return registered platforms with ``visibility == "active"``.
+
+    Sorted (matches ``registered_platforms`` ordering). Used by Unit 4
+    WebUI wiring to populate filter chips and publish-select that
+    should *not* show hidden / retired / experimental channels.
+
+    For the variant that includes experimental (e.g. the
+    ``--include-experimental`` CLI path or WebUI advanced mode), call
+    sites should filter ``registered_platforms()`` themselves with
+    ``visibility(name) != "retired"`` — the goal here is the default
+    user-facing list, not every possible filter.
+    """
+    return sorted(
+        name for name in _REGISTRY
+        if visibility(name) == "active"
+    )
+
+
+def bound_platforms(
+    config: Config,
+    is_bound: Callable[[Config, str], bool],
+) -> list[str]:
+    """Return active platforms that are currently bound for ``config``.
+
+    ``is_bound`` is dependency-injected: this module lives in the
+    ``publishing`` layer and must not import from ``webui_app``
+    (binding-status helpers live up there). Callers in WebUI inject
+    ``lambda cfg, name: webui_app.binding_status.get_channel_status(cfg, name).get("bound", False)``
+    or the equivalent.
+
+    Filtering is composed: ``active_platforms()`` first (drops hidden /
+    retired / experimental), then ``is_bound(config, name)`` for the
+    remainder. This guarantees a retired platform never appears in
+    publish UI even if its credentials are still on disk.
+    """
+    return [name for name in active_platforms() if is_bound(config, name)]
+
+
+def legacy_platforms() -> list[str]:
+    """Return registered platforms with NO manifest metadata.
+
+    A platform is "legacy" iff none of ``ui_meta`` / ``bind_descriptors``
+    / ``policy`` was supplied at ``register()`` time. ``visibility`` is
+    intentionally excluded — leaving it at the default ``"active"`` is
+    the expected state for pre-manifest channels.
+
+    Plan Unit 5 surfaces this as a migration progress board (printed to
+    contract-test stdout, not failed). Becomes a CI fail gate once all
+    8 existing platforms are migrated (deferred to Phase 3 of the plan).
+    """
+    return sorted(
+        name for name in _REGISTRY
+        if name not in _UI_META_BY_PLATFORM
+        and name not in _BIND_BY_PLATFORM
+        and name not in _POLICY_BY_PLATFORM
+    )
 
 
 def dispatch(

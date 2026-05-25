@@ -192,6 +192,10 @@ from backlink_publisher.publishing.registry import (  # noqa: E402
     _DOFOLLOW_BY_PLATFORM as __DOFOLLOW_BY_PLATFORM,
     _RATIONALE_BY_PLATFORM as __RATIONALE_BY_PLATFORM,
     _REFERRAL_VALUE_BY_PLATFORM as __REFERRAL_VALUE_BY_PLATFORM,
+    _UI_META_BY_PLATFORM as __UI_META_BY_PLATFORM,
+    _BIND_BY_PLATFORM as __BIND_BY_PLATFORM,
+    _POLICY_BY_PLATFORM as __POLICY_BY_PLATFORM,
+    _VISIBILITY_BY_PLATFORM as __VISIBILITY_BY_PLATFORM,
 )
 
 
@@ -226,6 +230,13 @@ def fake_platform_registered():
     previous_dofollow = __DOFOLLOW_BY_PLATFORM.get("fake")
     previous_rationale = __RATIONALE_BY_PLATFORM.get("fake")
     previous_referral = __REFERRAL_VALUE_BY_PLATFORM.get("fake")
+    # Plan 2026-05-25-002 Unit 1 — snapshot manifest dicts alongside the
+    # existing four. Same per-key fixture pattern; missing snapshot would
+    # leak manifest state across tests.
+    previous_ui = __UI_META_BY_PLATFORM.get("fake")
+    previous_bind = __BIND_BY_PLATFORM.get("fake")
+    previous_policy = __POLICY_BY_PLATFORM.get("fake")
+    previous_visibility = __VISIBILITY_BY_PLATFORM.get("fake")
     _register("fake", FakeAdapter, dofollow=True)
     try:
         yield
@@ -246,3 +257,19 @@ def fake_platform_registered():
             __REFERRAL_VALUE_BY_PLATFORM.pop("fake", None)
         else:
             __REFERRAL_VALUE_BY_PLATFORM["fake"] = previous_referral
+        if previous_ui is None:
+            __UI_META_BY_PLATFORM.pop("fake", None)
+        else:
+            __UI_META_BY_PLATFORM["fake"] = previous_ui
+        if previous_bind is None:
+            __BIND_BY_PLATFORM.pop("fake", None)
+        else:
+            __BIND_BY_PLATFORM["fake"] = previous_bind
+        if previous_policy is None:
+            __POLICY_BY_PLATFORM.pop("fake", None)
+        else:
+            __POLICY_BY_PLATFORM["fake"] = previous_policy
+        if previous_visibility is None:
+            __VISIBILITY_BY_PLATFORM.pop("fake", None)
+        else:
+            __VISIBILITY_BY_PLATFORM["fake"] = previous_visibility
