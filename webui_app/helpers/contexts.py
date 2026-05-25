@@ -287,12 +287,19 @@ def _settings_context(flash=None):
     velog_status = _get_velog_status()
 
     try:
-        from backlink_publisher.publishing.registry import registered_platforms
-        from ..binding_status import get_channel_status, HIDDEN_FROM_UI
+        # Plan 2026-05-25-002 Unit 4a — use ``active_platforms()`` from
+        # the registry; this composes ``registered_platforms()`` with the
+        # manifest ``visibility`` filter, so the dashboard card list now
+        # automatically excludes any future ``visibility='hidden'`` or
+        # ``visibility='retired'`` channel without needing to touch this
+        # helper. ``HIDDEN_FROM_UI`` (Unit 2a PEP 562 alias) is still the
+        # legacy fallback path but redundant once we read from
+        # ``active_platforms()`` directly.
+        from backlink_publisher.publishing.registry import active_platforms
+        from ..binding_status import get_channel_status
         dashboard_channels = [
             (name, get_channel_status(name, cfg))
-            for name in registered_platforms()
-            if name not in HIDDEN_FROM_UI
+            for name in active_platforms()
         ]
     except Exception:
         dashboard_channels = []
