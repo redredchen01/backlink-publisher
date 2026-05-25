@@ -73,7 +73,44 @@ register(
     MediumBrowserAdapter,
     dofollow=True,
 )
-register("telegraph", TelegraphAPIAdapter, dofollow=True)
+# Plan 2026-05-25-002 Phase 2 — Telegraph manifest migration.
+#
+# Telegraph is the second channel (after the velog pilot) to declare a
+# complete manifest. Unlike velog, telegraph requires NO user-side
+# binding: the adapter calls ``/createAccount`` on first publish and
+# persists the returned token under ``<config_dir>/telegraph-token.json``
+# via the credential-rotation pattern (lock + atomic write + orphan
+# archive). That is why ``bind=[]`` — there is no settings card, no
+# login endpoint, no storage-state path to manage from the UI. The
+# token file IS the binding artifact, but its lifecycle is fully
+# automatic. See ``telegraph_api._token_path`` /
+# ``_archive_orphan_token`` for the rotation mechanics.
+#
+# ``policy.throttle_band=None`` because telegraph has no documented
+# rate limit (the only ``sleep`` in the adapter is a 50-150ms lock-retry
+# jitter, which is not a thundering-herd throttle). ``env_keys`` is
+# empty for the same reason — there are no ``TELEGRAPH_*`` env knobs.
+# ``language_whitelist=()`` because telegraph accepts any UTF-8 text.
+register(
+    "telegraph",
+    TelegraphAPIAdapter,
+    dofollow=True,
+    ui=UiMeta(
+        display_name="Telegraph",
+        domain="telegra.ph",
+        category="instant-publish",
+        icon="bi-lightning-charge",
+    ),
+    bind=[],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+    visibility="active",
+)
 # Plan 2026-05-25-002 Unit 3 — Velog pilot. First channel to declare a
 # complete manifest (ui + bind + policy + visibility). The 5 special
 # velog files (velog_graphql, browser_publish/recipes/velog,

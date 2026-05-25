@@ -157,16 +157,22 @@ class TestZeroBehaviourChange:
         assert dofollow_status("velog") is True
 
 
+# Phase 2 migrations expand the set of platforms with a manifest. The
+# scope guard below excludes every already-migrated channel so it stays
+# meaningful as a regression net for the *remaining* legacy channels.
+# When you migrate a channel, add it to ``_MIGRATED`` here.
+_MIGRATED = {"velog", "telegraph"}
+
+
 @pytest.mark.parametrize(
     "platform",
-    sorted(set(registered_platforms()) - {"velog"}),
+    sorted(set(registered_platforms()) - _MIGRATED),
 )
 class TestOtherPlatformsRemainLegacy:
-    """Pilot scope guard: only velog has a manifest in Unit 3.
+    """Scope guard: only platforms listed in ``_MIGRATED`` have a manifest.
 
-    Migrating other channels is Phase 2 (separate plan). If any other
-    channel accidentally gains a manifest in this PR, this test catches
-    the scope creep.
+    If a channel accidentally gains a manifest in a PR that does not
+    update ``_MIGRATED``, this test catches the scope creep.
     """
 
     def test_other_platform_has_no_ui_meta(self, platform: str) -> None:
