@@ -27,6 +27,7 @@ from typing import Any, Literal, Optional
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
 from ..registry import dispatch, register, registered_platforms
+from .._manifest_types import BindDescriptor, Policy, UiMeta
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
@@ -73,11 +74,62 @@ register(
     dofollow=True,
 )
 register("telegraph", TelegraphAPIAdapter, dofollow=True)
+# Plan 2026-05-25-002 Unit 3 — Velog pilot. First channel to declare a
+# complete manifest (ui + bind + policy + visibility). The 5 special
+# velog files (velog_graphql, browser_publish/recipes/velog,
+# browser_publish/recipes/_velog_selectors, cli/_bind/recipes/velog,
+# cli/velog_login) are NOT relocated — only their paths are declared
+# in the bind descriptor's ``extras`` so downstream consumers
+# (Unit 4 WebUI wiring) can reverse-lookup them.
+#
+# Throttle band reflects the hardcoded ``_VELOG_JITTER_MIN/MAX_S`` in
+# velog_graphql.py (60-180s). ``env_keys`` is intentionally empty —
+# velog does not currently support env overrides; if that changes a
+# future PR adds ``VELOG_THROTTLE_MIN/MAX`` and updates this manifest.
 register(
     "velog",
     VelogGraphQLAdapter,
     BrowserPublishDispatcher.for_channel("velog"),
     dofollow=True,
+    ui=UiMeta(
+        display_name="Velog",
+        domain="velog.io",
+        category="dev-blog",
+        icon="bi-journal-code",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="cookie",
+            # Default cookies path when config.velog.cookies_path is unset
+            # — same default the dispatcher resolves at runtime
+            # (see this module, lines ~213-217). Stored as the *shape*
+            # (template), not an absolute path — runtime interpolation
+            # happens at the bind backend.
+            storage_state_path="<config_dir>/velog-cookies.json",
+            login_endpoint="/api/velog/login",
+            card_template="_settings_channel_velog.html",
+            extras={
+                "browser_recipe": (
+                    "backlink_publisher.publishing.browser_publish."
+                    "recipes.velog"
+                ),
+                "bind_recipe": "backlink_publisher.cli._bind.recipes.velog",
+                "login_module": "backlink_publisher.cli.velog_login",
+                "selectors_module": (
+                    "backlink_publisher.publishing.browser_publish."
+                    "recipes._velog_selectors"
+                ),
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=(60, 180),
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=900,
+        language_whitelist=("ko", "en"),
+    ),
+    # visibility defaults to "active" — explicit kwarg omitted.
 )
 register("ghpages", GitHubPagesAPIAdapter, dofollow=True)
 register(
