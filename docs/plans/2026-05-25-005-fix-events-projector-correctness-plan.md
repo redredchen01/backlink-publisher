@@ -1,7 +1,7 @@
 ---
 title: "fix: Events projector correctness — emit real successes, attribute platform, run the projection"
 type: fix
-status: active
+status: completed
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/brainstorms/2026-05-25-publishing-health-dashboard-requirements.md
