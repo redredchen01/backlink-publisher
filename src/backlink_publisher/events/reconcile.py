@@ -153,6 +153,10 @@ def _collect_sources(store: EventStore) -> list[Path]:
     if cp_dir.exists():
         known = _known_cursor_sources(store)
         for cp in sorted(cp_dir.glob("*.json")):
+            # Only regular files, never symlinks — the checkpoint dir is
+            # operator-local, but a stray symlink shouldn't be flushed.
+            if cp.is_symlink() or not cp.is_file():
+                continue
             if str(cp) not in known:
                 sources.append(cp)
     return sources
@@ -180,39 +184,61 @@ def _known_cursor_sources(store: EventStore) -> set[str]:
 
 
 def _latest_event_utc(store: EventStore) -> str | None:
+    """Freshness "as of" stamp. Best-effort — a read failure here must not
+    turn an otherwise-successful projection into a degraded result."""
     placeholders = ",".join("?" for _ in _PUBLISH_KINDS)
-    rows = store.query(
-        f"SELECT MAX(ts_utc) AS m FROM events WHERE kind IN ({placeholders})",
-        _PUBLISH_KINDS,
-    )
+    try:
+        rows = store.query(
+            f"SELECT MAX(ts_utc) AS m FROM events WHERE kind IN ({placeholders})",
+            _PUBLISH_KINDS,
+        )
+    except Exception as exc:  # noqa: BLE001 — freshness is non-critical
+        _log.warning("health: could not read freshness stamp: %s", exc)
+        return None
     if rows and rows[0]["m"] is not None:
         return str(rows[0]["m"])
     return None
 
 
 def _open_quarantine_count(store: EventStore) -> int:
-    rows = store.query("SELECT COUNT(*) AS n FROM quarantine_log")
+    """Open-gap count. Best-effort — defaults to 0 (no gap) on read failure."""
+    try:
+        rows = store.query("SELECT COUNT(*) AS n FROM quarantine_log")
+    except Exception as exc:  # noqa: BLE001 — gap count is non-critical
+        _log.warning("health: could not read quarantine count: %s", exc)
+        return 0
     return int(rows[0]["n"]) if rows else 0
 
 
-def _quarantine(
-    store: EventStore, source: str, reason: str, raw: str | None = None
-) -> None:
-    """Park an unprojectable source. De-duped by source so retries don't pile up."""
+def _quarantine(store: EventStore, source: str, reason: str) -> None:
+    """Park an unprojectable source. De-duped by source so retries don't pile up.
+
+    Best-effort: a write failure here (locked DB) must not escape and abort the
+    rest of the projection — the source stays unprojected and will be retried on
+    the next load.
+    """
     now = datetime.now(timezone.utc).isoformat()
-    with store.connect_immediate() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM quarantine_log WHERE source = ? LIMIT 1", (source,)
-        ).fetchone()
-        if existing is None:
-            conn.execute(
-                "INSERT INTO quarantine_log "
-                "(ts_utc, source, run_id, reason, raw_payload_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (now, source, None, reason, raw),
-            )
+    try:
+        with store.connect_immediate() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM quarantine_log WHERE source = ? LIMIT 1", (source,)
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO quarantine_log "
+                    "(ts_utc, source, run_id, reason, raw_payload_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (now, source, None, reason, None),
+                )
+    except Exception as exc:  # noqa: BLE001 — quarantine bookkeeping is non-critical
+        _log.warning("health: could not quarantine %s: %s", source, exc)
 
 
 def _clear_quarantine(store: EventStore, source: str) -> None:
-    with store.connect_immediate() as conn:
-        conn.execute("DELETE FROM quarantine_log WHERE source = ?", (source,))
+    """Clear a source's gap entry after it projects cleanly. Best-effort: a
+    failure here must not mask the successful projection as degraded."""
+    try:
+        with store.connect_immediate() as conn:
+            conn.execute("DELETE FROM quarantine_log WHERE source = ?", (source,))
+    except Exception as exc:  # noqa: BLE001 — clear is non-critical
+        _log.warning("health: could not clear quarantine for %s: %s", source, exc)

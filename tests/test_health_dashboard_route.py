@@ -152,6 +152,17 @@ def test_aggregation_error_degrades_not_500(client, monkeypatch):
     assert "Data may be incomplete" in resp.get_data(as_text=True)
 
 
+def test_render_failure_serves_fallback_not_500(client, monkeypatch):
+    # R5: even a template/context-rendering error must not 500 the page.
+    def _boom(*_a, **_k):
+        raise RuntimeError("template exploded")
+
+    monkeypatch.setattr("webui_app.routes.health._render", _boom)
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    assert "temporarily unavailable" in resp.get_data(as_text=True)
+
+
 # ── Redirect ─────────────────────────────────────────────────────────────────
 
 

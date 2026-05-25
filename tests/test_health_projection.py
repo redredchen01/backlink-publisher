@@ -172,9 +172,11 @@ def test_concurrent_loads_do_not_double_append(tmp_path):
     assert not errors, errors
     # The single-flight lock + flush_for idempotency guarantee exactly one row.
     assert _count_kind(EventStore(), "publish.confirmed") == 1
-    # Exactly one of the two loads inserted the event.
-    inserted = sorted(r.events_inserted for r in results)
-    assert inserted == [0, 1]
+    # Exactly one load INSERTED the event; the other was serialized behind the
+    # lock and saw the updated cursor, so it inserted nothing (no double-append).
+    # Both still "project" the history source — the second is an idempotent no-op.
+    assert sorted(r.events_inserted for r in results) == [0, 1]
+    assert [r.sources_projected for r in results] == [1, 1]
 
 
 # ── Quarantine gap flag: set, then clear ─────────────────────────────────────
@@ -252,6 +254,25 @@ def test_db_operational_error_degrades_not_raises(tmp_path, monkeypatch):
     assert result.degraded is True
     assert result.degraded_reason is not None
     assert "OperationalError" in result.degraded_reason
+
+
+def test_clear_quarantine_failure_does_not_degrade_successful_projection(tmp_path, monkeypatch):
+    # A locked DB during the (best-effort) quarantine-clear must NOT turn an
+    # otherwise-successful projection into a degraded result.
+    _write_history(tmp_path, [_published_row("h1")])
+    store = EventStore()
+
+    def _raise(*_a, **_k):
+        raise sqlite3.OperationalError("database is locked")
+
+    # connect_immediate backs _clear_quarantine (success path); break it.
+    monkeypatch.setattr(store, "connect_immediate", _raise)
+
+    result = reconcile.project_on_read(store=store)
+
+    assert result.degraded is False
+    assert result.events_inserted == 1
+    assert _count_kind(store, "publish.confirmed") == 1
 
 
 def test_unverified_done_emits_unverified_kind_not_confirmed(tmp_path):
