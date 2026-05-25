@@ -36,9 +36,9 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from backlink_publisher.http import get as http_get, put as http_put
 
 from backlink_publisher.config import Config, load_ghpages_token
+from backlink_publisher.http import get as http_get, put as http_put
 from backlink_publisher._util.errors import (
     BannerUploadError,
     DependencyError,
@@ -63,8 +63,6 @@ def _required_headers(token: str) -> dict[str, str]:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": _GITHUB_API_VERSION,
     }
-
-
 def _load_token(config: Config) -> str:
     """Return the PAT, raising DependencyError when not configured.
 
@@ -80,8 +78,6 @@ def _load_token(config: Config) -> str:
             "(chmod 600). PAT needs Contents:Read+Write on the target repo."
         )
     return token
-
-
 def _slugify(value: str) -> str:
     """Lowercase, ASCII-only slug suitable for both Jekyll filenames and URLs.
 
@@ -101,15 +97,11 @@ def _slugify(value: str) -> str:
             last_dash = True
     slug = "".join(cleaned).strip("-.")
     return slug or "post"
-
-
 def _render_target_path(template: str, *, slug: str, date_iso: str | None = None) -> str:
     """Resolve ``{date}`` / ``{slug}`` placeholders. UTC-only dates."""
     if date_iso is None:
         date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return template.format(date=date_iso, slug=slug)
-
-
 def _build_markdown_body(payload: dict[str, Any]) -> str:
     """Compose a Jekyll-compatible post body with YAML front matter.
 
@@ -147,8 +139,6 @@ def _build_markdown_body(payload: dict[str, Any]) -> str:
 
     body = payload.get("content_markdown") or extract_publish_html(payload, "ghpages")
     return f"{front_matter}\n\n{body}\n"
-
-
 def _get_existing_sha(repo: str, branch: str, path: str, token: str) -> str | None:
     """Return the file's current sha, or None if it doesn't exist yet.
 
@@ -169,8 +159,6 @@ def _get_existing_sha(repo: str, branch: str, path: str, token: str) -> str | No
         )
     body = resp.json()
     return body.get("sha")
-
-
 def _put_contents(
     repo: str,
     branch: str,
@@ -218,8 +206,6 @@ def _put_contents(
     raise ExternalServiceError(
         f"GitHub PUT contents returned HTTP {resp.status_code}: {resp.text[:200]}"
     )
-
-
 class _ShaRequired(Exception):
     """Internal sentinel — 422 from PUT contents means the file exists."""
 
@@ -247,15 +233,11 @@ def _published_url(repo: str, path: str) -> str:
     else:
         url_path = path
     return f"https://{owner}.github.io/{name}/{url_path}"
-
-
 def _banner_raw_url(repo: str, branch: str, target_path: str) -> str:
     """Compose the public ``raw.githubusercontent.com`` URL for a committed
     banner file.  Used by both the upload path and the idempotent-skip
     branch so the two cases return byte-identical URLs."""
     return f"https://raw.githubusercontent.com/{repo}/{branch}/{target_path}"
-
-
 def _put_binary_contents(
     repo: str,
     branch: str,
@@ -300,8 +282,6 @@ def _put_binary_contents(
     raise BannerUploadError(
         f"ghpages banner PUT returned HTTP {resp.status_code}: {resp.text[:200]}"
     )
-
-
 class GitHubPagesAPIAdapter(Publisher):
     """Publishes Markdown to a Pages-enabled repo via the Contents API."""
 

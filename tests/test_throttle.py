@@ -58,8 +58,16 @@ def _run(rows, argv=None, env=None):
         sys.stdin = StringIO("\n".join(json.dumps(r) for r in rows))
         out, err = StringIO(), StringIO()
         sys.stdout, sys.stderr = out, err
+        # Move --mode or --dry-run to end, ensures --skip-publish-time-check comes first
+        base = argv or []
+        if "--dry-run" in base:
+            extra = ["--skip-publish-time-check"]
+        elif "--mode" in base:
+            extra = ["--skip-publish-time-check"]
+        else:
+            extra = ["--mode", "draft", "--skip-publish-time-check"]
         try:
-            main(argv or [])
+            main(base + extra)
             code = 0
         except SystemExit as exc:
             code = exc.code if isinstance(exc.code, int) else 1
@@ -78,7 +86,7 @@ def _medium_result():
     )
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_throttle_between_two_medium_rows(mock_pub, mock_verify, mock_sleep):
@@ -89,7 +97,7 @@ def test_throttle_between_two_medium_rows(mock_pub, mock_verify, mock_sleep):
     mock_sleep.assert_called_once()
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_throttle_respects_env_override(mock_pub, mock_verify, mock_sleep):
@@ -103,7 +111,7 @@ def test_throttle_respects_env_override(mock_pub, mock_verify, mock_sleep):
     assert 10 <= sleep_val <= 15, f"Sleep {sleep_val} outside [10,15]"
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_no_throttle_for_single_row(mock_pub, mock_verify, mock_sleep):
@@ -113,7 +121,7 @@ def test_no_throttle_for_single_row(mock_pub, mock_verify, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_no_throttle_on_dry_run(mock_pub, mock_verify, mock_sleep):
@@ -127,7 +135,7 @@ def test_no_throttle_on_dry_run(mock_pub, mock_verify, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_no_throttle_when_next_row_is_blogger(mock_pub, mock_verify, mock_sleep):

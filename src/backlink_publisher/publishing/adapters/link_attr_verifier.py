@@ -11,6 +11,7 @@ failures are logged but never surface as publish failures.
 from __future__ import annotations
 
 import re
+from backlink_publisher import http as _http
 
 _A_TAG_RE = re.compile(r"<a\s[^>]*>", re.IGNORECASE)
 _BLANK_RE = re.compile(r'\btarget\s*=\s*["\']?_blank["\']?', re.IGNORECASE)
@@ -56,8 +57,7 @@ def verify_link_attributes(
     are NOT expected to fail the publish over it.
     """
     try:
-        import requests  # noqa: PLC0415
-        resp = requests.get(
+        resp = _http.get(
             url,
             timeout=timeout,
             headers={"User-Agent": "backlink-publisher-verifier/0.1"},

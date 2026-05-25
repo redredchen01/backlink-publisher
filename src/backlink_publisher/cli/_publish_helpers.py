@@ -258,6 +258,167 @@ def _record_publish_failure(
     return new_run_id
 
 
+def _build_parser() -> Any:
+    import argparse
+    from backlink_publisher.publishing.registry import registered_platforms
+
+    parser = argparse.ArgumentParser(
+        prog="publish-backlinks",
+        description="Publish validated backlink payloads.",
+    )
+    parser.add_argument(
+        "--input", "-i",
+        type=argparse.FileType("r"),
+        default=None,
+        help="Input JSONL file (default: stdin)",
+    )
+    parser.add_argument(
+        "--platform",
+        choices=registered_platforms(),
+        default=None,
+        help="Target platform (overrides per-row platform)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["draft", "publish"],
+        default="draft",
+        help="Publish mode (default: draft)",
+    )
+    parser.add_argument(
+        "--opencli-profile",
+        default=None,
+        help="Deprecated. Has no effect (OpenCLI removed).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print command plans without executing",
+    )
+    parser.add_argument(
+        "--keep-temp",
+        action="store_true",
+        default=False,
+        help="Deprecated. Has no effect.",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="WARN",
+        choices=["DEBUG", "INFO", "WARN", "ERROR"],
+        help="Log verbosity (default: WARN)",
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        metavar="RUN_ID",
+        help="Resume an interrupted batch run from checkpoint",
+    )
+    parser.add_argument(
+        "--list-runs",
+        action="store_true",
+        default=False,
+        help="List incomplete checkpoint runs and exit",
+    )
+    parser.add_argument(
+        "--cleanup",
+        default=None,
+        metavar="RUN_ID",
+        help="Delete a specific checkpoint and exit",
+    )
+    parser.add_argument(
+        "--cleanup-all",
+        action="store_true",
+        default=False,
+        help="Delete all complete checkpoints and exit",
+    )
+    parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        default=False,
+        help="Skip post-publish content verification (default: verify after each publish)",
+    )
+    parser.add_argument(
+        "--skip-publish-time-check",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip publish-time URL reachability re-check (default: re-check "
+            "each row's target_url and links before dispatch). Per plan "
+            "2026-05-14-001 R10: this is independent of validate-time's "
+            "--no-validate-url-check; setting one does not affect the other."
+        ),
+    )
+    return parser
+
+
+def _handle_checkpoint_ops(args: Any) -> None:
+    from .. import checkpoint
+    from backlink_publisher._util.errors import emit_error
+
+    exclusive = [args.resume, args.list_runs, args.cleanup, args.cleanup_all]
+    if sum(bool(x) for x in exclusive) > 1:
+        emit_error(
+            "error: --resume, --list-runs, --cleanup, and --cleanup-all are mutually exclusive",
+            exit_code=2,
+        )
+
+    if args.list_runs:
+        runs = checkpoint.list_incomplete()
+        if not runs:
+            print("No incomplete runs.")
+        else:
+            print(f"{'RUN_ID':<32}  {'STARTED':<26}  {'PENDING':>7}  {'FAILED':>7}")
+            print("-" * 76)
+            for run in runs:
+                pending = sum(1 for i in run["items"] if i["status"] == "pending")
+                failed = sum(1 for i in run["items"] if i["status"] == "failed")
+                print(f"{run['run_id']:<32}  {run.get('started_at', ''):<26}  {pending:>7}  {failed:>7}")
+        raise SystemExit(0)
+
+    if args.cleanup:
+        try:
+            checkpoint.delete(args.cleanup)
+            print(f"Deleted checkpoint: {args.cleanup}")
+        except (ValueError, FileNotFoundError) as exc:
+            emit_error(str(exc), exit_code=2)
+        raise SystemExit(0)
+
+    if args.cleanup_all:
+        count = checkpoint.delete_complete()
+        print(f"Deleted {count} complete checkpoint(s).")
+        raise SystemExit(0)
+
+
+def _handle_auth_expired(
+    exc: Any,
+    run_id: str | None,
+    row: dict[str, Any],
+    logger: Any,
+) -> None:
+    from backlink_publisher._util.errors import emit_error
+
+    try:
+        from webui_store.channel_status import mark_expired
+        mark_expired(exc.channel)
+    except Exception as flip_exc:
+        logger.warning(f"mark_expired({exc.channel!r}) failed: {flip_exc}")
+    if run_id is not None:
+        from .. import checkpoint
+        try:
+            checkpoint.update_item(
+                run_id, row.get("id", ""), "failed",
+                error=str(exc),
+                error_class="auth_expired",
+            )
+        except Exception as ckpt_exc:
+            print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+    logger.error(
+        f"auth expired: {exc}",
+        extra={"id": row.get("id"), "platform": row.get("platform", "")},
+    )
+    emit_error(str(exc), exit_code=3)
+
+
 def _medium_throttle_sleep(
     row_idx: int,
     last_success_idx: int,

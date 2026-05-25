@@ -383,7 +383,10 @@ class EventStore:
     def acquire_lease(self, target_host: str, owner_pid: int, ttl_seconds: int = 3600) -> bool:
         """Atomically acquire a lease on target_host.
 
-        Returns True if acquired, False otherwise.
+        Returns True if acquired, False otherwise. Takeover triggers when
+        the lease is expired, owned by the caller, or held by a dead PID
+        (crashed publish that bypassed ``atexit`` cleanup — see
+        ``cli/_publish_helpers._release_acquired_leases``).
         """
         now = _now_iso_utc()
         from datetime import datetime, timedelta, timezone
@@ -404,7 +407,11 @@ class EventStore:
                     return True
 
                 curr_owner, curr_expire = row
-                if curr_expire < now or curr_owner == owner_pid:
+                if (
+                    curr_expire < now
+                    or curr_owner == owner_pid
+                    or not _pid_alive(curr_owner)
+                ):
                     conn.execute(
                         "UPDATE publish_leases SET owner_pid = ?, started_at = ?, expire_at = ? WHERE target_host = ?",
                         (owner_pid, now, expire, target_host)
@@ -449,3 +456,26 @@ def _now_iso_utc() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
+
+def _pid_alive(pid: int) -> bool:
+    """Return True if ``pid`` names a live process on this host.
+
+    Uses POSIX ``kill(pid, 0)``: ``ProcessLookupError`` (ESRCH) means the
+    PID does not exist; ``PermissionError`` (EPERM) means the PID exists
+    but is owned by a different user — still treated as alive so we never
+    steal a lease from a live process. ``OSError`` from any other errno
+    also resolves to alive to fail safe (don't take over on unknown
+    state). PID 0 / negative is treated as not alive (sentinel).
+    """
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True

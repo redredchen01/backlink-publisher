@@ -210,7 +210,7 @@ def test_publish_external_service_error(mock_pub, mock_verify):
     assert "editor not found" in stderr
 
 
-@patch("backlink_publisher.cli.publish_backlinks.time.sleep")
+@patch("backlink_publisher.cli._publish_helpers.time.sleep")
 @patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
 @patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
 def test_external_service_error_mid_batch_continues(mock_pub, mock_verify, mock_sleep):

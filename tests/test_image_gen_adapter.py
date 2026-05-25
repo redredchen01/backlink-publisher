@@ -84,10 +84,10 @@ def test_generate_url_mode_downloads_and_returns_bytes():
     get_resp = _ok_get(_PNG_MAGIC, "image/png")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=get_resp,
     ):
         artifact = adapter.generate("a cat on a sunny porch")
@@ -107,7 +107,7 @@ def test_generate_b64_mode_decodes_inline():
     post_resp = _ok_post({"data": [{"b64_json": b64}]})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ):
         artifact = adapter.generate("seed prompt")
@@ -127,7 +127,7 @@ def test_post_sends_bearer_authorization():
     post_resp = _ok_post({"data": [{"b64_json": base64.b64encode(_PNG_MAGIC).decode()}]})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ) as mock_post:
         adapter.generate("p")
@@ -150,7 +150,7 @@ def test_post_targets_images_generations_path():
     post_resp = _ok_post({"data": [{"b64_json": base64.b64encode(_PNG_MAGIC).decode()}]})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ) as mock_post:
         adapter.generate("p")
@@ -180,10 +180,10 @@ def test_mime_sniffed_from_magic_bytes(magic, expected_mime):
     get_resp = _ok_get(magic, content_type="application/octet-stream")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=get_resp,
     ):
         artifact = adapter.generate("p")
@@ -199,10 +199,10 @@ def test_unknown_magic_fails_loud():
     get_resp = _ok_get(b"<html>not an image", "image/png")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=get_resp,
     ), pytest.raises(RuntimeError, match="unrecognized image format"):
         adapter.generate("p")
@@ -221,10 +221,10 @@ def test_response_at_size_cap_succeeds():
     get_resp = _ok_get(big, "image/png")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=get_resp,
     ):
         artifact = adapter.generate("p")
@@ -242,10 +242,10 @@ def test_response_over_size_cap_rejected():
     get_resp = _ok_get(too_big, "image/png")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=get_resp,
     ), pytest.raises(ExternalServiceError, match=r"exceeds 5 ?MB"):
         adapter.generate("p")
@@ -261,7 +261,7 @@ def test_401_fails_loud_with_rotate_hint():
     bad = _err_post(401, "invalid_api_key")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=bad,
     ) as mock_post, pytest.raises(RuntimeError, match="frw-login"):
         adapter.generate("p")
@@ -280,7 +280,7 @@ def test_429_retries_then_succeeds():
     ]
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         side_effect=sequence,
     ), patch(
         "backlink_publisher.publishing.adapters.image_gen.adapter.time.sleep",
@@ -299,7 +299,7 @@ def test_5xx_retries_then_gives_up():
     adapter = _make_adapter(max_retries=3)
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         side_effect=[_err_post(500, "boom")] * 3,
     ), patch(
         "backlink_publisher.publishing.adapters.image_gen.adapter.time.sleep",
@@ -315,7 +315,7 @@ def test_4xx_non_401_fails_loud():
 
     adapter = _make_adapter()
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=_err_post(400, "bad prompt"),
     ) as mock_post, pytest.raises(ExternalServiceError):
         adapter.generate("p")
@@ -330,7 +330,7 @@ def test_missing_data_field_fails_loud():
     post_resp = _ok_post({"unexpected": "shape"})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), pytest.raises(RuntimeError, match="data"):
         adapter.generate("p")
@@ -343,7 +343,7 @@ def test_empty_data_array_fails_loud():
     post_resp = _ok_post({"data": []})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), pytest.raises(RuntimeError, match="data"):
         adapter.generate("p")
@@ -364,10 +364,10 @@ def test_source_url_unreachable_fails_loud():
     )
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ), patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.get",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_get",
         return_value=bad_get,
     ), pytest.raises(ExternalServiceError, match="source_url"):
         adapter.generate("p")
@@ -382,7 +382,7 @@ def test_timeout_retries():
     b64 = base64.b64encode(_PNG_MAGIC).decode("ascii")
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         side_effect=[
             requests.Timeout("slow"),
             _ok_post({"data": [{"b64_json": b64}]}),
@@ -407,7 +407,7 @@ def test_same_prompt_same_sha():
     post_resp = _ok_post({"data": [{"b64_json": b64}]})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ):
         a1 = adapter.generate("the same prompt")
@@ -422,7 +422,7 @@ def test_different_prompt_different_sha():
     post_resp = _ok_post({"data": [{"b64_json": b64}]})
 
     with patch(
-        "backlink_publisher.publishing.adapters.image_gen.adapter.requests.post",
+        "backlink_publisher.publishing.adapters.image_gen.adapter.http_post",
         return_value=post_resp,
     ):
         a1 = adapter.generate("prompt one")

@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 import requests
+from backlink_publisher.http import get as http_get, post as http_post
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import (
@@ -88,7 +89,7 @@ class MediumAPIAdapter(Publisher):
 
         # One-time user_id lookup (retried on connection errors and 429/5xx)
         def _do_me() -> requests.Response:
-            resp = requests.get(f"{_API_BASE}/me", headers=headers, timeout=_TIMEOUT)
+            resp = http_get(f"{_API_BASE}/me", headers=headers, timeout=_TIMEOUT)
             if resp.status_code in RETRYABLE_HTTP_STATUSES:
                 raise _TransientHTTPError(resp.status_code)
             return resp
@@ -148,7 +149,7 @@ class MediumAPIAdapter(Publisher):
 
         # Create post (retried on connection errors and 429/5xx)
         def _do_post() -> requests.Response:
-            resp = requests.post(
+            resp = http_post(
                 f"{_API_BASE}/users/{user_id}/posts",
                 headers=headers,
                 json=body,

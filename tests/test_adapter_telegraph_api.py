@@ -79,7 +79,7 @@ def test_happy_publish_returns_published_url(isolated_config_dir):
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
     _seed_token(isolated_config_dir)
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.return_value = _ok_page(url="https://telegra.ph/happy-01-01")
         result = TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
 
@@ -95,7 +95,7 @@ def test_happy_draft_mode_returns_draft_url(isolated_config_dir):
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
     _seed_token(isolated_config_dir)
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.return_value = _ok_page(url="https://telegra.ph/draft-01-01")
         result = TelegraphAPIAdapter().publish(PAYLOAD, mode="draft", config=Config())
 
@@ -111,7 +111,7 @@ def test_token_bootstrap_when_no_file_exists(isolated_config_dir):
     # Sanity: no token file pre-test
     assert not (isolated_config_dir / "telegraph-token.json").exists()
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.side_effect = [
             _ok_account(token="BOOTSTRAP_TOKEN"),
             _ok_page(url="https://telegra.ph/bootstrap-01-01"),
@@ -129,7 +129,7 @@ def test_token_schema_keys_are_exactly_access_token_and_short_name(isolated_conf
     """Schema lock-in: file MUST NOT contain extra fields (parity with spike)."""
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.side_effect = [_ok_account(token="SCHEMA_TOKEN"), _ok_page()]
         TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
 
@@ -148,7 +148,7 @@ def test_legacy_phase0_token_migrates_to_canonical_name(isolated_config_dir):
     legacy.write_text(json.dumps({"access_token": "LEGACY_TKN", "short_name": "x"}))
     os.chmod(legacy, 0o600)
 
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.return_value = _ok_page()
         TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
 
@@ -167,7 +167,7 @@ def test_empty_markdown_raises_external_service_error(isolated_config_dir):
 
     _seed_token(isolated_config_dir)
     payload = {**PAYLOAD, "content_markdown": ""}
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         with pytest.raises(ExternalServiceError, match="empty"):
             TelegraphAPIAdapter().publish(payload, mode="publish", config=Config())
         assert p.call_count == 0, "must not hit Telegraph API on empty payload"
@@ -180,7 +180,7 @@ def test_oversize_payload_rejected_before_network(isolated_config_dir):
     _seed_token(isolated_config_dir)
     huge_md = "Padding " * 12_000  # ~96 KB markdown → ~96 KB JSON nodes
     payload = {**PAYLOAD, "content_markdown": huge_md}
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         with pytest.raises(ExternalServiceError, match="60KB|budget|exceeds"):
             TelegraphAPIAdapter().publish(payload, mode="publish", config=Config())
         assert p.call_count == 0
@@ -193,7 +193,7 @@ def test_markdown_with_unsupported_html_publishes_via_unwrap(isolated_config_dir
     _seed_token(isolated_config_dir)
     md = "Has <table><tr><td>inner [link](https://x.com)</td></tr></table> tag.\n"
     payload = {**PAYLOAD, "content_markdown": md}
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.return_value = _ok_page()
         result = TelegraphAPIAdapter().publish(payload, mode="publish", config=Config())
     assert result.status == "published"
@@ -208,7 +208,7 @@ def test_token_file_with_loose_perms_raises_dependency_error(isolated_config_dir
 
     p = _seed_token(isolated_config_dir)
     os.chmod(p, 0o644)
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as post:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as post:
         with pytest.raises(DependencyError, match="0600"):
             TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
         assert post.call_count == 0
@@ -230,7 +230,7 @@ def test_network_timeout_propagates_as_external_service_error(isolated_config_di
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
     _seed_token(isolated_config_dir)
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.side_effect = requests.ConnectTimeout("timed out")
         with pytest.raises(ExternalServiceError, match="network"):
             TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
@@ -241,7 +241,7 @@ def test_429_response_raises_external_service_error(isolated_config_dir):
     from backlink_publisher.publishing.adapters.telegraph_api import TelegraphAPIAdapter
 
     _seed_token(isolated_config_dir)
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         p.return_value = _api_response(ok=False, error="FLOOD_WAIT_X")
         with pytest.raises(ExternalServiceError, match="rejected"):
             TelegraphAPIAdapter().publish(PAYLOAD, mode="publish", config=Config())
@@ -267,6 +267,6 @@ def test_verify_telegraph_setup_silently_ok_when_token_missing(isolated_config_d
     from backlink_publisher.publishing.adapters.telegraph_api import verify_telegraph_setup
 
     # No token seeded, no network mock — should NOT make a request.
-    with patch("backlink_publisher.publishing.adapters.telegraph_api.requests.post") as p:
+    with patch("backlink_publisher.publishing.adapters.telegraph_api.http_post") as p:
         verify_telegraph_setup(Config())
         assert p.call_count == 0, "verify must not hit the network"

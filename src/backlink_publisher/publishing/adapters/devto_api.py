@@ -46,6 +46,7 @@ import time
 from typing import Any
 
 import requests
+from backlink_publisher.http import post as http_post
 
 from backlink_publisher.config import Config, load_devto_token
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
@@ -184,7 +185,7 @@ class DevtoAPIAdapter(Publisher):
             )
 
         def execute():
-            resp = requests.post(
+            resp = http_post(
                 DEVTO_ARTICLES_API,
                 headers=_required_headers(api_key),
                 json=article_payload,

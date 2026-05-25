@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import mimetypes
+import os
+import random
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from backlink_publisher.config import Config, BloggerOAuthConfig, resolve_blog_id, load_blogger_token, save_blogger_token
 from backlink_publisher._util.errors import (
@@ -23,6 +27,46 @@ from .base import AdapterResult
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
 _SCOPES = ["https://www.googleapis.com/auth/blogger"]
+
+_LOCK_TIMEOUT_S = 30
+
+
+@contextmanager
+def _refresh_lock(token_path: Path) -> Iterator[None]:
+    """Serialize concurrent access token refreshes around ``token_path``.
+
+    Two simultaneous publish-backlinks processes both calling creds.refresh()
+    causes a token-rotation race: the second refresh invalidates the first
+    access token, turning half the batch rows into AuthExpiredError even
+    though the run started with a valid token.
+
+    Lock file lives next to the token file with a ``.lock`` suffix, same
+    convention as telegraph_api (canonical credential-rotation pattern).
+    """
+    lock_path = token_path.with_suffix(token_path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        deadline = time.monotonic() + _LOCK_TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise ExternalServiceError(
+                        f"Could not acquire blogger token lock "
+                        f"(waited {_LOCK_TIMEOUT_S}s): {lock_path}"
+                    )
+                time.sleep(random.uniform(0.05, 0.15))
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
 
 
 def _near_expiry(creds, window_secs: int) -> bool:
@@ -56,13 +100,26 @@ def _build_credentials(config: Config):
             creds = None
 
     if creds and _near_expiry(creds, 300) and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            save_blogger_token(json_from_creds(creds), config.blogger_token_path)
-            return creds
-        except Exception as exc:
-            log.warn(f"Token refresh failed: {exc}. Re-authenticating.")
-            creds = None
+        # Serialize concurrent refreshes to prevent the race where two
+        # simultaneous publish processes both call creds.refresh() and
+        # the second rotation invalidates the first's access token.
+        with _refresh_lock(Path(config.blogger_token_path)):
+            # Re-read inside the lock — a peer may have already refreshed.
+            fresh = load_blogger_token(config.blogger_token_path)
+            if fresh:
+                try:
+                    creds = Credentials.from_authorized_user_info(fresh, _SCOPES)
+                except Exception:
+                    pass
+            if not _near_expiry(creds, 300):
+                return creds  # peer refreshed while we waited on the lock
+            try:
+                creds.refresh(Request())
+                save_blogger_token(json_from_creds(creds), config.blogger_token_path)
+                return creds
+            except Exception as exc:
+                log.warn(f"Token refresh failed: {exc}. Re-authenticating.")
+                creds = None
 
     if not creds or not creds.valid:
         oauth = config.blogger_oauth

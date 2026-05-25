@@ -25,6 +25,7 @@ import time  # noqa: F401 — referenced by tests via mock.patch
 from typing import Any
 
 import requests
+from backlink_publisher.http import get as http_get, post as http_post
 
 from backlink_publisher._util.errors import ExternalServiceError
 from backlink_publisher.publishing.adapters.retry import retry_transient_call
@@ -91,7 +92,7 @@ class ImageGenAdapter:
 
         def _do_post() -> dict[str, Any]:
             try:
-                resp = requests.post(
+                resp = http_post(
                     url,
                     headers=headers,
                     json=body,
@@ -188,7 +189,7 @@ def _download_with_cap(src_url: str) -> bytes:
     flag rather than enabling it globally.
     """
     try:
-        resp = requests.get(src_url, timeout=30, stream=False)
+        resp = http_get(src_url, timeout=30, stream=False)
     except (requests.Timeout, requests.ConnectionError) as exc:
         # Treat as fail-loud at this layer — retry_transient_call has
         # already wrapped the outer POST; a CDN miss is a different
