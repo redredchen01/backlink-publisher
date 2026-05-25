@@ -1037,11 +1037,22 @@ class TestSitesPostRoutes:
 
 
 class TestQueueDashboardRoutes:
-    def test_ce_dashboard_redirects_to_history_in_progress(self, client):
-        """Plan 012 Unit 2 — /ce:dashboard 302 → /ce:history?section=in-progress."""
+    def test_ce_dashboard_redirects_to_health(self, client):
+        """Plan 2026-05-25-006 U3 — /ce:dashboard 302 → /ce:health.
+
+        Repurposed from the Plan 012 target (/ce:history?section=in-progress):
+        "dashboard" now means the publishing health dashboard. The in-progress
+        task list is still reachable directly at /ce:history?section=in-progress.
+        """
         resp = client.get("/ce:dashboard", follow_redirects=False)
         assert resp.status_code == 302
-        assert resp.headers["Location"].endswith("/ce:history?section=in-progress")
+        assert resp.headers["Location"].endswith("/ce:health")
+
+    def test_ce_health_renders_read_only_dashboard(self, client):
+        """Plan 2026-05-25-006 U3 — /ce:health GET renders the health dashboard."""
+        resp = client.get("/ce:health")
+        assert resp.status_code == 200
+        assert "Publishing Health" in resp.get_data(as_text=True)
 
     def test_dashboard_html_template_removed(self):
         """Plan 012 Unit 2 — dashboard.html template file deleted."""

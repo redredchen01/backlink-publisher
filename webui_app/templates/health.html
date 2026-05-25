@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Publishing Health</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+  <style>
+    .hero-pct { font-size: 3rem; font-weight: 700; line-height: 1; }
+    .hero-good { color: #198754; }
+    .hero-warn { color: #fd7e14; }
+    .hero-bad  { color: #dc3545; }
+    .hero-none { color: #6c757d; }
+    .as-of { font-variant-numeric: tabular-nums; }
+    .target-cell { font-family: ui-monospace, monospace; font-size: 13px; }
+    .row-worst { box-shadow: inset 3px 0 0 #dc3545; }
+  </style>
+</head>
+<body class="bg-light">
+<nav class="navbar bg-white border-bottom px-3">
+  <span class="navbar-brand mb-0 h1"><i class="bi bi-heart-pulse me-2"></i>Publishing Health</span>
+  <a href="/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-house"></i> Home</a>
+</nav>
+
+<main class="container py-4">
+
+  {# ── Freshness + degraded/gap notice (R5, adjacent to hero) ───────────── #}
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2 text-muted small">
+    <span>Window: last {{ health.window_days }} days</span>
+    <span class="ms-auto as-of">
+      {% if projection.latest_event_utc %}
+        <i class="bi bi-clock-history"></i> as of {{ projection.latest_event_utc }}
+      {% else %}
+        <i class="bi bi-clock-history"></i> no publishes recorded yet
+      {% endif %}
+    </span>
+  </div>
+  {% if projection.degraded or projection.gap %}
+  <div class="alert alert-warning py-2 small d-flex align-items-center gap-2" role="alert">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <span>
+      Data may be incomplete —
+      {% if projection.degraded %}the projection could not be refreshed{% if projection.gap %} and {% endif %}{% endif %}
+      {% if projection.gap %}{{ projection.gap_reason or "one or more sources could not be read" }}{% endif %}.
+      Figures below reflect the last successful projection.
+    </span>
+  </div>
+  {% endif %}
+
+  {# ── 1. Hero success rate (R6, R10) ───────────────────────────────────── #}
+  <div class="card shadow-sm mb-4">
+    <div class="card-body text-center">
+      {% if health.success.has_data %}
+        {% set pct = health.success.pct %}
+        <div class="hero-pct {% if pct >= 90 %}hero-good{% elif pct >= 70 %}hero-warn{% else %}hero-bad{% endif %}">
+          {{ pct }}%
+        </div>
+        <div class="text-muted mt-1">
+          {{ health.success.confirmed }} of {{ health.success.targets }}
+          target{{ '' if health.success.targets == 1 else 's' }} verified-confirmed
+        </div>
+        {% if health.success.confirmed == health.success.targets %}
+          <div class="text-success small mt-1"><i class="bi bi-check-circle"></i> No failures in this window</div>
+        {% endif %}
+      {% else %}
+        <div class="hero-pct hero-none">—</div>
+        <div class="text-muted mt-1">No publishes in the last {{ health.window_days }} days</div>
+      {% endif %}
+      <div class="text-muted small mt-2">
+        Success counts only <strong>verified</strong> confirmations; an unverified publish counts against the rate.
+      </div>
+    </div>
+  </div>
+
+  {# ── 2. Currently-broken channels banner (R9, honest scope) ───────────── #}
+  {% if health.broken %}
+  <div class="alert alert-danger" role="alert">
+    <div class="fw-semibold mb-2"><i class="bi bi-plug"></i> Channels needing attention</div>
+    <ul class="list-unstyled mb-1">
+      {% for ch in health.broken %}
+      <li class="d-flex align-items-center gap-2 mb-1">
+        <span class="badge text-bg-danger text-uppercase">{{ ch.status.replace('_', ' ') }}</span>
+        <span class="fw-semibold">{{ ch.channel }}</span>
+        {% if ch.last_verified_at %}<span class="text-muted small">last ok {{ ch.last_verified_at }}</span>{% endif %}
+        <a href="/settings" class="btn btn-sm btn-outline-light ms-auto">Re-bind</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <div class="alert alert-success py-2 small" role="alert">
+    <i class="bi bi-check-circle"></i> No known channel problems
+    <span class="text-muted">(monitors velog / medium / blogger; flags reactively on failure)</span>
+  </div>
+  {% endif %}
+
+  {# ── 3. Per-adapter health (R7, worst-first) ──────────────────────────── #}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">Per-platform health</div>
+    {% if health.per_adapter %}
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Platform</th>
+            <th class="text-end">Success</th>
+            <th class="text-end">Confirmed</th>
+            <th class="text-end">Unverified</th>
+            <th class="text-end">Failed</th>
+            <th class="text-end">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in health.per_adapter %}
+          <tr class="{% if a.pct is not none and a.pct < 70 %}row-worst{% endif %}">
+            <td class="target-cell">
+              {{ a.platform }}
+              {% if a.small_sample %}<span class="badge text-bg-secondary" title="small sample">small sample</span>{% endif %}
+            </td>
+            <td class="text-end">{% if a.pct is not none %}{{ a.pct }}%{% else %}—{% endif %}</td>
+            <td class="text-end">{{ a.confirmed }}</td>
+            <td class="text-end">{{ a.unverified }}</td>
+            <td class="text-end">{{ a.failed }}</td>
+            <td class="text-end">{{ a.total }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted text-center py-4">No publish activity in this window.</div>
+    {% endif %}
+  </div>
+
+  {# ── 4. Error distribution (R8) ───────────────────────────────────────── #}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">Failure breakdown</div>
+    {% if health.errors %}
+    <ul class="list-group list-group-flush">
+      {% for e in health.errors %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span>{{ e.error_class }}</span>
+        <span class="badge text-bg-danger rounded-pill">{{ e.count }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card-body text-success text-center py-4"><i class="bi bi-check-circle"></i> No failures recorded in this window.</div>
+    {% endif %}
+  </div>
+
+</main>
+</body>
+</html>

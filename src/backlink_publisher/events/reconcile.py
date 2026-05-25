@@ -149,8 +149,6 @@ def _collect_sources(store: EventStore) -> list[Path]:
     if history.exists():
         sources.append(history)
 
-    from ..checkpoint import _checkpoint_dir
-
     cp_dir = _checkpoint_dir()
     if cp_dir.exists():
         known = _known_cursor_sources(store)
@@ -158,6 +156,22 @@ def _collect_sources(store: EventStore) -> list[Path]:
             if str(cp) not in known:
                 sources.append(cp)
     return sources
+
+
+def _checkpoint_dir() -> Path:
+    """Resolve the checkpoint directory: ``<cache_dir>/checkpoints``.
+
+    Resolves ``_cache_dir`` via the config *module attribute* at call time
+    rather than importing ``checkpoint._checkpoint_dir`` — checkpoint.py binds
+    ``_cache_dir`` by name at import, which a test that ``mock.patch``es
+    ``config._cache_dir`` can poison under unlucky import ordering (the patch is
+    restored, but checkpoint keeps the stale reference). Looking the attribute
+    up fresh on the module each call is leak-proof and matches the projector's
+    own config-path discipline.
+    """
+    from .. import config as _config
+
+    return _config._cache_dir() / "checkpoints"
 
 
 def _known_cursor_sources(store: EventStore) -> set[str]:

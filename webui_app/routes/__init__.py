@@ -26,10 +26,11 @@ def register_blueprints(app: Flask) -> None:
     from .image_gen import bp as image_gen_bp
     from .seo_viz import bp as seo_viz_bp
     from .equity_ledger import bp as equity_ledger_bp
+    from .health import bp as health_bp
 
     for bp in (main_bp, pipeline_bp, batch_bp, checkpoint_bp,
                history_bp, drafts_bp, settings_basic_bp, llm_bp, oauth_bp,
                profiles_bp, sites_bp, queue_bp, dashboard_bp,
                medium_login_bp, bind_bp, token_paste_bp, url_verify_bp, image_gen_bp,
-               seo_viz_bp, equity_ledger_bp):
+               seo_viz_bp, equity_ledger_bp, health_bp):
         app.register_blueprint(bp)
