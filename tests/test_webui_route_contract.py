@@ -1150,6 +1150,20 @@ class TestUrlVerifyRoutes:
         assert resp.status_code == 403
 
 
+class TestEquityLedgerRoutes:
+    """Plan 2026-05-25-004 — equity-ledger route smoke. Full lifecycle in
+    tests/test_webui_equity_ledger_route.py + _recheck.py; this satisfies the
+    route-coverage gate below."""
+
+    def test_get_equity_ledger(self, client):
+        resp = client.get("/ce:equity-ledger")
+        assert resp.status_code == 200
+
+    def test_post_equity_ledger_recheck_missing_csrf_or_body(self, client):
+        resp = client.post("/ce:equity-ledger/recheck")
+        assert resp.status_code in (400, 403, 404, 415)
+
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Coverage assertion — make sure we exercised every @app.route declared.
