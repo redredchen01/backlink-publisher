@@ -5,6 +5,7 @@ status: completed
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/ideation/2026-05-25-codebase-optimization-backlog.md  # backlog item O4
+claims: {}  # no verifiable-SHA assertions — PR/file refs are context, not claims
 ---
 
 # test: Dedicated route-level coverage for OAuth WebUI routes (O4)
