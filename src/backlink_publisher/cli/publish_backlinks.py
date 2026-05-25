@@ -277,6 +277,14 @@ def main(argv: list[str] | None = None) -> None:
                 extra={"id": row.get("id"), "status": result.status},
             )
 
+    # R2: project this run's outcomes into events.db now that every item's
+    # final status is in the checkpoint. Placed before the failure/unverified
+    # SystemExit branches below — those are exactly the runs whose outcomes
+    # must be projected. Fail-safe: never raises, never affects the exit code.
+    if run_id is not None:
+        from ..events import project_run_safe
+        project_run_safe(run_id)
+
     successful = [r for r in outputs if r.get("error") is None]
     failed = [r for r in outputs if r.get("error") is not None]
     unverified = [r for r in successful if r.get("status", "").endswith("_unverified")]

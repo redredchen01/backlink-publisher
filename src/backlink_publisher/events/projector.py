@@ -88,6 +88,64 @@ def flush_for(
     raise ProjectionError(f"unknown source for path: {path}")
 
 
+# Reserved projection_cursor key for the projection-health marker (Plan 005 /
+# U4). Reuses the existing table — no schema migration — so the dashboard and
+# an operator can see whether the projection is fresh or silently failing.
+_HEALTH_SOURCE = "__projection_health__"
+
+
+def record_projection_health(
+    store: EventStore, *, ok: bool, error: str | None = None
+) -> None:
+    """Persist the last projection outcome so swallowed failures are visible.
+
+    Fail-safe in its own right: never raises (the DB may be the thing that is
+    locked/broken). Stored under a reserved ``projection_cursor`` row.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with store.connect() as conn:
+            state = dict(_cursor_load(conn, _HEALTH_SOURCE))
+            if ok:
+                state["last_ok_at"] = now
+                state["last_error"] = None
+            else:
+                state["last_error"] = error
+                state["last_error_at"] = now
+            _cursor_save(conn, _HEALTH_SOURCE, state, mtime=None)
+    except Exception as exc:  # noqa: BLE001 — health recording is best-effort
+        _log.warning("projector: could not record projection health: %s", exc)
+
+
+def project_run_safe(
+    run_id: str, *, store: EventStore | None = None
+) -> ProjectionResult | None:
+    """Project a finished run's checkpoint into ``events.db`` — fail-safe.
+
+    Called inline at the end of publish/resume (Plan 005 / R2). It MUST NOT
+    raise: a projection failure (a locked DB ``sqlite3.OperationalError`` from a
+    concurrent writer, a ``ProjectionError``, a missing checkpoint) is logged
+    and swallowed so the publish result is unaffected. ``flush_for`` is
+    idempotent, so the dashboard's project-on-read remains a safe backstop.
+    """
+    store = store or EventStore()
+    try:
+        from ..checkpoint import _checkpoint_path
+
+        result = flush_for(_checkpoint_path(run_id), store=store)
+        record_projection_health(store, ok=True)
+        return result
+    except Exception as exc:  # noqa: BLE001 — projection must never fail publish
+        _log.warning(
+            "projector: projection after run %s failed (non-fatal): %s",
+            run_id, exc,
+        )
+        record_projection_health(
+            store, ok=False, error=f"{type(exc).__name__}: {exc}"
+        )
+        return None
+
+
 # ── Source detection ──────────────────────────────────────────────
 
 

@@ -291,6 +291,12 @@ def _run_resume(args: Any) -> None:
 
     from .. import checkpoint as _ckpt
     updated_ckpt = _ckpt.load_checkpoint(run_id)
+
+    # R2: project the resumed run's outcomes into events.db before the
+    # unverified SystemExit(5) below. Fail-safe; never affects the exit code.
+    from ..events import project_run_safe
+    project_run_safe(run_id)
+
     all_done = []
     for i in updated_ckpt["items"]:
         if i["status"] == "done":
