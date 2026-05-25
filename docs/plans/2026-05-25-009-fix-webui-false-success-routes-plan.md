@@ -1,7 +1,7 @@
 ---
 title: "fix: Close remaining WebUI false-success routes (UX honesty O1)"
 type: fix
-status: active
+status: completed
 date: 2026-05-25
 deepened: 2026-05-25
 claims: {}  # opt-out: branch SHAs not yet merged; drift gate not applicable pre-merge
