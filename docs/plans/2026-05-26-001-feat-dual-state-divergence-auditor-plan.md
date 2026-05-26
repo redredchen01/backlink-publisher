@@ -5,6 +5,7 @@ status: active
 date: 2026-05-26
 deepened: 2026-05-26
 origin: docs/brainstorms/2026-05-26-dual-state-divergence-auditor-requirements.md
+claims: {}
 ---
 
 # feat: Dual-State Divergence Auditor (`audit-state`) — v1
