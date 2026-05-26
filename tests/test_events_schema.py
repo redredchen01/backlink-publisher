@@ -126,6 +126,8 @@ def test_quarantine_log_columns_match_plan(tmp_path):
     store = EventStore()
     with store.connect() as conn:
         cols = _column_names(conn, "quarantine_log")
+    # dedup_key added for the idempotent quarantine write path
+    # (Plan 2026-05-26-001 Unit 2).
     assert cols == [
         "id",
         "ts_utc",
@@ -133,6 +135,7 @@ def test_quarantine_log_columns_match_plan(tmp_path):
         "run_id",
         "reason",
         "raw_payload_json",
+        "dedup_key",
     ]
 
 
