@@ -355,12 +355,12 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     # An item already projected past pending should not
                     # regress; ignore unexpected rewinds.
                     continue
-                dedup_key = (run_id, target_url or "", "publish.intent")
+                dedup_key = (run_id, target_url or "", kinds.PUBLISH_INTENT)
                 if dedup_key in seen_intent_or_failed:
                     continue
                 seen_intent_or_failed.add(dedup_key)
                 store.append(
-                    "publish.intent",
+                    kinds.PUBLISH_INTENT,
                     {
                         "target_url": target_url,
                         "title": item.get("title"),
@@ -413,7 +413,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 # kind='publish.confirmed'" count stays honest. Legacy items
                 # without the key default to verified (pre-D5 indistinguishable).
                 _verified = item.get("verified", True)
-                _kind = "publish.confirmed" if _verified else "publish.unverified"
+                _kind = kinds.PUBLISH_CONFIRMED if _verified else kinds.PUBLISH_UNVERIFIED
                 store.append(
                     _kind,
                     {
@@ -436,7 +436,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 events_inserted += 1
 
             elif outcome is kinds.PUBLISH_FAILED:  # status == "failed"
-                dedup_key = (run_id, target_url or "", "publish.failed")
+                dedup_key = (run_id, target_url or "", kinds.PUBLISH_FAILED)
                 if dedup_key in seen_intent_or_failed:
                     continue
                 seen_intent_or_failed.add(dedup_key)
@@ -444,7 +444,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 error_message = item.get("error") or ""
                 cleaned, hits = scrub_text(error_message)
                 store.append(
-                    "publish.failed",
+                    kinds.PUBLISH_FAILED,
                     {
                         "error_class": error_class,
                         "error_message_clean": cleaned,
@@ -605,7 +605,7 @@ def _project_history(
                     # still emit a confirmed event so consumers see the
                     # row, but article row is skipped.
                     store.append(
-                        "publish.confirmed",
+                        kinds.PUBLISH_CONFIRMED,
                         {
                             "live_url": None,
                             "target_url": target_url,
@@ -640,7 +640,7 @@ def _project_history(
                         continue
                     articles_inserted += 1
                     store.append(
-                        "publish.confirmed",
+                        kinds.PUBLISH_CONFIRMED,
                         {
                             "live_url": live_url,
                             "target_url": target_url,
@@ -663,7 +663,7 @@ def _project_history(
                 error = row.get("error") or ""
                 cleaned, hits = scrub_text(error)
                 store.append(
-                    "publish.failed",
+                    kinds.PUBLISH_FAILED,
                     {
                         # D3: always present so checkpoint- and history-sourced
                         # failed events share one shape; None when the row has
@@ -757,7 +757,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                 if not isinstance(article_urls, list) or not article_urls:
                     # Published without URL: emit event, skip article row.
                     store.append(
-                        "publish.confirmed",
+                        kinds.PUBLISH_CONFIRMED,
                         {"live_url": None, "draft_id": draft_id},
                         target_url=target_url,
                         host=host,
@@ -786,7 +786,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                         continue
                     articles_inserted += 1
                     store.append(
-                        "publish.confirmed",
+                        kinds.PUBLISH_CONFIRMED,
                         {"live_url": live_url, "draft_id": draft_id},
                         target_url=target_url,
                         host=_host_of(live_url),
@@ -801,7 +801,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                 if prior_status == "scheduled":
                     continue
                 store.append(
-                    "draft.scheduled",
+                    kinds.DRAFT_SCHEDULED,
                     {"draft_id": draft_id},
                     target_url=target_url,
                     host=host,
@@ -815,7 +815,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                     # on the first encounter.
                     continue
                 store.append(
-                    "draft.created",
+                    kinds.DRAFT_CREATED,
                     {"draft_id": draft_id},
                     target_url=target_url,
                     host=host,
