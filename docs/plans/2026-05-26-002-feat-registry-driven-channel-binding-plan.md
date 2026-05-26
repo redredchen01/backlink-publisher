@@ -5,6 +5,7 @@ status: active
 date: 2026-05-26
 deepened: 2026-05-26
 origin: docs/brainstorms/2026-05-26-overview-inline-channel-binding-requirements.md
+claims: {}
 ---
 
 # feat: Registry-driven, auth-type-templated channel binding surface
