@@ -277,3 +277,65 @@ def test_non_ascii_url_does_not_throw():
         # Korean handle + CJK slug — would crash raw urllib at request-line encoding.
         facts = pf.fetch_target("https://example.com/@한국/슬러그")
     assert facts.status == 200
+
+
+# --------------------------------------------------------------------------
+# Never-raises hardening: malformed IPv6 must not crash _check_url_for_ssrf
+# (review finding — urlparse(url).hostname raises ValueError on "http://[invalid")
+# --------------------------------------------------------------------------
+
+def test_malformed_ipv6_initial_url_does_not_raise():
+    # Real _check_url_for_ssrf (not patched) would raise ValueError on .hostname;
+    # _safe_ssrf_check must swallow it. No socket opened (rejected pre-fetch).
+    with patch.object(pf._PREFLIGHT_OPENER, "open") as mock_open:
+        facts = pf.fetch_target("http://[invalid")
+    assert facts.reason == "invalid_url"
+    mock_open.assert_not_called()
+
+
+def test_malformed_ipv6_final_url_does_not_raise():
+    # Initial check safe; post-redirect re-check hits a malformed final URL whose
+    # real SSRF check would raise — must be swallowed, fetch completes.
+    def _ssrf(url):
+        if "[bad" in url:
+            raise ValueError("Invalid IPv6 URL")
+        return None
+    with patch.object(pf, "_check_url_for_ssrf", side_effect=_ssrf), \
+         patch.object(pf._PREFLIGHT_OPENER, "open",
+                      return_value=_mock_resp(final_url="http://[bad/x")):
+        facts = pf.fetch_target("https://example.com/page")  # must not raise
+    assert facts.status == 200  # completed; malformed final host left to opener guard
+
+
+# --------------------------------------------------------------------------
+# noindex token match, not substring (review finding: "noindexing" false positive)
+# --------------------------------------------------------------------------
+
+def test_x_robots_noindexing_is_not_noindex():
+    with patch.object(pf, "_check_url_for_ssrf", return_value=None), \
+         patch.object(pf._PREFLIGHT_OPENER, "open",
+                      return_value=_mock_resp(headers={"X-Robots-Tag": "noindexing-strategy"})):
+        facts = pf.fetch_target("https://example.com/")
+    assert facts.noindex is False  # "noindexing" is not the "noindex" directive
+
+
+def test_meta_content_all_noindex_is_noindex():
+    body = b'<html><head><meta name="robots" content="all, noindex"><title>T</title></head><body><h1>H</h1></body></html>'
+    with patch.object(pf, "_check_url_for_ssrf", return_value=None), \
+         patch.object(pf._PREFLIGHT_OPENER, "open", return_value=_mock_resp(body=body)):
+        facts = pf.fetch_target("https://example.com/")
+    assert facts.noindex is True  # directive token present in a comma list
+
+
+# --------------------------------------------------------------------------
+# Empty / structureless body → has_title / has_h1 False (coverage gap)
+# --------------------------------------------------------------------------
+
+def test_empty_body_no_title_no_h1():
+    with patch.object(pf, "_check_url_for_ssrf", return_value=None), \
+         patch.object(pf._PREFLIGHT_OPENER, "open",
+                      return_value=_mock_resp(body=b"<html><body></body></html>")):
+        facts = pf.fetch_target("https://example.com/")
+    assert facts.status == 200
+    assert facts.has_title is False
+    assert facts.has_h1 is False

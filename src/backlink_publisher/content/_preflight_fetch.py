@@ -32,7 +32,7 @@ import re
 import socket
 import ssl
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request
@@ -70,6 +70,10 @@ _META_NAME_RE = re.compile(rb"""name\s*=\s*["']?([a-zA-Z-]+)""", re.IGNORECASE)
 _META_CONTENT_RE = re.compile(rb"""content\s*=\s*["']?([^"'>]*)""", re.IGNORECASE)
 _H1_RE = re.compile(rb"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
 _H1_SENTINEL = b"</h1>"
+#: Split robots directives on commas / whitespace / colons (the last covers
+#: ``X-Robots-Tag: googlebot: noindex``) so ``noindex`` matches as a token, not
+#: a substring (guards against ``noindexing`` false positives).
+_DIRECTIVE_SPLIT = re.compile(r"[,\s:]+")
 
 
 @dataclass(frozen=True)
@@ -97,14 +101,30 @@ def _is_http_url(url: str) -> bool:
     """http/https scheme + non-empty netloc. Run before any network attempt —
     ``_check_once`` skips this, so a reused prelude would have NO scheme gate
     and could hand ``file://`` / ``ftp://`` to ``urlopen``.
+
+    ``urlparse`` itself raises ``ValueError`` on a malformed IPv6 literal
+    (e.g. ``http://[invalid``), so this is also the first guard against a URL
+    that would otherwise crash the never-raises contract — treat any parse
+    failure as "not a valid http url".
     """
     if not isinstance(url, str) or not url:
         return False
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
-def _read_body_prefix(resp, max_bytes: int) -> bytes:
+def _safe_hostname(url: str) -> Optional[str]:
+    """``urlparse(url).hostname`` that never raises (malformed IPv6 → None)."""
+    try:
+        return urlparse(url).hostname
+    except ValueError:
+        return None
+
+
+def _read_body_prefix(resp: Any, max_bytes: int) -> bytes:
     """Stream ``resp`` until ``</h1>``, EOF, or ``max_bytes`` — whichever first.
 
     Mirrors ``_html_utils.read_html_head_window``'s streaming-cap discipline but
@@ -132,6 +152,15 @@ def _has_h1(body: bytes) -> bool:
     return bool(m and m.group(1).strip())
 
 
+def _has_noindex_directive(text: str) -> bool:
+    """True if ``text`` contains ``noindex`` as a distinct directive token, not
+    a substring. Tokenizes on commas / whitespace / colons so directive lists
+    (``"all, noindex"``) and bot-prefixed headers (``"googlebot: noindex"``)
+    match, while ``"noindexing"`` does NOT (false-positive guard).
+    """
+    return "noindex" in _DIRECTIVE_SPLIT.split(text.lower())
+
+
 def _meta_noindex(body: bytes) -> bool:
     """True if any ``<meta name=robots|googlebot content=...noindex...>`` is
     present, tolerating either attribute order.
@@ -141,12 +170,14 @@ def _meta_noindex(body: bytes) -> bool:
         content_m = _META_CONTENT_RE.search(tag)
         if not name_m or not content_m:
             continue
-        if name_m.group(1).lower() in (b"robots", b"googlebot") and b"noindex" in content_m.group(1).lower():
+        if name_m.group(1).lower() in (b"robots", b"googlebot") and _has_noindex_directive(
+            content_m.group(1).decode("ascii", "ignore")
+        ):
             return True
     return False
 
 
-def _x_robots_value(headers) -> Optional[str]:
+def _x_robots_value(headers: Any) -> Optional[str]:
     """Join any ``X-Robots-Tag`` header values (case-insensitive lookup via the
     ``email.message.Message`` container), truncated to a fixed length.
     """
@@ -173,6 +204,21 @@ def _ssrf_reason_to_taxonomy(blocked: str) -> str:
     return "ssrf_blocked"
 
 
+def _safe_ssrf_check(url: str) -> Optional[str]:
+    """``_check_url_for_ssrf`` wrapper that never raises.
+
+    ``_check_url_for_ssrf`` calls ``urlparse(url).hostname``, which raises
+    ``ValueError`` on a malformed IPv6 literal (e.g. ``http://[invalid``). A
+    hostile ``Location`` header or operator typo must not crash this routine —
+    the contract is exit-0-safe. Treat any parse failure as ``invalid_host``
+    (→ ``invalid_url`` in the taxonomy), never fetched.
+    """
+    try:
+        return _check_url_for_ssrf(url)
+    except Exception:  # noqa: BLE001 — malformed URL must not break never-raises
+        return "invalid_host"
+
+
 def fetch_target(url: str, *, timeout: Optional[float] = None) -> PreflightFacts:
     """Fetch ``url`` once and return :class:`PreflightFacts`. Never raises."""
     # 1. Scheme gate — before the SSRF DNS check or any Request.
@@ -180,7 +226,7 @@ def fetch_target(url: str, *, timeout: Optional[float] = None) -> PreflightFacts
         return PreflightFacts(reason="invalid_url")
 
     # 2. Initial SSRF guard (resolves host; rejects blocked ranges).
-    blocked = _check_url_for_ssrf(url)
+    blocked = _safe_ssrf_check(url)
     if blocked is not None:
         return PreflightFacts(reason=_ssrf_reason_to_taxonomy(blocked))
 
@@ -228,14 +274,16 @@ def fetch_target(url: str, *, timeout: Optional[float] = None) -> PreflightFacts
     except Exception:  # noqa: BLE001
         return PreflightFacts(reason="network_error")
 
-    # Post-redirect SSRF re-check of the final URL (narrows DNS-rebinding).
+    # Post-redirect SSRF re-check of the final URL (narrows the DNS-rebinding
+    # window; IP-range re-check only — a malformed final host is left to the
+    # opener's per-hop guard, which already raised if it mattered).
     if final_url and final_url != normalized:
-        final_blocked = _check_url_for_ssrf(final_url)
+        final_blocked = _safe_ssrf_check(final_url)
         if final_blocked is not None and final_blocked.startswith("blocked_ip"):
             return PreflightFacts(status=status, final_url=final_url, reason="ssrf_blocked")
 
     redirected = bool(final_url) and final_url != normalized
-    host_diff = redirected and urlparse(final_url).hostname != urlparse(normalized).hostname
+    host_diff = redirected and _safe_hostname(final_url) != _safe_hostname(normalized)
 
     if status != 200:
         if 500 <= status < 600:
@@ -249,7 +297,7 @@ def fetch_target(url: str, *, timeout: Optional[float] = None) -> PreflightFacts
 
     title = extract_title(body) or ""
     x_robots = _x_robots_value(headers)
-    noindex = _meta_noindex(body) or bool(x_robots and "noindex" in x_robots.lower())
+    noindex = _meta_noindex(body) or bool(x_robots and _has_noindex_directive(x_robots))
 
     return PreflightFacts(
         status=status,

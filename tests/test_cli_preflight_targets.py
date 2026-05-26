@@ -127,6 +127,29 @@ def test_tls_unverified_is_not_healthy(tmp_path, capsys):
     assert "tls_unverified" in receipts[0]["failed_checks"]
 
 
+def test_invalid_url_is_not_healthy(tmp_path, capsys):
+    receipts, _ = _run(tmp_path, capsys, [{"target_url": "ftp://bad/scheme"}],
+                       fetch_return=PreflightFacts(reason="invalid_url"))
+    assert receipts[0]["verdict"] == "not-healthy"
+    assert "invalid_url" in receipts[0]["failed_checks"]
+
+
+def test_redirect_capped_is_not_healthy(tmp_path, capsys):
+    receipts, _ = _run(tmp_path, capsys, [{"target_url": "https://example.com/loop"}],
+                       fetch_return=PreflightFacts(status=302, reason="redirect_capped", redirect_capped=True))
+    assert receipts[0]["verdict"] == "not-healthy"
+    assert "redirect_capped" in receipts[0]["failed_checks"]
+
+
+def test_200_missing_title_h1_is_not_healthy(tmp_path, capsys):
+    receipts, _ = _run(tmp_path, capsys, [{"target_url": "https://example.com/blank"}],
+                       fetch_return=PreflightFacts(status=200, final_url="https://example.com/blank",
+                                                   has_title=False, has_h1=False))
+    assert receipts[0]["verdict"] == "not-healthy"
+    assert "no_title" in receipts[0]["failed_checks"]
+    assert "no_h1" in receipts[0]["failed_checks"]
+
+
 # --------------------------------------------------------------------------
 # Precedence: multi-failure full failed_checks; redirect-then-404
 # --------------------------------------------------------------------------
