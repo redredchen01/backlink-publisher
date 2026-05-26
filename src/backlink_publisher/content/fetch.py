@@ -30,7 +30,6 @@ plan-backlinks invocation. Operators must either restart the process or call
 from __future__ import annotations
 
 import os
-import re
 import socket  # noqa: F401 — kept for test patch backward compat
 import ssl
 import time
@@ -40,8 +39,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request
 
-from bs4 import BeautifulSoup
-
 from backlink_publisher._util.logger import opencli_logger
 from backlink_publisher._util.url import normalize_url_for_fetch
 from backlink_publisher._util.net_safety import (
@@ -49,6 +46,8 @@ from backlink_publisher._util.net_safety import (
     _make_ssrf_opener,
     _SSRF_OPENER,
 )
+from ._soft404 import is_soft_404_title as _is_soft_404_title
+from ._html_utils import read_html_head_window, extract_title
 
 #: Wall-clock budget per single GET attempt. Roughly matches ``linkcheck``'s
 #: REQUEST_TIMEOUT so a row's combined plan-time HTTP doesn't drift wildly.
@@ -206,123 +205,10 @@ def _is_transient(reason: str) -> bool:
     return is_transient_reason(reason)
 
 
-#: Title patterns that signal a "soft 404" — HTTP 200 with a body whose
-#: title element advertises a "page not found" state. Each entry is matched
-#: against the casefolded title using ``re.match``; the regex is anchored at
-#: the start of the string and accepts an optional ``" - SiteName"`` /
-#: ``" | SiteName"`` / ``" — SiteName"`` suffix so titles like
-#: ``"Page Not Found - 51acgs"`` are caught while titles that merely
-#: CONTAIN the pattern mid-string (e.g., ``"What's Not Found in the
-#: Manuscript"``) are not.
-#:
-#: To extend: append the new phrase casefolded; verify against
-#: TestSoftFourOhFour false-positive cases.
-_SOFT_404_TITLE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
-    re.compile(rf"^{phrase}(\s*[-|–—:|·]\s*.*)?$")
-    for phrase in (
-        # English
-        r"404",
-        r"404\s+not\s+found",
-        r"page\s+not\s+found",
-        r"not\s+found",
-        r"page\s+does\s+not\s+exist",
-        r"error\s+404",
-        r"this\s+page\s+(can'?t|cannot|could\s+not)\s+be\s+found",
-        # Chinese (simplified + traditional)
-        r"页面不存在",
-        r"页面未找到",
-        r"找不到页面",
-        r"頁面不存在",
-        r"頁面未找到",
-        r"找不到頁面",
-        r"404\s*错误",
-        r"404\s*錯誤",
-        # Japanese
-        r"ページが見つかりません",
-        r"お探しのページは見つかりません",
-        # Russian
-        r"страница\s+не\s+найдена",
-    )
-)
 
 
-def _is_soft_404_title(title: str) -> bool:
-    """Return True if ``title`` looks like a soft-404 placeholder.
-
-    The check is case-insensitive, anchored at the start, and tolerates the
-    common ``"<phrase> - <SiteName>"`` suffix pattern that sites attach.
-    Conservatively rejects titles that match; legitimate articles whose
-    titles happen to start with these phrases are extremely rare. If a real
-    site trips this guard, the operator can ``--no-fetch-verify`` (or fix
-    their title).
-    """
-    if not title:
-        return False
-    casefolded = title.casefold().strip()
-    for pat in _SOFT_404_TITLE_PATTERNS:
-        if pat.match(casefolded):
-            return True
-    return False
 
 
-def _read_html_head_window(resp, max_bytes: int) -> bytes:
-    """Stream ``resp`` and return the accumulated body up to whichever comes
-    first: closing ``</head>`` tag, end of stream, or ``max_bytes``.
-
-    Title extraction (``<meta property="og:title">`` and ``<title>``) lives
-    entirely in ``<head>``; reading the full body is wasteful and is what
-    used to trip ``body_too_large`` on real HTML pages with inlined CSS/JS
-    (modern pages routinely exceed 1MB). Stopping at ``</head>`` keeps memory
-    use bounded by the head's actual size — typically tens of KB.
-
-    Substring search is restricted to the trailing window so the inner loop
-    stays linear in the response size.
-    """
-    buf = bytearray()
-    chunk_size = 16_384
-    sentinel = b"</head>"
-    # Trailing window for the close-tag probe: must be ≥ len(sentinel) and
-    # large enough to span a chunk boundary on conservative chunk sizes.
-    probe_window = 32_768
-    while len(buf) < max_bytes:
-        remaining = max_bytes - len(buf)
-        chunk = resp.read(min(chunk_size, remaining))
-        if not chunk:
-            break
-        buf.extend(chunk)
-        # Case-insensitive close-tag check on the trailing window only.
-        tail_start = max(0, len(buf) - probe_window)
-        if sentinel in bytes(buf[tail_start:]).lower():
-            break
-    return bytes(buf)
-
-
-def _extract_title(body: bytes) -> Optional[str]:
-    """Parse ``body`` as HTML and return the first non-empty title element.
-
-    Looks for ``<meta property="og:title">`` first (typically richer / more
-    accurate on modern sites), then falls back to ``<title>``. Returns
-    ``None`` if neither element is present or both are empty after strip.
-    """
-    try:
-        soup = BeautifulSoup(body, "html.parser")
-    except Exception:  # noqa: BLE001 — bs4 is permissive but a malformed
-        # binary payload can still trip the underlying parser.
-        return None
-
-    og = soup.find("meta", attrs={"property": "og:title"})
-    if og is not None:
-        content = og.get("content", "")
-        if content and content.strip():
-            return content.strip()
-
-    title_tag = soup.find("title")
-    if title_tag is not None and title_tag.text:
-        stripped = title_tag.text.strip()
-        if stripped:
-            return stripped
-
-    return None
 
 
 def _check_once(
@@ -395,7 +281,7 @@ def _check_once(
         return False, f"http_{code}", None
 
     try:
-        body = _read_html_head_window(resp, HEAD_SCAN_BYTES)
+        body = read_html_head_window(resp, HEAD_SCAN_BYTES)
     except Exception:  # noqa: BLE001
         return False, "network_error", None
     finally:
@@ -404,7 +290,7 @@ def _check_once(
         except Exception:  # noqa: BLE001
             pass
 
-    title = _extract_title(body)
+    title = extract_title(body)
     if not title:
         has_head_close = b"</head>" in body.lower()
         if not has_head_close and len(body) < BODY_TOO_SMALL_BYTES:
