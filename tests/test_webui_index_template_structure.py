@@ -137,3 +137,34 @@ def test_flash_msg_is_html_escaped(client):
     # The raw tag must not appear; its escaped form must.
     assert "<img src=x onerror=alert(1)>" not in body
     assert "&lt;img src=x onerror=alert(1)&gt;" in body
+
+
+# ── fetch_json.js load order (O3 index-page follow-up) ──────────────────────
+# index_main.js's save-profile handler calls window.fetchJson(), defined by a
+# synchronous IIFE in fetch_json.js. The classic (non-defer) <script> for
+# fetch_json.js must therefore appear before the index_main.js <script>, or
+# fetchJson would be undefined when the handler fires. These lock that ordering
+# so a future template edit can't silently reintroduce the silent-failure bug
+# this follow-up fixed. See feedback_fetch_json_must_guard_content_type.
+
+def test_index_page_loads_fetch_json_helper(client):
+    """GET / must load the fetch_json.js guard helper."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    assert "js/fetch_json.js" in body
+
+
+def test_fetch_json_loads_before_index_main(client):
+    """fetch_json.js must load before index_main.js (defines window.fetchJson
+    before the save-profile handler can call it)."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data.decode("utf-8")
+    fetch_json_pos = body.find("js/fetch_json.js")
+    index_main_pos = body.find("js/index_main.js")
+    assert fetch_json_pos != -1, "fetch_json.js script tag missing"
+    assert index_main_pos != -1, "index_main.js script tag missing"
+    assert fetch_json_pos < index_main_pos, (
+        "fetch_json.js must be loaded before index_main.js"
+    )
