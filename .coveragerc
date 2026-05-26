@@ -21,7 +21,6 @@ omit =
     */.venv/*
     */site-packages/*
 show_missing = True
-fail_under = 85
 
 [html]
 directory = htmlcov

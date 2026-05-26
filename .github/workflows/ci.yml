@@ -33,7 +33,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[dev]"
-          pip install pytest pytest-cov
 
       - name: Print radon version
         run: python -m radon --version
