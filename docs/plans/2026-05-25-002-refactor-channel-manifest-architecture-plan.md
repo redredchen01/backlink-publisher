@@ -4,6 +4,7 @@ type: refactor
 status: phase1-complete
 date: 2026-05-25
 origin: docs/brainstorms/2026-05-25-channel-manifest-architecture-requirements.md
+claims: {}
 ---
 
 > **Phase 1 closeout (2026-05-25)** — All 5 implementation units shipped as a 5-PR stack (#207 → #208 → #209 → #211 → #212). Unit 2 split into 2a (HIDDEN_FROM_UI, shipped) + 2b (`_SAVE_CONFIG_KNOWN_ROOTS`, separate PR pending) due to 12+ reader sites + production `save_config` round-trip blast radius. Unit 4 split into 4a (`inject_platforms` reverse-lookup, shipped) + 4b (`_token_paste_status` + template iteration, separate PR pending) due to JS/template layer scope. **Velog pilot validated `BindDescriptor.extras` sufficient — no dataclass extension needed.** Phase 2 (migrate 9 remaining channels) and Phase 3 (CI fail gate on `legacy_platforms()`) are independent of this stack.

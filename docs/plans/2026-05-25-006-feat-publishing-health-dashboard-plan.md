@@ -6,6 +6,7 @@ date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/brainstorms/2026-05-25-publishing-health-dashboard-requirements.md
 depends_on: docs/plans/2026-05-25-005-fix-events-projector-correctness-plan.md
+claims: {}
 ---
 
 # feat: Publishing Health Dashboard
