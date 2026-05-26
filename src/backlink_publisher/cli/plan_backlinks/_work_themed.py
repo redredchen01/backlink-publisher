@@ -141,6 +141,7 @@ def _plan_work_themed_row(
     *,
     count: int,
 ) -> Any:
+    from typing import Iterator
 
     main_domain = row["main_domain"].rstrip("/")
 

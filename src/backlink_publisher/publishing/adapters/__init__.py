@@ -28,41 +28,23 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
 from ..registry import dispatch, register, registered_platforms
 from .._manifests import (
-    BEEHIIV_MANIFEST,
     BLOGGER_MANIFEST,
-    CNBLOGS_MANIFEST,
-    CSDN_MANIFEST,
     DEVTO_MANIFEST,
-    GHOST_MANIFEST,
     GHPAGES_MANIFEST,
-    HABR_MANIFEST,
-    HASHNODE_MANIFEST,
-    JIANSHU_MANIFEST,
-    JUEJIN_MANIFEST,
-    LINKEDIN_MANIFEST,
     LIVEJOURNAL_MANIFEST,
     MASTODON_MANIFEST,
     MEDIUM_MANIFEST,
-    NOTE_MANIFEST,
     NOTION_MANIFEST,
-    PIKABU_MANIFEST,
-    RENTRY_MANIFEST,
-    SEGMENTFAULT_MANIFEST,
-    SUBSTACK_MANIFEST,
     TELEGRAPH_MANIFEST,
-    TUMBLR_MANIFEST,
     TXTFYI_MANIFEST,
     VELOG_MANIFEST,
-    WORDPRESSCOM_MANIFEST,
-    WRITEAS_MANIFEST,
-    ZHIHU_MANIFEST,
 )
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
 from .devto_api import DevtoAPIAdapter
-from .instant_web import TelegraphCdpAdapter  # noqa: F401  kept for test import, not yet wired
+from .instant_web import TelegraphCdpAdapter
 from .livejournal_api import LivejournalAPIAdapter
 from .txtfyi_api import TxtfyiFormPostAdapter
 from .medium_api import MediumAPIAdapter
@@ -71,24 +53,6 @@ from .medium_browser import MediumBrowserAdapter
 from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
-from .wordpresscom_api import WordpresscomAPIAdapter
-from .cnblogs_api import CNBlogsAPIAdapter
-from .hashnode_graphql import HashnodeGraphQLAdapter
-from .writeas_api import WriteasAPIAdapter
-from .tumblr_api import TumblrAPIAdapter
-from .juejin_api import JuejinAPIAdapter
-from .csdn_api import CSDNAPIAdapter
-from .zhihu_api import ZhihuAPIAdapter
-from .linkedin_api import LinkedInAPIAdapter
-from .ghost_api import GhostAPIAdapter
-from .beehiiv_api import BeehiivAPIAdapter
-from .segmentfault_api import SegmentFaultAPIAdapter
-from .substack_api import SubstackAPIAdapter
-from .note_api import NoteAPIAdapter
-from .habr_api import HabrAPIAdapter
-from .jianshu_api import JianshuAPIAdapter
-from .rentry_api import RentryAPIAdapter
-from .pikabu_api import PikabuAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
 # RECIPES["velog"] before the registration line below references it.
@@ -118,39 +82,6 @@ from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
 # ``**<SLUG>_MANIFEST`` splat here. The dispatcher module stays focused
 # on register() wiring and adapter imports.
 register("blogger", BloggerAPIAdapter, dofollow=True, **BLOGGER_MANIFEST)
-register("wordpresscom", WordpresscomAPIAdapter, dofollow=True, **WORDPRESSCOM_MANIFEST)
-register("cnblogs", CNBlogsAPIAdapter, dofollow=True, **CNBLOGS_MANIFEST)
-register("hashnode", HashnodeGraphQLAdapter, dofollow=True, **HASHNODE_MANIFEST)
-register("writeas", WriteasAPIAdapter, dofollow=True, **WRITEAS_MANIFEST)
-register("juejin", JuejinAPIAdapter, dofollow=True, **JUEJIN_MANIFEST)
-register("csdn", CSDNAPIAdapter, dofollow=True, **CSDN_MANIFEST)
-register("zhihu", ZhihuAPIAdapter, dofollow=True, **ZHIHU_MANIFEST)
-register("ghost", GhostAPIAdapter, dofollow=True, **GHOST_MANIFEST)
-register("beehiiv", BeehiivAPIAdapter, dofollow=True, **BEEHIIV_MANIFEST)
-register("segmentfault", SegmentFaultAPIAdapter, dofollow=True, **SEGMENTFAULT_MANIFEST)
-register("substack", SubstackAPIAdapter, dofollow=True, **SUBSTACK_MANIFEST)
-register("note", NoteAPIAdapter, dofollow=True, **NOTE_MANIFEST)
-register("habr", HabrAPIAdapter, dofollow=True, **HABR_MANIFEST)
-register("jianshu", JianshuAPIAdapter, dofollow=True, **JIANSHU_MANIFEST)
-register("rentry", RentryAPIAdapter, dofollow=True, **RENTRY_MANIFEST)
-register("pikabu", PikabuAPIAdapter, dofollow=True, **PIKABU_MANIFEST)
-register(
-    "linkedin",
-    LinkedInAPIAdapter,
-    dofollow=False,
-    rationale=_R["linkedin"],
-    referral_value="high",
-    **LINKEDIN_MANIFEST,
-    visibility="experimental",
-)
-register(
-    "tumblr",
-    TumblrAPIAdapter,
-    dofollow=False,
-    rationale=_R["tumblr"],
-    referral_value="high",
-    **TUMBLR_MANIFEST,
-)
 register(
     "medium",
     MediumAPIAdapter,
@@ -817,6 +748,8 @@ def _verify_velog_live(config: Config) -> VerifyResult:
         last_verify_result="ok",
         dofollow=True,
     )
+
+
 
 
 def _utc_now_iso() -> str:

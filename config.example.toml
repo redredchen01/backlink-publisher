@@ -19,24 +19,6 @@ client_secret = "your-client-secret"
 # ────────────────────────────────────────────────────────────
 # Medium
 # ────────────────────────────────────────────────────────────
-# ────────────────────────────────────────────────────────────
-# WordPress.com — REST API v1.1 (Phase 1 P0)
-# ────────────────────────────────────────────────────────────
-# Token stored at: ~/.config/backlink-publisher/wordpresscom-token.json
-# Format: {"token": "<oauth2-access-token>", "site": "<site-domain-or-blog-id>"}
-# Get an OAuth2 token by registering a WP.com app at:
-#   https://developer.wordpress.com/apps/
-# [wordpresscom]
-
-# ────────────────────────────────────────────────────────────
-# CNBlogs (博客园) — MetaWeblog XML-RPC (Phase 1 P0)
-# ────────────────────────────────────────────────────────────
-# Credentials stored in a separate 0600 file at:
-#   ~/.config/backlink-publisher/cnblogs-credentials.json
-# Format: {"username": "<your-cnblogs-username>", "password": "<your-password>"}
-# Use a CNBlogs app-password for security (Settings → App Password).
-# [cnblogs]
-
 [medium]
 # Integration Token — obtain at: medium.com/me/settings/security → Integration tokens
 # Optional: if missing, the browser fallback (Playwright) will be used instead.

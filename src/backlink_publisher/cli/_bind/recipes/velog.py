@@ -79,10 +79,8 @@ def _velog_bound_predicate(page) -> None:
 
     try:
         from playwright.sync_api import TimeoutError as PWTimeoutError
-
-        del PWTimeoutError  # noqa: F841  imported for runtime availability
     except ImportError:
-        pass
+        PWTimeoutError = TimeoutError
 
     started_at = time.monotonic()
     last_nav_at: list[float | None] = [None]

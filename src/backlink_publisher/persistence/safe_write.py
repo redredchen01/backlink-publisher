@@ -9,7 +9,6 @@ from pathlib import Path
 
 _log = logging.getLogger(__name__)
 
-
 def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     """Write text to path atomically via a unique temp file and replace.
 

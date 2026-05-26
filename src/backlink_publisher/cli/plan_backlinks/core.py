@@ -2,30 +2,52 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
+import re
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 from typing import Iterator
 
 from ... import config_echo
+from ...anchor import (
+    profile as anchor_profile,
+    resolver as anchor_resolver,
+    scheduler as anchor_scheduler,
+)
 from ...content import (
     fetch as content_fetch,
+    scraper as work_scraper,
+    themed_gen as work_themed_generator,
 )
+from ..._util import markdown as markdown_utils
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before argparse
 from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider
 from backlink_publisher.publishing.registry import registered_platforms
+from backlink_publisher.anchor.profile import ProfileEntry
+from backlink_publisher.anchor.scheduler import ScheduleDecision, SecondaryLink
 from backlink_publisher.config import (
     Config,
+    ThreeUrlConfig,
+    get_anchor_keywords,
     get_anchor_pool_v2,
     get_three_url_config,
     load_config,
 )
 from backlink_publisher._util.errors import (
+    ExternalServiceError,
+    InputValidationError,
     emit_error,
 )
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher._util.logger import plan_logger
+from backlink_publisher._util.markdown import (
+    links_to_markdown,
+    select_anchor_keywords,
+    slugify,
+)
 from ...schema import (
     validate_input_payload,
 )
@@ -108,6 +130,7 @@ def _dispatch_row(
             yield payload
             return
     if payload is None:
+        from backlink_publisher.cli.plan_backlinks import _generate_payload
         payload = _generate_payload(
             row, config=config, fetch_verify_enabled=fetch_verify_enabled,
         )

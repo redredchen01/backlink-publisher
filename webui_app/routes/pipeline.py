@@ -1,8 +1,4 @@
-"""/ce:plan, /ce:generate, /ce:validate, /ce:publish — Plan Unit 3.
-
-Phase A refactoring: CLI invocations go through ``PipelineAPI`` instead of
-raw ``run_pipe`` calls.  Session and template logic remain in the route.
-"""
+"""/ce:plan, /ce:generate, /ce:validate, /ce:publish — Plan Unit 3."""
 
 from __future__ import annotations
 
@@ -14,11 +10,10 @@ from backlink_publisher._util.logger import plan_logger
 
 from flask import Blueprint, request, session
 
-from ..api import PipelineAPI
-from ..api.pipeline_api import publish_state_summary
-
 from ..helpers.contexts import _persist_three_tier_config, _render, _get_velog_status
+from ..helpers.cli_runner import run_pipe, strip_cli_diagnostic_banner
 from ..helpers.history import (
+    _parse_publish_results,
     _push_history_per_row,
     _push_history_single_failure,
 )
@@ -33,7 +28,6 @@ from ..helpers.url_meta import (
 )
 
 bp = Blueprint("pipeline", __name__)
-_api = PipelineAPI()
 
 
 @bp.route('/ce:plan', methods=['POST'])
@@ -193,37 +187,42 @@ def ce_generate():
 
     seed_json = json.dumps(seed, ensure_ascii=False)
 
-    result = _api.plan(seed_json)
-    if not result.success:
+    try:
+        result = run_pipe(['plan-backlinks'], seed_json)
+        plans = result['stdout']
+        if not plans.strip():
+            error_msg = result['stderr'] or "生成失败，没有输出"
+            return _render('index.html', target_url=main_url, error=error_msg,
+                           config=stored_config)
+
+        plans_list = []
+        for line in plans.strip().split('\n'):
+            if line.strip():
+                try:
+                    plans_list.append(json.loads(line))
+                except json.JSONDecodeError as je:
+                    plan_logger.warn("json_parse_error", error=str(je), line=line[:100])
+
+        if not plans_list:
+            return _render('index.html', target_url=main_url,
+                           error=f"解析生成结果失败。原始输出: {plans[:200]}",
+                           config=stored_config)
+
+        config = {
+            'platform': platform, 'target_language': target_language,
+            'urls': urls, 'fetch_tdk': fetch_tdk,
+            'url_mode': url_mode, 'publish_mode': publish_mode,
+            'custom_title': custom_title, 'custom_tags': custom_tags,
+        }
+        session['config'] = config
+        session['plans'] = plans
+
+        return _render('index.html', target_url=main_url, config=config,
+            plans=plans, plans_list=plans_list,
+            urls_json=urls_json, extra_urls=extra_urls)
+    except Exception as e:
         return _render('index.html', target_url=main_url,
-                       error=result.error or "生成失败，没有输出",
-                       config=stored_config)
-
-    plans = result.stdout
-    if not plans.strip():
-        return _render('index.html', target_url=main_url,
-                       error=result.stderr_cleaned or "生成失败，没有输出",
-                       config=stored_config)
-
-    plans_list = result.rows
-    if not plans_list:
-        plan_logger.warn("json_parse_error", line=plans[:100])
-        return _render('index.html', target_url=main_url,
-                       error=f"解析生成结果失败。原始输出: {plans[:200]}",
-                       config=stored_config)
-
-    config = {
-        'platform': platform, 'target_language': target_language,
-        'urls': urls, 'fetch_tdk': fetch_tdk,
-        'url_mode': url_mode, 'publish_mode': publish_mode,
-        'custom_title': custom_title, 'custom_tags': custom_tags,
-    }
-    session['config'] = config
-    session['plans'] = plans
-
-    return _render('index.html', target_url=main_url, config=config,
-        plans=plans, plans_list=plans_list,
-        urls_json=urls_json, extra_urls=extra_urls)
+                       error=str(e), config=stored_config)
 
 
 @bp.route('/ce:validate', methods=['POST'])
@@ -231,20 +230,16 @@ def ce_validate():
     plans = session.get('plans', '') or request.form.get('plans', '')
     config = session.get('config', {})
 
-    result = _api.validate(plans, no_check_urls=True)
-    if not result.success:
-        return _render('index.html', plans=plans,
-                       error=result.error or "验证失败，请检查链接数量是否在 6-8 个之间",
-                       config=config)
-
-    validated = result.stdout
-    if not validated.strip():
-        return _render('index.html', plans=plans,
-                       error=result.stderr_cleaned or "验证失败，请检查链接数量是否在 6-8 个之间",
-                       config=config)
-
-    session['validated'] = validated
-    return _render('index.html', validated=validated, plans=plans, config=config)
+    try:
+        result = run_pipe(['validate-backlinks', '--no-check-urls'], plans)
+        validated = result['stdout']
+        if not validated.strip():
+            error_msg = result['stderr'] or "验证失败，请检查链接数量是否在 6-8 个之间"
+            return _render('index.html', plans=plans, error=error_msg, config=config)
+        session['validated'] = validated
+        return _render('index.html', validated=validated, plans=plans, config=config)
+    except Exception as e:
+        return _render('index.html', plans=plans, error=str(e), config=config)
 
 
 @bp.route('/ce:publish', methods=['POST'])
@@ -257,18 +252,21 @@ def ce_publish():
     target_url = config.get('target_url', 'unknown')
     language = config.get('target_language', 'zh-CN')
 
-    if platform == 'velog':
-        velog_status = _get_velog_status()
-        if velog_status.get('state') not in ('ok', 'fresh'):
-            detail = velog_status.get('guide') or velog_status.get('label') or ''
-            return _render('index.html',
-                error=f"Velog 凭证无效，请先在设置页重新绑定。{detail}",
-                config=config, history_active=True)
+    try:
+        if platform == 'velog':
+            velog_status = _get_velog_status()
+            if velog_status.get('state') not in ('ok', 'fresh'):
+                detail = velog_status.get('guide') or velog_status.get('label') or ''
+                return _render('index.html',
+                    error=f"Velog 凭证无效，请先在设置页重新绑定。{detail}",
+                    config=config, history_active=True)
 
-    result = _api.publish(plans, platform, publish_mode)
-
-    if not result.success:
-        msg = result.error or "发布失败"
+        cmd = ['publish-backlinks', '--platform', platform, '--mode', publish_mode]
+        result = run_pipe(cmd, plans)
+        published = result['stdout']
+        stderr = result.get('stderr', '') or ''
+    except Exception as exc:
+        msg = strip_cli_diagnostic_banner(str(exc)) or str(exc)
         _push_history_single_failure(
             target_url=target_url, platform=platform, language=language, error=msg,
         )
@@ -281,12 +279,12 @@ def ce_publish():
             publish_state='all_failed', publish_error=f"发布失败: {msg}",
             config=config, history_active=True)
 
-    published = result.stdout
-    stderr = result.stderr
-    publish_results = result.rows
-
+    publish_results = _parse_publish_results(published)
     if not publish_results:
-        diagnostic = result.stderr_cleaned or "publish-backlinks returned no parseable rows"
+        # CLI exited 0 with stdout that did not parse into rows — treat as
+        # failure rather than silently masking the lack of usable output.
+        cleaned = strip_cli_diagnostic_banner(stderr)
+        diagnostic = cleaned or "publish-backlinks returned no parseable rows"
         _push_history_single_failure(
             target_url=target_url, platform=platform, language=language,
             error=diagnostic,
@@ -307,11 +305,27 @@ def ce_publish():
         language_fallback=language,
     )
 
-    summary = publish_state_summary(publish_results)
-    n_ok = summary["n_ok"]
-    n_failed = summary["n_failed"]
-    publish_state = summary["state"]
-    publish_error = summary["failure_detail"]
+    n_ok = sum(
+        1 for r in publish_results
+        if (r.get('published_url') or '').strip() or (r.get('draft_url') or '').strip()
+    )
+    n_failed = len(publish_results) - n_ok
+    if n_failed == 0:
+        publish_state = 'all_success'
+    elif n_ok == 0:
+        publish_state = 'all_failed'
+    else:
+        publish_state = 'partial_success'
+
+    publish_error = ''
+    if n_failed:
+        failure_msgs = [
+            (r.get('error') or '').strip() or f"{r.get('status') or 'failed'} (no URL)"
+            for r in publish_results
+            if not ((r.get('published_url') or '').strip()
+                    or (r.get('draft_url') or '').strip())
+        ]
+        publish_error = "；".join(m for m in failure_msgs if m)
 
     log_fn = plan_logger.info if publish_state == 'all_success' else plan_logger.warn
     log_fn(
@@ -348,10 +362,10 @@ def ce_preview():
     }
     if request.form.get('fetch_tdk') == 'yes':
         seed['tdk'] = fetch_full_tdk(urls[0])
-
-    result = _api.plan(json.dumps([seed]))
-    content = result.stdout
-
+        
+    pipe_out = run_pipe(['plan-backlinks', '-'], json.dumps([seed]))
+    content = pipe_out.get('stdout', '')
+    
     fmt = request.args.get('format', 'md')
     if fmt == 'html':
         return render_to_html(content)

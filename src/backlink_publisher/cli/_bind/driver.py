@@ -25,24 +25,18 @@ The CLI in ``bind_channel.py`` is responsible for emitting
 """
 
 from __future__ import annotations
-from ._driver_impl import (
-    PlaywrightLaunchError,
-    BoundPredicateTimeout,
-    PersistIOError,
-    IdentityMismatch,
-    ChromeLaunchError,
-    BindResult,
-    BrowserRunner,
-    _emit,
-    _browser_profile_dir,
-    _validate_storage_state_path,
-    _persist_storage_state,
-    run_bind,
-    _promote_last_account_if_pending,
-    _apply_host_filter,
-)
 
-# Default per-bind
+import json
+import os
+import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Protocol
+
+from backlink_publisher._util.errors import UsageError
+from backlink_publisher.cli._bind.channels import CHANNELS, EVENTS
+from backlink_publisher.config.loader import _config_dir
 
 
 # Default per-bind timeout. Playwright accepts ms; 5 minutes lets the operator
@@ -53,10 +47,19 @@ BIND_TIMEOUT_MS = 15 * 60 * 1000  # SPIKE PATCH plan-016 Unit 1 (was 5*60*1000)
 # ───────── exception sentinels (caught by run_bind and CLI) ─────────
 
 
-# ─────────
+from ._driver_impl import PlaywrightLaunchError, BoundPredicateTimeout, PersistIOError, IdentityMismatch, ChromeLaunchError, BindResult, BrowserRunner, _emit, _browser_profile_dir, _validate_storage_state_path, _persist_storage_state, run_bind, _promote_last_account_if_pending, _PlaywrightBrowserRunner, _apply_host_filter, _origin_host
+
+
+
+
+
+
+
+
 
 
 # ───────── public types ─────────
+
 
 
 # ───────── re-exports from _driver_impl ─────────
@@ -75,6 +78,5 @@ __all__ = [
     "_persist_storage_state",
     "_promote_last_account_if_pending",
     "_validate_storage_state_path",
-    "_apply_host_filter",
     "run_bind",
 ]

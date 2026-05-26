@@ -63,18 +63,16 @@ def _capture_logger(monkeypatch):
     return events
 
 
-def _mock_publish(monkeypatch, *, stdout="", stderr="", raise_exc=None):
-    """Patch PipelineAPI.publish at the route's import site."""
-    from webui_app.api.pipeline_api import PipeResult
+def _mock_run_pipe(monkeypatch, *, stdout="", stderr="", raise_exc=None):
+    """Patch run_pipe at the route's import site."""
     from webui_app.routes import pipeline as pipeline_mod
 
-    def _fake_publish(self, plans_jsonl, platform, mode):
+    def _fake(cmd, stdin):
         if raise_exc is not None:
-            return PipeResult(
-                success=False, error=str(raise_exc), stderr=str(raise_exc))
-        return PipeResult(stdout=stdout, stderr=stderr, success=True)
+            raise raise_exc
+        return {"stdout": stdout, "stderr": stderr}
 
-    monkeypatch.setattr(pipeline_mod.PipelineAPI, "publish", _fake_publish)
+    monkeypatch.setattr(pipeline_mod, "run_pipe", _fake)
 
 
 def _rows_jsonl(*rows):
@@ -93,7 +91,7 @@ def test_all_published_renders_green_banner(client, seeded_session, monkeypatch)
         {"target_url": "https://example.com/b", "title": "B", "status": "published",
          "published_url": "https://blogger.example/b"},
     )
-    _mock_publish(monkeypatch, stdout=rows)
+    _mock_run_pipe(monkeypatch, stdout=rows)
     events = _capture_logger(monkeypatch)
 
     resp = client.post("/ce:publish", data={
@@ -121,7 +119,7 @@ def test_all_drafted_renders_green_banner(client, seeded_session, monkeypatch):
         {"target_url": "https://example.com/a", "title": "A", "status": "drafted",
          "draft_url": "https://blogger.example/a?draft=1"},
     )
-    _mock_publish(monkeypatch, stdout=rows)
+    _mock_run_pipe(monkeypatch, stdout=rows)
     _capture_logger(monkeypatch)
 
     resp = client.post("/ce:publish", data={
@@ -142,7 +140,7 @@ def test_all_drafted_renders_green_banner(client, seeded_session, monkeypatch):
 
 
 def test_subprocess_exception_renders_red_banner(client, seeded_session, monkeypatch):
-    _mock_publish(monkeypatch, raise_exc=Exception("subprocess died: boom"))
+    _mock_run_pipe(monkeypatch, raise_exc=Exception("subprocess died: boom"))
     events = _capture_logger(monkeypatch)
 
     resp = client.post("/ce:publish", data={
@@ -170,7 +168,7 @@ def test_all_failed_rows_no_url_renders_red_banner(client, seeded_session, monke
         {"target_url": "https://example.com/b", "title": "B", "status": "failed",
          "error": "auth expired"},
     )
-    _mock_publish(monkeypatch, stdout=rows)
+    _mock_run_pipe(monkeypatch, stdout=rows)
     _capture_logger(monkeypatch)
 
     resp = client.post("/ce:publish", data={
@@ -194,7 +192,7 @@ def test_mixed_rows_render_partial_banner(client, seeded_session, monkeypatch):
         {"target_url": "https://example.com/b", "title": "B", "status": "failed",
          "error": "auth expired"},
     )
-    _mock_publish(monkeypatch, stdout=rows)
+    _mock_run_pipe(monkeypatch, stdout=rows)
     _capture_logger(monkeypatch)
 
     resp = client.post("/ce:publish", data={
@@ -215,7 +213,7 @@ def test_mixed_rows_render_partial_banner(client, seeded_session, monkeypatch):
 def test_no_parseable_rows_renders_red_banner(client, seeded_session, monkeypatch):
     # stdout is non-empty (passes run_pipe silent-failure guard) but every
     # line is unparseable.
-    _mock_publish(monkeypatch, stdout="not-json-at-all\n",
+    _mock_run_pipe(monkeypatch, stdout="not-json-at-all\n",
                    stderr="hint from adapter")
     _capture_logger(monkeypatch)
 

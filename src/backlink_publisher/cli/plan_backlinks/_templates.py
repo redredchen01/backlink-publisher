@@ -5,7 +5,7 @@ Extracted from ``core.py`` in the Unit 3 monolith decomposition.
 
 from __future__ import annotations
 
-from backlink_publisher._util._body_templates import (
+from backlink_publisher._util.markdown import (
     _en_body_a,
     _en_body_b,
     _en_body_c,

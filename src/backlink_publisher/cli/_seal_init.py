@@ -228,7 +228,6 @@ def _handle_init(args: argparse.Namespace) -> int:
     )
     return EXIT_OK
 
-
 class _InitError(Exception):
     """Init pre-flight validation failure with a specific exit_code."""
 
@@ -236,10 +235,8 @@ class _InitError(Exception):
         super().__init__(msg)
         self.exit_code = exit_code
 
-
 class _NotesPushDidNotLand(Exception):
     """Notes-push to origin returned 0 but verify-fetch shows it did not land."""
-
 
 def _build_routine_verdict_ref(
     *,
@@ -283,7 +280,6 @@ def _build_routine_verdict_ref(
         "comment_updated_at": validated["comment_updated_at"],
         "comment_body_sha256": validated["body_sha256"],
     }
-
 
 def _build_manual_verdict_ref(evidence_log: str | None, repo_root: Path) -> dict:
     if not evidence_log:
@@ -334,7 +330,6 @@ def _build_manual_verdict_ref(evidence_log: str | None, repo_root: Path) -> dict
         "evidence_sha256": hashlib.sha256(content).hexdigest(),
     }
 
-
 def _get_main_sha(repo_root: Path) -> str:
     proc = subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "origin/main"],
@@ -353,7 +348,6 @@ def _get_main_sha(repo_root: Path) -> str:
             EXIT_MISUSE,
         )
     return sha
-
 
 def _post_push_verify(repo_root: Path, expected_bodies: dict[str, str]) -> None:
     """Fetch origin notes ref into a TEMP local ref; assert each note round-trips.

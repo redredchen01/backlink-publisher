@@ -35,15 +35,6 @@ from backlink_publisher.publishing.registry import (
 )
 
 
-# Phase 3 expansion: all 28 production channels now carry a full manifest.
-# ``TestOtherPlatformsRemainLegacy`` is parametrized over the set difference
-# between registered_platforms() and _MIGRATED.  When both are equal the
-# class has zero parametrizations and skips — correct per Pytest semantics
-# (no collected items = no runs).  This file stays as a regression net for
-# any future register() call that omits the manifest kwargs.
-_MIGRATED = set(registered_platforms())
-
-
 class TestVelogManifestPresence:
     """The velog register() call carries all 4 manifest kwargs."""
 
@@ -164,6 +155,24 @@ class TestZeroBehaviourChange:
         from backlink_publisher.publishing.registry import dofollow_status
 
         assert dofollow_status("velog") is True
+
+
+# Phase 2 migrations expand the set of platforms with a manifest. The
+# scope guard below excludes every already-migrated channel so it stays
+# meaningful as a regression net for the *remaining* legacy channels.
+# When you migrate a channel, add it to ``_MIGRATED`` here.
+_MIGRATED = {
+    "velog",
+    "telegraph",
+    "blogger",
+    "ghpages",
+    "devto",
+    "notion",
+    "mastodon",
+    "livejournal",
+    "txtfyi",
+    "medium",
+}
 
 
 @pytest.mark.parametrize(
