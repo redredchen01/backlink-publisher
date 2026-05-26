@@ -135,18 +135,18 @@ def test_plan_malformed_json():
 
 
 def test_plan_unsupported_platform():
-    """platform=linkedin must be rejected with exit code 2."""
+    """platform=xyznonexistent rejected with exit code 2."""
     seed = {
         "target_url": "https://example.com/article",
         "main_domain": "https://example.com",
         "language": "en",
-        "platform": "linkedin",
+        "platform": "xyznonexistent",
         "url_mode": "A",
         "publish_mode": "draft",
     }
     stdout, stderr, code = _run_plan(json.dumps(seed))
     assert code == 2
-    assert "linkedin" in stderr.lower()
+    assert "xyznonexistent" in stderr.lower()
     assert stdout == ""
 
 

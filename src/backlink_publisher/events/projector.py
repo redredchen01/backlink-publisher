@@ -45,7 +45,6 @@ _DRAFTS_FILENAME = "draft-queue.json"
 _SUCCESS_STATUSES = ("succeeded", "done")
 
 
-
 class ProjectionError(RuntimeError):
     """Cursor table corruption, unknown source dispatch, schema mismatch.
 

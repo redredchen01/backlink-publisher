@@ -30,6 +30,7 @@ DEFAULT_WORK_TEMPLATES: tuple[str, ...] = (
 
 _UNSAFE_IN_ANCHOR = re.compile(r'[\]\[()><"\'\n\r]')
 
+
 @dataclass
 class BloggerOAuthConfig:
     client_id: str
@@ -378,9 +379,34 @@ class Config:
         return _cfg._config_dir() / "notion-token.json"
 
     @property
+    def wordpresscom_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "wordpresscom-token.json"
+
+    @property
+    def hashnode_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "hashnode-token.json"
+
+    @property
+    def writeas_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "writeas-token.json"
+
+    @property
+    def tumblr_credentials_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "tumblr-credentials.json"
+
+    @property
     def devto_token_path(self) -> Path:
         from backlink_publisher import config as _cfg
         return _cfg._config_dir() / "devto-token.json"
+
+    @property
+    def linkedin_token_path(self) -> Path:
+        from backlink_publisher import config as _cfg
+        return _cfg._config_dir() / "linkedin-token.json"
 
     @property
     def screenshot_dir(self) -> Path:

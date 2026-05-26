@@ -97,14 +97,12 @@ class TestRejectUnsupportedPlatform:
         assert reject_unsupported_platform("blogger") is None
         assert reject_unsupported_platform("medium") is None
 
-    def test_rejects_linkedin_with_preserved_phrasing(self) -> None:
-        msg = reject_unsupported_platform("linkedin")
-        assert msg is not None
-        assert "linkedin" in msg
-        assert "not supported" in msg
-        # Lists what IS supported, so the user can self-correct
-        assert "blogger" in msg
-        assert "medium" in msg
+    def test_rejects_linkedin_is_now_registered(self) -> None:
+        """LinkedIn was un-rejected in the channel expansion plan (Phase 3 P1)
+        and is now a registered platform — reject_unsupported_platform returns
+        None for it, proving the R9d helper extends to any newly registered
+        platform without schema edits."""
+        assert reject_unsupported_platform("linkedin") is None
 
     def test_rejects_arbitrary_unregistered_platform(self) -> None:
         """R9d's net is wider than legacy linkedin-only rejection."""

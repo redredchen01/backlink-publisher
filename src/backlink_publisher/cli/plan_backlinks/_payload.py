@@ -17,7 +17,6 @@ from backlink_publisher._util.markdown import (
     select_anchor_keywords,
     slugify,
 )
-from backlink_publisher.content.fetch import verify_url_has_content
 from backlink_publisher.publishing import registry
 from backlink_publisher.publishing.adapters.llm_anchor_provider import OpenAICompatibleProvider
 
@@ -85,7 +84,7 @@ def _generate_payload(
     target_language = row.get("target_language", language)
     publish_mode = row.get("publish_mode", "draft")
     topic = row.get("topic", "")
-    
+
     # Plan-time URL Validation: verify target_url health
     if fetch_verify_enabled:
         from backlink_publisher.content.fetch import verify_url_has_content
@@ -96,7 +95,7 @@ def _generate_payload(
     
     extra_urls = row.get("extra_urls", [])
     custom_tags = row.get("custom_tags", "")
-    system_prompt = row.get("system_prompt", "")
+    # system_prompt handled via config.llm_anchor_provider.system_prompt
     tdk_title = row.get('tdk_title', '')
     tdk_description = row.get('tdk_description', '')
     tdk_keywords = row.get('tdk_keywords', '')

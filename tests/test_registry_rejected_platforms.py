@@ -19,7 +19,9 @@ class TestRejectedPlatformsMap:
         # PR #108 → #109 negative-knowledge corpus.
         # devto removed in Plan 2026-05-21-001 Unit 4b (chrome-publish channel).
         # mastodon removed in Unit 4c (chrome-publish channel).
-        assert "wordpresscom" in _REJECTED_PLATFORMS
+        # wordpresscom removed in Phase 3 expansion.
+        # All rejected platforms have now been un-rejected and registered.
+        assert len(_REJECTED_PLATFORMS) == 0
 
     def test_every_rationale_meets_length_floor(self) -> None:
         # Mirrors monolith_budget.toml rationale discipline. Loop assertion

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sys
 import time
+from enum import Enum
 from typing import Any, Callable, TypeVar
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
@@ -15,9 +17,6 @@ T = TypeVar("T")
 MAX_ATTEMPTS: int = 3
 BACKOFF_BASE: int = 2
 JITTER_FACTOR: float = 0.15
-
-from enum import Enum
-import re
 
 # HTTP status codes that indicate a transient server-side failure worth retrying.
 # Only used by call-site is_retryable predicates — not enforced here.

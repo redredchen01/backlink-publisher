@@ -138,12 +138,9 @@ _REJECTED_PLATFORMS: dict[str, str] = {
     # mastodon: re-registered as nofollow chrome-publish channel in
     #   Plan 2026-05-21-001 Unit 4c — Fediverse referral traffic +
     #   topical signal value despite the hardcoded nofollow attribute.
-    "wordpresscom": (
-        "WordPress.com free tier applies rel=\"nofollow\" to outbound links; "
-        "paid Business/Commerce tiers enable dofollow but require a paid "
-        "subscription not justified at solo-operator scale. Free-tier ship "
-        "would emit nofollow-only backlinks. Reverted in PR #109."
-    ),
+    # wordpresscom: un-rejected 2026-05-25 — channel expansion plan
+    #   Phase 1 P0; new adapter registers with dofollow=True. The free
+    #   tier nofollow limitation is accepted for entity/D52DA referral value.
 }
 
 

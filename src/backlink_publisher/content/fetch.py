@@ -48,7 +48,6 @@ from backlink_publisher._util.net_safety import (
     _check_url_for_ssrf,
     _make_ssrf_opener,
     _SSRF_OPENER,
-    _SSRFSafeRedirectHandler,
 )
 
 #: Wall-clock budget per single GET attempt. Roughly matches ``linkcheck``'s

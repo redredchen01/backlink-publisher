@@ -28,8 +28,6 @@ Safety guarantees:
 
 from __future__ import annotations
 
-import ipaddress
-import socket
 from dataclasses import dataclass
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
@@ -37,15 +35,13 @@ from xml.etree import ElementTree as ET
 import requests
 from bs4 import BeautifulSoup
 
-from backlink_publisher.publishing.adapters.retry import retry_transient_call
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
 from backlink_publisher._util.logger import plan_logger
-from ._http import _MAX_RESPONSE_BYTES, _resolve_addresses, _ResponseTooLarge, _RetryableHttp, _safe_get
+from ._http import _ResponseTooLarge, _safe_get
 from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
     strip_fragment_query,
-    validate_https_url,
 )
 
 __all__ = [
@@ -84,8 +80,6 @@ class WorkMetadata:
     title: str | None
     description: str | None
     h1: str | None
-
-
 
 
 # ── Decoding helpers ─────────────────────────────────────────────────────────
