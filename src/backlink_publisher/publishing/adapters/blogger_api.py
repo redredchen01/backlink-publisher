@@ -107,8 +107,8 @@ def _build_credentials(config: Config):
             if fresh:
                 try:
                     creds = Credentials.from_authorized_user_info(fresh, _SCOPES)
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("blogger credential refresh failed silently: %s", exc)
             if not _near_expiry(creds, 300):
                 return creds  # peer refreshed while we waited on the lock
             try:

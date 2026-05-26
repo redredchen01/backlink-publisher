@@ -228,8 +228,8 @@ def _wait_for_editor(win_id: str, tab_id: str, max_wait: int = 20) -> bool:
             )
             if result == "ready":
                 return True
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug("page-ready probe failed: %s", exc)
         time.sleep(1)
     return False
 
