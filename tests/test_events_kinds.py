@@ -83,6 +83,19 @@ def test_unknown_source_defaults_to_quarantine():
     assert kinds.classify("brand_new_source", "anything") is kinds.QUARANTINE
 
 
+def test_every_status_map_source_has_a_default():
+    # The history/drafts reducers rely on SOURCE_DEFAULT being NO_EMIT for an
+    # unmapped status (their `else` assumes it). Guard against drift: every
+    # source with a STATUS_MAP entry must declare a SOURCE_DEFAULT, and the
+    # non-authoritative sources must default to NO_EMIT (not QUARANTINE), else
+    # the reducers would silently mis-handle unknown statuses.
+    for source in kinds.STATUS_MAP:
+        assert source in kinds.SOURCE_DEFAULT
+    assert kinds.SOURCE_DEFAULT["history"] is kinds.NO_EMIT
+    assert kinds.SOURCE_DEFAULT["drafts"] is kinds.NO_EMIT
+    assert kinds.SOURCE_DEFAULT["checkpoint"] is kinds.QUARANTINE
+
+
 def test_classify_never_raises():
     # Defensive: empty / odd inputs resolve, never throw.
     assert kinds.classify("", "") is kinds.QUARANTINE

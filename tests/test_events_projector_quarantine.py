@@ -109,3 +109,47 @@ def test_drafts_failed_status_is_no_emit_not_quarantined(tmp_path):
     store = EventStore()
     assert _quarantine(store) == []
     assert _event_count(store) == 0
+
+
+def test_reprojecting_unmapped_status_does_not_duplicate_quarantine(tmp_path):
+    # Idempotency end-to-end: flushing the same checkpoint twice yields one row.
+    ckpt = _write_checkpoint(
+        tmp_path / "20260526T120000-abcd1234.json",
+        [{"id": "i1", "status": "done2", "adapter": "blogger", "payload": {}}],
+    )
+    flush_for(ckpt)
+    flush_for(ckpt)
+    assert len(_quarantine(EventStore())) == 1
+
+
+def test_mixed_run_emits_known_and_quarantines_unmapped_without_halting(tmp_path):
+    # A run with a normal pending item AND an unmapped item: the pending emits
+    # its intent event, the unmapped quarantines, and the run completes.
+    ckpt = _write_checkpoint(
+        tmp_path / "20260526T120000-abcd1234.json",
+        [
+            {"id": "ok", "status": "pending", "adapter": "blogger",
+             "payload": {"target_url": "https://example.com/ok"}, "title": "t"},
+            {"id": "bad", "status": "weird", "adapter": "blogger", "payload": {}},
+        ],
+    )
+    result = flush_for(ckpt)
+    store = EventStore()
+    assert result.events_inserted == 1  # the pending -> publish.intent
+    assert _event_count(store) == 1
+    assert len(_quarantine(store)) == 1  # only the unmapped one
+
+
+def test_history_truly_unknown_status_is_no_emit_via_catch_all(tmp_path):
+    # A status neither emitted nor explicitly listed -> NO_EMIT default, not quarantine.
+    path = tmp_path / "publish-history.json"
+    path.write_text(
+        json.dumps([{"id": "h1", "target_url": "https://example.com/x",
+                     "platform": "medium", "status": "never_seen_before",
+                     "created_at": "2026-05-26 12:30"}]),
+        encoding="utf-8",
+    )
+    flush_for(path)
+    store = EventStore()
+    assert _quarantine(store) == []
+    assert _event_count(store) == 0

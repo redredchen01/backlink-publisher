@@ -169,10 +169,19 @@ def _ensure_quarantine_dedup_key(conn: sqlite3.Connection) -> None:
     table_info`` check (SQLite ``ADD COLUMN`` is not ``IF NOT EXISTS``), the
     index is ``CREATE UNIQUE INDEX IF NOT EXISTS``. Fresh DBs already get both
     via ``_DDL_STATEMENTS``; this back-fills pre-existing v2 databases.
+
+    Concurrency-safe: two processes opening the same pre-migration v2 DB at once
+    could both see the column missing and both ``ALTER``; the loser raises
+    ``OperationalError: duplicate column name``. Treat that as a benign race —
+    the column now exists either way — rather than crashing ``connect()``.
     """
     cols = {row[1] for row in conn.execute("PRAGMA table_info(quarantine_log)")}
     if "dedup_key" not in cols:
-        conn.execute("ALTER TABLE quarantine_log ADD COLUMN dedup_key TEXT")
+        try:
+            conn.execute("ALTER TABLE quarantine_log ADD COLUMN dedup_key TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantine_dedup "
         "ON quarantine_log(dedup_key)"

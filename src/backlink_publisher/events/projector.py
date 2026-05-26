@@ -266,6 +266,31 @@ def _host_of(url: str | None) -> str | None:
     return netloc or None
 
 
+def _write_quarantines(store: EventStore, pending: list[dict[str, Any]]) -> None:
+    """Write collected quarantine intents AFTER the reducer transaction commits.
+
+    Called once the reducer's ``store.connect()`` block has exited (write lock
+    released), so ``quarantine()``'s private connection doesn't contend with it.
+    Each write is wrapped so a transient failure logs (RECON) and continues —
+    never aborts the run (the "quarantine + continue, never halt" contract).
+    """
+    for q in pending:
+        try:
+            store.quarantine(**q)
+            _log.warning(
+                "RECON projector: quarantined unmapped %s status %r (run=%s id=%s)",
+                q.get("source"), q.get("source_status"),
+                q.get("run_id"), q.get("record_identity"),
+            )
+        except Exception as exc:  # noqa: BLE001 — never let quarantine abort the run
+            _log.error(
+                "RECON projector: FAILED to quarantine unmapped %s status %r "
+                "(run=%s id=%s): %s — continuing",
+                q.get("source"), q.get("source_status"),
+                q.get("run_id"), q.get("record_identity"), exc,
+            )
+
+
 # ── Checkpoint reducer ────────────────────────────────────────────
 
 
@@ -286,6 +311,12 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
     articles_inserted = 0
     skipped_due_to_dedup = 0
     seen_intent_or_failed: set[tuple[str, str, str]] = set()
+    # Quarantine intents are collected during the loop and written AFTER the
+    # reducer transaction commits — quarantine() opens its own connection, and
+    # writing it while this reducer holds the WAL write lock would deadlock
+    # ("database is locked"). Deferring also means only records from a committed
+    # flush are quarantined; a rolled-back flush re-derives them next run.
+    pending_quarantines: list[dict[str, Any]] = []
 
     with store.connect() as conn:
         prior = _cursor_load(conn, source)
@@ -434,18 +465,17 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 pass
 
             else:  # kinds.QUARANTINE — unrecognized checkpoint status (drift)
-                store.quarantine(
-                    reason=f"unmapped_status: checkpoint/{status}",
-                    failure_type="unmapped_status",
-                    source="checkpoint",
-                    run_id=run_id,
-                    source_status=status,
-                    record_identity=item_id,
-                    raw_payload={"target_url": target_url, "adapter": item.get("adapter")},
-                )
-                _log.warning(
-                    "RECON projector: quarantined unmapped checkpoint status "
-                    "%r (run=%s item=%s)", status, run_id, item_id
+                # Collect now; write after the transaction commits (see above).
+                pending_quarantines.append(
+                    {
+                        "reason": f"unmapped_status: checkpoint/{status}",
+                        "failure_type": "unmapped_status",
+                        "source": "checkpoint",
+                        "run_id": run_id,
+                        "source_status": status,
+                        "record_identity": item_id,
+                        "raw_payload": {"target_url": target_url, "adapter": item.get("adapter")},
+                    }
                 )
 
         _cursor_save(
@@ -454,6 +484,8 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
             {"items": next_items},
             mtime=path.stat().st_mtime,
         )
+
+    _write_quarantines(store, pending_quarantines)
 
     return ProjectionResult(
         events_inserted=events_inserted,
