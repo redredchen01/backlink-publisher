@@ -3,83 +3,105 @@ date: 2026-05-26
 topic: overview-inline-channel-binding
 ---
 
-# 渠道綁定總覽 — 内联绑定缺卡渠道
+# 渠道綁定總覽 — 注册表驱动的统一绑定面
+
+> 修订记录：初稿基于"总览 10 渠道 / 缺 3 卡"的过时快照。会话期间并发 session 把 phase1 PR #236 合入本地 main（HEAD `4852ee0`），`active_platforms()` 实际为 **27 个**。文档已据此重写为根治方案。
 
 ## Problem Frame
 
-`/settings` 页面有两个渠道区块,数据来源不同步:
+`/settings` 的渠道绑定有两个不同步的来源:
 
-- **渠道綁定總覽**（`#section-dashboard`）由注册表 `active_platforms()` 动态驱动 → 列出**全部** 10 个渠道。
-- **发布渠道**（`#section-channels`）由模板**写死的 HTML** 卡片组成 → 只有 6 个。
+- **渠道綁定總覽**（`#section-dashboard`）由注册表 `active_platforms()` **动态驱动** → 当前列出**全部 27 个**渠道。
+- **发布渠道**（`#section-channels`）由模板**写死的 6 张卡**组成（blogger/medium/velog/ghpages/devto/notion）。
 
-总览每张卡的 `Configure ↓` 链接指向 `#channel-<name>`,但发布渠道区块没有对应卡片的渠道,链接是**死锚点**,且无处绑定。后果:**txtfyi / mastodon / livejournal** 出现在总览里却无法在 UI 中完成绑定。根因是"注册表驱动 vs 写死 HTML"的结构性漂移。
+后果（两个叠加的缺陷）:
 
-本次范围:让这 3 个渠道**直接在总览内联完成绑定**,不依赖发布渠道区块补卡。（telegraph 是自动 bootstrap、已绑定,本次不涉及。已工作的 6 张卡保持不动。）
+1. **死锚点 / 无绑定面**：总览每张卡的 `Configure ↓` 指向 `#channel-<name>`,但只有 6 个有对应卡片。**约 21 个渠道**出现在总览里却无处绑定,`Configure↓` 是死链。
+2. **bound 误报**：`webui_app/binding_status.get_channel_status()` 的 `bound` 由 offline `verify_adapter_setup()` 决定,而后者只对 `_SETUP_CHECKS` 里的 7 个渠道有判定;**其余 ~20 个已注册渠道**全部返回 `bound=False` + blocker `"No adapter configured for platform: X"` —— 即便它们都已 `register()`。总览大部分卡因此误显"未綁定"。
 
-## 三渠道绑定机制对比
+**根因**:渠道列表是注册表驱动（加渠道自动出现）、绑定 UI 是写死的 HTML（加渠道不自动出现）→ 结构性漂移。本次**转向根治**:让绑定面也由注册表驱动,按各渠道的 auth 类型自动渲染绑定 UI,一次覆盖全部 active 渠道;新增渠道零模板改动。
 
-| 渠道 | 绑定本质 | 凭证/输入 | 存储 | dofollow |
-|---|---|---|---|---|
-| **txtfyi** | 免绑定（匿名表单 POST,无账号/cookie/token） | 无 | 无 | uncertain |
-| **livejournal** | 账号密码（密码 md5 → hpassword） | username + password | `livejournal-credentials.json` `0o600` | uncertain |
-| **mastodon** | 实例地址 + 浏览器登录 | `instance_url` + Chrome profile 登录 | config.toml + per-channel Chrome profile | nofollow |
+## Approach（已定方向）
+
+把"渠道綁定總覽"升级为**唯一的、注册表驱动的绑定面**。每个渠道按其 **auth 类型**自动套用一个绑定 UI 模板,而非逐个写死卡片。`develop` 的 6 张工作卡按下表收敛或保留。
+
+**auth 类型 → 绑定 UI 模板**（完整 27 渠道的逐个归类是规划期的代码审计任务,见 Outstanding）:
+
+| auth 类型 | 绑定 UI | 代表渠道 | 本轮处理 |
+|---|---|---|---|
+| **ANON**（无凭证) | 「免绑定·就绪」徽章 + 无副作用连通性探测 | txtfyi、telegraph(auto) | ✅ 纳入 |
+| **TOKEN**（单字段密钥) | token-paste 表单 | devto、ghpages | ✅ 纳入 |
+| **TOKEN+FIELDS**（多字段) | 多字段表单 | notion(token+db_id) | ✅ 纳入 |
+| **USERPASS**（账密,服务端存) | username+password 表单 | livejournal | ✅ 纳入 |
+| **OAUTH**（重定向) | 复用现有 OAuth 流程 | blogger、medium(oauth) | ⏸ 保留现状,接入统一面但不重写流程 |
+| **BROWSER_LOGIN**（Chrome/Playwright 登录) | 浏览器登录流程 | velog、medium(browser)、**mastodon** | ⏸ velog 保留现状;**mastodon 拆出单独评估** |
 
 ## Requirements
 
-**总览内联绑定通用行为**
-- R1. 总览中的 txtfyi / mastodon / livejournal 三张卡必须能在**总览区块内**完成绑定/配置,不要求用户跳转到发布渠道区块。
-- R2. 三张卡的 `Configure ↓` 死锚点必须消除（改为内联展开,或移除该链接）。
-- R3. 绑定动作完成后,卡片状态（已綁定/未綁定徽章、identity、last_verified_at）应即时刷新,无需手动刷新整页。
-- R4. 沿用现有通用 `/api/<channel>/verify`：每张卡的 "Verify Token" 行为保持可用,用于验证绑定结果。
+**注册表驱动绑定面（根治漂移）**
+- R1. 绑定面必须由 `active_platforms()` 驱动:新增/退役渠道时绑定面自动同步,**不需要新增写死 HTML**。消除"注册表 vs 写死卡"的漂移根因。
+- R2. 每个渠道按其 auth 类型套用对应绑定 UI 模板（见上表 ANON/TOKEN/TOKEN+FIELDS/USERPASS）。OAUTH 与 BROWSER_LOGIN 类渠道接入同一面板,但**复用各自现有流程**,本轮不重写。
+- R3. 消除所有死锚点 `Configure ↓`:渠道的绑定/配置在面板内**内联完成**,不依赖跳转到已退役/不存在的卡片。
+- R4. 现有 6 张工作卡（blogger/medium/velog/ghpages/devto/notion）的绑定/配置能力**零回归**;迁入统一面后行为与原先一致。
 
-**txtfyi（免绑定）**
-- R5. txtfyi 卡片不显示"未綁定 + 绑定按钮",改为绿色就绪状态徽章「免绑定 · 可直接发布」。
-- R6. 提供一个「测试发布 / dry-run」按钮验证渠道连通性（替代绑定按钮的位置）。
-- R7. 修正其绑定状态来源,使 txtfyi 不再被报告为 `bound=False` 的误导态（呈现为"无需绑定即就绪"）。
+**bound 状态正确性（修共用缺陷）**
+- R5. 修正 `bound` 误报:所有已注册渠道在 offline 路径下不得因缺 `_SETUP_CHECKS` 条目而错报 `"No adapter configured"`。为各 auth 类型补 offline setup-check（ANON 恒就绪;TOKEN/USERPASS 检凭证文件存在;等）。
+- R6. ANON 类（如 txtfyi/telegraph-auto）呈现「免绑定·可直接发布」绿色就绪态,不显示"未綁定 + 绑定按钮"。
+- R7. 渠道的 dofollow/nofollow 标注沿用注册表 `dofollow_status()`,nofollow 渠道必须显式标注（与现有 nofollow 警示一致）。
 
-**livejournal（账号密码）**
-- R8. 卡片内联展开一个含 **username + password** 两个字段的绑定表单。
-- R9. 表单提交走一个新的保存路由,后端调用既有 `store_credentials(config, username, password)`,密码即时派生为 hpassword,凭证文件 `0o600`,明文密码绝不落盘。
-- R10. 表单旁必须有醒目警告：**仅使用一次性小号**（凭证为 password-equivalent、不可吊销,只能改密码）。
-- R11. 已绑定时支持"更新绑定/重新绑定"（rotation 走同一保存路径）与"清除凭证"。
+**连通性验证（非破坏性）**
+- R8. 沿用通用 `/api/<channel>/verify` 做绑定结果验证;R5 的 offline check 修好后,verify 对全部渠道可用。
+- R9. ANON 类的连通性探测**必须无副作用**——绝不触发真实公开发布（txtfyi form-post 按一下会留真 paste）。用无副作用探测（如表单页 GET / `dry_run_intercept` 拦截),并以"绝不产生真实 paste"为验收条件。〔取代初稿 R6 的"测试发布"按钮——多角色共识其有公网足迹风险且 verify 可能已够。〕
 
-**mastodon（实例 + 浏览器登录）**
-- R12. 卡片内联提供 `instance_url` 输入（如 `https://mastodon.social`），保存到 config.toml `[mastodon] instance_url`。
-- R13. 提供"浏览器登录"动作：在该实例对应的 per-channel Chrome profile 中打开登录页,登录态持久化到该 profile,供后续 chrome-backend 发布复用。
-- R14. 卡片必须显式标注 **nofollow**（与发布渠道区块现有 nofollow 警示一致），避免误以为是 dofollow 主力渠道。
-- R15. 未设置 instance_url 时,"浏览器登录"动作应被禁用并提示先填实例地址。
+**交互状态（每个异步动作都要定义）**
+- R10. 每个异步绑定动作（保存凭证 / 连通性探测 / verify / 浏览器登录）触发后必须:禁用按钮 + 切换 in-progress 文案、禁止并发重复触发,直到结果返回。
+- R11. 失败态必须 inline 回显在卡片内:用户向文案(非原始 stack trace / 非被截断的 stderr)、失败后输入保留、可直接重试。
+- R12. 已绑定态卡片显示摘要(各 auth 类型字段不同:USERPASS 显 username;TOKEN 显 masked;ANON 显"就绪")+ `last_verified_at`;绑定/状态变更后**局部即时刷新**,无需整页刷新。
+- R13. 破坏性"清除凭证"动作需二次确认,并说明后果与清除后回落的状态。
+
+**安全（新绑定面与新路由的硬约束,非待规划项)**
+- R14. 任何用户可控的 URL 输入（如未来 BROWSER_LOGIN 的实例地址)在保存与使用前必须过 `_util/net_safety` 的 SSRF 校验 + 强制 https + 拒绝私有/回环/链路本地/元数据网段。
+- R15. 所有新凭证保存路由必须挂在受 `_global_csrf_guard` 覆盖的 blueprint 下并通过 CSRF 校验,前端带 `X-CSRFToken`(注意 medium_login 的 csrf_client ≠ 全局守卫的陷阱,见 [[reference_webui_csrf_architecture]])。
+- R16. 所有以 `channel` 为键的路由/文件路径/profile 目录构造前,必须用注册表白名单校验 `channel`,拒绝未注册值与含 `/`、`..`、空字节的输入(防路径穿越)。
+- R17. password / hpassword / token / cookie / storage-state **绝不得**出现在日志、stderr 诊断、异常消息或前端错误回显中;凭证文件经 `safe_write.atomic_write` 写入 `0o600`。
+
+**livejournal（USERPASS 实例）**
+- R18. 内联 username + password 表单,提交走新保存路由,后端调既有 `store_credentials(config, username, password)`(密码即时派生 hpassword,明文不落盘);旁附醒目警告:**仅用一次性小号**(凭证 password-equivalent、不可吊销)。已绑定支持重新绑定(rotation 走同一路径)与清除。
 
 ## Success Criteria
-- 在 `/settings` 仅停留在总览区块,即可分别完成 txtfyi（确认免绑定）、livejournal（存账密）、mastodon（设实例 + 登录）三个渠道的就绪。
-- 三渠道再无死锚点 `Configure ↓`；总览状态徽章与真实绑定态一致。
-- 6 个已工作渠道的绑定流程零回归。
+- 在 `/settings` 总览面板内,可对全部 active 渠道(除 mastodon 等 BROWSER_LOGIN 拆出项)完成与其 auth 类型相符的绑定/确认;**无死锚点**。
+- 新增一个 TOKEN/USERPASS/ANON 类渠道到注册表后,绑定面**自动出现**对应 UI,无需改模板 HTML(根因消除的验收)。
+- 总览不再有渠道因 `_SETUP_CHECKS` 缺项而误报"未綁定 / No adapter configured"。
+- 现有 6 个工作渠道绑定流程零回归(含 OAuth/velog browser-login)。
 
 ## Scope Boundaries
-- **不**退役/重做发布渠道区块的 6 张卡（blogger/medium/velog/ghpages/devto/notion）——本次保持原样。
-- **不**处理 telegraph（自动 bootstrap、已绑定;其在总览的 `Configure↓` 死链可顺手移除,但不强求）。
-- **不**做 mastodon 多实例支持（单实例;多实例为后续）。
-- **不**把发布渠道卡片改成注册表自动生成（"根治漂移"的更大改法）——留作后续。
+- **mastodon 拆出**:本轮不做。其 BROWSER_LOGIN 有未解技术前提——bind 路径存 Playwright `storage_state` JSON,而发布走 `real-chrome-profile/<channel>`,**两者不互通**;且登录 URL 随 `instance_url` 变,静态 recipe 表达不了。需单独一轮做 cost/benefit(referral_value="high" 但 nofollow)+ 解 storage_state↔profile 兼容。
+- **OAUTH / 其余 BROWSER_LOGIN 不重写**:blogger OAuth、medium 三模式、velog 登录保留现有流程,只接入统一面板的呈现/状态层,避免回归。
+- **不**改发布流程、不改 publish 适配器本身;只动 WebUI 绑定面 + binding_status + 新增凭证保存路由。
 
 ## Key Decisions
-- 绑定入口统一在**总览**内联,而非给缺卡渠道补发布渠道卡片：避免写死 HTML 继续扩张、漂移。
-- txtfyi 呈现为「免绑定·可直接发布」而非隐藏:诚实反映其匿名发布特性,且不与 `active_platforms()` 驱动逻辑冲突。
-- 三渠道按各自 auth 类型走**不同的内联绑定 UI**（免绑定就绪态 / 账密表单 / 实例+浏览器登录），不强行统一成一种表单。
+- 转向**注册表驱动统一绑定面**而非逐个内联/逐个补卡:逐个方案随 27→N 渠道线性堆定制 UI,正是要消除的漂移;注册表驱动一次根治。
+- **按 auth 类型模板化**:ANON/TOKEN/TOKEN+FIELDS/USERPASS 走自动模板;OAUTH/BROWSER_LOGIN 复用现有流程(回归风险高、且 mastodon 类有未解前提)。
+- **mastodon 拆出单独评估**:三渠道里成本最高且 nofollow,捆进本轮会拖慢根治主线。
+- **砍掉 txtfyi"测试发布"按钮**,改为无副作用连通性探测:避免公网真 paste 足迹。
 
 ## Dependencies / Assumptions
-- 复用既有 `store_credentials()`（livejournal）、chrome per-channel profile 机制（mastodon,见 `[[reference_chrome_backend_per_channel_profile]]`）、通用 `/api/<channel>/verify`。
-- 假设 mastodon 浏览器登录可复用 velog/medium 的 Chrome attach 模式,但 mastodon 当前**不在** bind `CHANNELS` frozenset、也无 `cli/_bind/recipes/mastodon.py` 登录 recipe（见下方待规划项）。
+- 复用:`store_credentials()`(livejournal)、`/api/<channel>/verify`、`_util/net_safety` SSRF 防御、`safe_write.atomic_write`、注册表 `active_platforms()`/`dofollow_status()`/registered_platforms 白名单、`_global_csrf_guard`、`channel-binding.js` 的 `renderResult` 局部刷新。
+- `_SETUP_CHECKS` 当前仅含 blogger/devto/ghpages/medium/notion/telegraph/velog 7 项(已代码证实)。
 
 ## Outstanding Questions
 
 ### Resolve Before Planning
-（无 — 产品决策已全部确定）
+（无 — 方向性产品决策已定:根治/统一面、mastodon 拆出、砍 dry-run、安全为硬需求。）
 
 ### Deferred to Planning
-- [Affects R13][Technical] mastodon 浏览器登录该走哪条路:扩 bind `CHANNELS` frozenset + 新增 `cli/_bind/recipes/mastodon.py` 登录 recipe（复用现有 bind job 基建）,还是新建一个独立的 instance-aware 登录流程?需评估两条路的改动面与 CHANNELS 安全校验影响。
-- [Affects R9][Technical] livejournal 保存路由放在哪个 blueprint（token_paste vs bind vs settings_basic）、CSRF/`_global_csrf_guard` 接入、错误回显格式。
-- [Affects R7][Needs research] txtfyi 的 `bound` 判定在 `binding_status.get_channel_status` 里如何产出?需确认改成"免绑定就绪态"是否影响 drift-check 测试与 `active_platforms()` 一致性断言。
-- [Affects R6][Technical] txtfyi「测试发布/dry-run」走通用 `/api/<channel>/dry-run` 还是 verify 足矣?确认 dry-run 端点是否对 txtfyi 可用且不产生真实公开 paste。
-- [Affects R3][Technical] 内联绑定后状态刷新:复用 `channel-binding.js` 的 `renderResult`/局部刷新,还是各动作返回最新 status JSON 后局部重渲染卡片?
+- [Affects R1/R2][Technical] 27 个 adapter 的逐个 auth 类型归类审计(谁是 ANON/TOKEN/TOKEN+FIELDS/USERPASS/OAUTH/BROWSER_LOGIN),据此确定每个模板覆盖哪些渠道。
+- [Affects R1/R4][Technical] 统一面如何承载 OAUTH(blogger)与 velog browser-login 的现有流程:嵌入 vs 链接到保留的局部卡;以及 `#section-channels` 写死区块是退役还是收敛为"复杂 auth 专区"。
+- [Affects R5][Technical] `_SETUP_CHECKS` offline-check 的扩展形态:逐 auth 类型一个通用判定 vs 逐渠道;及其对 drift-check / `test_no_monolith_regrowth` / R9 extension-readiness 断言的影响。
+- [Affects R5/R6][Needs research] txtfyi 等 ANON 渠道改为"就绪态"后,`bound` 字段取值(True 还是保持 False+ready 标志)对 active_platforms 一致性断言与下游消费者的影响。
+- [Affects R9][Technical] txtfyi 无副作用探测的具体手段:`dry_run_intercept`(requests-backed,Session.send 拦截早于 edit.php) vs 仅 GET 表单页;确认 `/api/<channel>/dry-run` 路由当前**不存在**(需建或避免)。
+- [Affects R18][Technical] livejournal 保存路由的 blueprint 归属(token_paste vs bind vs settings_basic)与错误回显格式。
+- [Affects 整体] mastodon 拆出轮的独立计划:storage_state↔real-chrome-profile 兼容、instance-aware 登录 recipe、扩 bind `CHANNELS` frozenset 的安全影响、SSRF 校验。
 
 ## Next Steps
 → `/ce:plan` for structured implementation planning
