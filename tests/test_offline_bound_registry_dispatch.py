@@ -84,7 +84,7 @@ def test_anon_channels_bound_without_credentials(platform, cfg):
 
 @pytest.mark.parametrize(
     "platform",
-    ["csdn", "zhihu", "ghost", "beehiiv", "tumblr", "wordpresscom", "substack"],
+    ["csdn", "jianshu", "note", "tumblr", "wordpresscom", "substack"],
 )
 def test_credential_channel_unbound_without_credentials(platform, cfg):
     assert _is_bound(platform, cfg) is False

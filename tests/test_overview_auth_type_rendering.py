@@ -47,7 +47,7 @@ def test_anon_channel_renders_ready_badge(body):
 # ── dead-anchor elimination ───────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("cardless", ["csdn", "zhihu", "txtfyi", "rentry", "ghost", "tumblr"])
+@pytest.mark.parametrize("cardless", ["csdn", "jianshu", "txtfyi", "rentry", "substack", "tumblr"])
 def test_cardless_channel_has_no_configure_anchor(body, cardless):
     """Cardless channels must not emit a Configure ↓ anchor to a non-existent
     #channel-<name> target."""

@@ -197,15 +197,14 @@ _AUTH_TYPE_BY_PLATFORM: dict[str, str] = {
     # TOKEN — single secret field
     "devto": "token", "writeas": "token",
     # TOKEN+FIELDS — secret + extra config field(s)
-    "ghpages": "token_fields", "beehiiv": "token_fields", "ghost": "token_fields",
-    "notion": "token_fields", "wordpresscom": "token_fields",
-    "hashnode": "token_fields", "tumblr": "token_fields",
+    "ghpages": "token_fields", "notion": "token_fields",
+    "wordpresscom": "token_fields", "hashnode": "token_fields",
+    "tumblr": "token_fields",
     # PASTE-BLOB — pasted {"cookies":[...]} JSON (cookie-export)
-    "csdn": "paste_blob", "habr": "paste_blob", "jianshu": "paste_blob",
-    "juejin": "paste_blob", "note": "paste_blob", "pikabu": "paste_blob",
-    "segmentfault": "paste_blob", "substack": "paste_blob", "zhihu": "paste_blob",
+    "csdn": "paste_blob", "jianshu": "paste_blob", "juejin": "paste_blob",
+    "note": "paste_blob", "substack": "paste_blob",
     # USERPASS — username + password (stored server-side)
-    "livejournal": "userpass", "cnblogs": "userpass",
+    "livejournal": "userpass",
     # OAUTH — redirect flow
     "blogger": "oauth",
     # LIVE-BROWSER — driven browser login (Chrome/Playwright)
