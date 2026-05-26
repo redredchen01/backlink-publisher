@@ -204,3 +204,98 @@ def test_reducer_floor_miss_quarantines_after_commit_without_deadlock(monkeypatc
     assert rows[0]["payload"]["failure_type"] == "missing_field"
     assert rows[0]["run_id"] == _RUN_ID
     assert result.quarantined == 1
+
+
+def test_mixed_pass_and_miss_counts_events_inserted_accurately(monkeypatch):
+    # Two pending items emit publish.intent (floor target_url, satisfied) and
+    # pass; one done item's publish.confirmed is forced to miss. events_inserted
+    # must count ONLY the 2 rows actually written, not the quarantined one.
+    monkeypatch.setitem(
+        kinds.REQUIRED_FIELDS, kinds.PUBLISH_CONFIRMED, frozenset({"__never_sent__"})
+    )
+    _write_checkpoint(
+        [
+            {"id": "p1", "status": "pending", "adapter": "blogger", "title": "t",
+             "payload": {"target_url": "https://example.com/1"}},
+            {"id": "p2", "status": "pending", "adapter": "blogger", "title": "t",
+             "payload": {"target_url": "https://example.com/2"}},
+            {"id": "ok1", "status": "done", "adapter": "blogger", "verified": True,
+             "published_url": "https://blogger.com/live1",
+             "payload": {"target_url": "https://example.com/3"}},
+        ]
+    )
+    store = EventStore()
+    result = flush_for(checkpoint_path(_RUN_ID), store=store)
+
+    assert _event_count(store, kinds.PUBLISH_INTENT) == 2
+    assert _event_count(store, kinds.PUBLISH_CONFIRMED) == 0
+    assert result.events_inserted == 2  # NOT 3 — the miss must not be counted
+    assert result.quarantined == 1
+    assert result.records_considered == 3
+
+
+def test_history_reducer_floor_miss_defers_without_deadlock(monkeypatch):
+    # Force the history publish.confirmed emit to miss; it holds the WAL write
+    # lock, so the quarantine must defer to after commit (no deadlock) and the
+    # event must not be written.
+    monkeypatch.setitem(
+        kinds.REQUIRED_FIELDS, kinds.PUBLISH_CONFIRMED, frozenset({"__never_sent__"})
+    )
+    import os
+
+    cfg = os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"]
+    p = Path(cfg) / "publish-history.json"
+    p.write_text(
+        json.dumps(
+            [
+                {"id": "h1", "platform": "medium", "target_url": "https://example.com/a",
+                 "article_urls": ["https://medium.com/p/x"], "status": "published"}
+            ]
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore()
+    result = flush_for(p, store=store)  # must not raise / deadlock
+
+    assert _event_count(store, kinds.PUBLISH_CONFIRMED) == 0
+    assert result.events_inserted == 0
+    assert result.quarantined == 1
+    assert _quarantine_rows(store)[0]["payload"]["failure_type"] == "missing_field"
+
+
+def test_drafts_reducer_floor_miss_defers_without_deadlock(monkeypatch):
+    # Same for the drafts reducer's draft.created emit.
+    monkeypatch.setitem(
+        kinds.REQUIRED_FIELDS, kinds.DRAFT_CREATED, frozenset({"__never_sent__"})
+    )
+    import os
+
+    cfg = os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"]
+    p = Path(cfg) / "draft-queue.json"
+    p.write_text(
+        json.dumps(
+            [{"id": "d1", "status": "drafted", "target_url": "https://example.com/a"}]
+        ),
+        encoding="utf-8",
+    )
+    store = EventStore()
+    result = flush_for(p, store=store)  # must not raise / deadlock
+
+    assert _event_count(store, kinds.DRAFT_CREATED) == 0
+    assert result.quarantined == 1
+    assert _quarantine_rows(store)[0]["payload"]["failure_type"] == "missing_field"
+
+
+def test_quarantine_records_non_serializable_payload():
+    # The quarantine path is the safety net: a non-JSON-serialisable value in
+    # the payload must NOT prevent the row from being written (default=str
+    # degrades it to a string for triage). Without this, _write_quarantines
+    # would log-and-skip, silently losing the signal.
+    from decimal import Decimal
+
+    store = EventStore()
+    eid = store.append(kinds.IMAGE_GEN_INVOKED, {"cost": Decimal("1.50")})  # no prompt_sha
+    assert eid == -1
+    rows = _quarantine_rows(store)
+    assert len(rows) == 1
+    assert rows[0]["payload"]["cost"] == "1.50"  # Decimal -> str, row preserved
