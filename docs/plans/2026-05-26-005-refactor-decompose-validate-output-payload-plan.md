@@ -4,9 +4,11 @@ type: refactor
 status: active
 date: 2026-05-26
 claims:
+  # Only paths that exist on origin/main — the drift gate verifies reachability.
+  # The net-new test file (tests/test_schema_output_payload_characterization.py)
+  # is intentionally NOT claimed (it does not exist on origin/main yet).
   paths:
     - src/backlink_publisher/schema.py
-    - tests/test_schema_output_payload_characterization.py
   shas: []
 ---
 
