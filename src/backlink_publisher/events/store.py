@@ -530,7 +530,15 @@ class EventStore:
             "record_identity": record_identity,
             **(raw_payload or {}),
         }
-        payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        # ``default=str`` so the quarantine row is ALWAYS recorded: this is the
+        # safety net, and it must never itself fail to write because a caller's
+        # raw_payload held a non-JSON-serialisable value (Decimal, datetime, …).
+        # Such a value degrades to its str() for triage rather than raising —
+        # which _write_quarantines would otherwise log-and-skip, silently losing
+        # the very signal R6/R9 exist to surface.
+        payload_json = json.dumps(
+            payload, sort_keys=True, ensure_ascii=False, default=str
+        )
         ts_utc = _now_iso_utc()
 
         def _op() -> bool:

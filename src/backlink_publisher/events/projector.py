@@ -513,6 +513,13 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
             mtime=path.stat().st_mtime,
         )
 
+    # A required-field floor miss (append() returns -1) is collected in
+    # pending_quarantines as a missing_field record but writes NO event row;
+    # subtract those optimistic increments so events_inserted counts only rows
+    # actually written. (unmapped_status entries never incremented it.)
+    events_inserted -= sum(
+        1 for q in pending_quarantines if q.get("failure_type") == "missing_field"
+    )
     _write_quarantines(store, pending_quarantines)
 
     return ProjectionResult(
@@ -736,6 +743,13 @@ def _project_history(
             mtime=path.stat().st_mtime,
         )
 
+    # A required-field floor miss (append() returns -1) is collected in
+    # pending_quarantines as a missing_field record but writes NO event row;
+    # subtract those optimistic increments so events_inserted counts only rows
+    # actually written. (unmapped_status entries never incremented it.)
+    events_inserted -= sum(
+        1 for q in pending_quarantines if q.get("failure_type") == "missing_field"
+    )
     _write_quarantines(store, pending_quarantines)
 
     return ProjectionResult(
@@ -891,6 +905,13 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
             mtime=path.stat().st_mtime,
         )
 
+    # A required-field floor miss (append() returns -1) is collected in
+    # pending_quarantines as a missing_field record but writes NO event row;
+    # subtract those optimistic increments so events_inserted counts only rows
+    # actually written. (unmapped_status entries never incremented it.)
+    events_inserted -= sum(
+        1 for q in pending_quarantines if q.get("failure_type") == "missing_field"
+    )
     _write_quarantines(store, pending_quarantines)
 
     return ProjectionResult(
