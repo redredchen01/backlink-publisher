@@ -6,8 +6,12 @@ Public API:
     - ``project_run_safe`` (Plan 005 / U4) — fail-safe project-after-run
     - ``ProjectionError`` (U4) — cursor / dispatch failures
     - ``ProjectionResult`` (U4) — counters returned by ``flush_for``
+    - ``KINDS`` / ``classify`` — event-kind vocabulary + status classifier
+      (dependency-free; safe to import from I/O-free writers)
 """
 
+from . import kinds
+from .kinds import KINDS, classify
 from .projector import (
     ProjectionError,
     ProjectionResult,
@@ -22,4 +26,7 @@ __all__ = [
     "ProjectionResult",
     "flush_for",
     "project_run_safe",
+    "kinds",
+    "KINDS",
+    "classify",
 ]
