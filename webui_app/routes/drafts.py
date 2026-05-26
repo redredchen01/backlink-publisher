@@ -12,24 +12,9 @@ from ..api import DraftAPI
 bp = Blueprint("drafts", __name__)
 _draft = DraftAPI()
 
-
-def _remove_scheduled_job(job_id: str) -> bool:
-    """Remove a scheduler job, distinguishing benign absence from real failure.
-
-    Returns True when removal was clean (job removed, or the job never existed —
-    the expected state for a draft that was never scheduled). Returns False when
-    removal genuinely failed (the job may still fire); logs the real cause.
-    """
-    try:
-        _scheduler.remove_job(job_id)
-    except JobLookupError:
-        # Draft was never scheduled — nothing to remove. Benign.
-        return True
-    except Exception as exc:
-        plan_logger.warn("draft_job_remove_failed", item_id=job_id,
-                         reason=type(exc).__name__)
-        return False
-    return True
+# Scheduler-job-removal honesty lives in ``DraftAPI`` (api/drafts_api.py
+# ``_remove_scheduled_job``); these routes just surface the result's
+# ``flash_type`` ("warning" when a job may still fire).
 
 
 @bp.route('/ce:draft/save', methods=['POST'])
@@ -75,7 +60,7 @@ def ce_draft_cancel():
     """Cancel a scheduled draft job."""
     item_id = request.form.get('id', '')
     result = _draft.cancel(item_id)
-    flash_type = "success" if result["ok"] else "danger"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "danger")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -84,7 +69,7 @@ def ce_draft_delete():
     """Delete a draft item (cancel job if scheduled)."""
     item_id = request.form.get('id', '')
     result = _draft.delete(item_id)
-    flash_type = "success" if result["ok"] else "danger"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "danger")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -96,7 +81,7 @@ def ce_draft_bulk_delete():
     """Delete multiple drafts by id. Form: ids=<id1>&ids=<id2>..."""
     ids = request.form.getlist('ids')
     result = _draft.bulk_delete(ids)
-    flash_type = "success" if result["ok"] else "warning"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "warning")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -114,5 +99,5 @@ def ce_draft_bulk_cancel():
     """Cancel scheduling for multiple drafts (revert to pending)."""
     ids = request.form.getlist('ids')
     result = _draft.bulk_cancel(ids)
-    flash_type = "success" if result["ok"] else "warning"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "warning")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')

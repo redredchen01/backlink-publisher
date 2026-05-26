@@ -11,6 +11,9 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from apscheduler.jobstores.base import JobLookupError
+
+from backlink_publisher._util.logger import plan_logger
 from webui_store import drafts_store as _drafts_store
 
 from ..helpers.contexts import _calc_next_available
@@ -20,11 +23,24 @@ from ..scheduler import _publish_draft_job, _scheduler
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
-def _remove_job_silent(job_id: str) -> None:
+def _remove_scheduled_job(job_id: str) -> bool:
+    """Remove a scheduler job, distinguishing benign absence from real failure.
+
+    Returns True when removal was clean (job removed, or the job never existed —
+    the expected state for a draft that was never scheduled). Returns False on a
+    genuine failure (the job may still fire); logs the real cause with the
+    exception class. Restores the O1 "removal honesty" (PR #231) that the
+    Phase-1 extraction's silent ``_remove_job_silent`` had dropped.
+    """
     try:
         _scheduler.remove_job(job_id)
-    except Exception:
-        pass
+    except JobLookupError:
+        return True
+    except Exception as exc:
+        plan_logger.warn("draft_job_remove_failed", item_id=job_id,
+                         reason=type(exc).__name__)
+        return False
+    return True
 
 
 # ── DraftAPI ───────────────────────────────────────────────────────────────
@@ -150,8 +166,11 @@ class DraftAPI:
         """Cancel a scheduled draft."""
         if not item_id:
             return {"ok": False, "flash_msg": "参数缺失"}
-        _remove_job_silent(item_id)
+        job_clean = _remove_scheduled_job(item_id)
         _drafts_store.update_item(item_id, status="pending", scheduled_at=None)
+        if not job_clean:
+            return {"ok": True, "flash_type": "warning",
+                    "flash_msg": "已取消排程，但排程任务可能仍会触发"}
         return {"ok": True, "flash_msg": "已取消排程"}
 
     # ── delete ────────────────────────────────────────────────────────────
@@ -160,8 +179,11 @@ class DraftAPI:
         """Delete a draft item (cancel job if scheduled)."""
         if not item_id:
             return {"ok": False, "flash_msg": "参数缺失"}
-        _remove_job_silent(item_id)
+        job_clean = _remove_scheduled_job(item_id)
         _drafts_store.delete_item(item_id)
+        if not job_clean:
+            return {"ok": True, "flash_type": "warning",
+                    "flash_msg": "已删除，但排程任务可能仍会触发"}
         return {"ok": True, "flash_msg": "已删除"}
 
     # ── bulk operations ──────────────────────────────────────────────────
@@ -170,9 +192,12 @@ class DraftAPI:
         """Delete multiple drafts by id."""
         if not ids:
             return {"ok": False, "flash_msg": "未选择任何项"}
-        for item_id in ids:
-            _remove_job_silent(item_id)
+        job_failures = sum(not _remove_scheduled_job(item_id) for item_id in ids)
         removed = _drafts_store.bulk_delete(ids)
+        if job_failures:
+            return {"ok": True, "flash_type": "warning",
+                    "flash_msg": f"已删除 {removed} 项，但其中 {job_failures} "
+                                 "项的排程任务可能仍会触发"}
         return {"ok": True, "flash_msg": f"已删除 {removed} 项"}
 
     def bulk_publish_now(self, ids: list[str]) -> dict[str, Any]:
@@ -206,11 +231,17 @@ class DraftAPI:
         if not ids:
             return {"ok": False, "flash_msg": "未选择任何项"}
         cancelled = 0
+        job_failures = 0
         for item_id in ids:
             item = _drafts_store.get_item(item_id)
             if not item or item.get("status") != "scheduled":
                 continue
-            _remove_job_silent(item_id)
+            if not _remove_scheduled_job(item_id):
+                job_failures += 1
             _drafts_store.update_item(item_id, status="pending", scheduled_at=None)
             cancelled += 1
+        if job_failures:
+            return {"ok": True, "flash_type": "warning",
+                    "flash_msg": f"已取消 {cancelled} 项排程，但其中 {job_failures} "
+                                 "项的排程任务可能仍会触发"}
         return {"ok": True, "flash_msg": f"已取消 {cancelled} 项排程"}
