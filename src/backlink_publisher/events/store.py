@@ -21,6 +21,7 @@ coverage to ``.db-wal``/``.db-shm``/``persona.salt`` etc).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -420,6 +421,59 @@ class EventStore:
             with self.connect() as conn:
                 conn.row_factory = sqlite3.Row
                 return list(conn.execute(sql, params))
+
+        return _retry_sqlite(_op, sleep_fn=self._sleep_fn)
+
+    def quarantine(
+        self,
+        *,
+        reason: str,
+        failure_type: str,
+        source: str | None = None,
+        run_id: str | None = None,
+        source_status: str | None = None,
+        record_identity: str | None = None,
+        raw_payload: dict[str, Any] | None = None,
+    ) -> bool:
+        """Record a record the projector could not classify, idempotently.
+
+        Always opens its own **private, committed connection** — never a
+        caller-supplied reducer ``conn`` — so a later reducer rollback cannot
+        discard the quarantine row (that would recreate the silent-drop class
+        this exists to prevent). An extra quarantine row on a retried record is
+        benign (deduped); a lost one is the failure under attack.
+
+        Idempotent via a single non-null ``dedup_key`` hashed over
+        ``(run_id, source, source_status, record_identity)`` with NULLs folded
+        to a fixed token, plus ``INSERT OR IGNORE``. Re-projecting the same
+        record does not duplicate. ``record_identity`` must be per-record
+        granular (e.g. checkpoint item_id, history/drafts row_id) so two
+        *distinct* unmapped records in one run produce two rows.
+
+        Returns True if a new row was written, False if it was a dedup no-op.
+        ``failure_type`` (e.g. ``"unmapped_status"``) is stored inside
+        ``raw_payload_json`` so R9 (P2) can widen the set with ``"missing_field"``.
+        """
+        parts = [run_id or "-", source or "-", source_status or "-", record_identity or "-"]
+        dedup_key = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+        payload = {
+            "failure_type": failure_type,
+            "source_status": source_status,
+            "record_identity": record_identity,
+            **(raw_payload or {}),
+        }
+        payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        ts_utc = _now_iso_utc()
+
+        def _op() -> bool:
+            with self.connect() as conn:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO quarantine_log "
+                    "(ts_utc, source, run_id, reason, raw_payload_json, dedup_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (ts_utc, source, run_id, reason, payload_json, dedup_key),
+                )
+                return cursor.rowcount > 0
 
         return _retry_sqlite(_op, sleep_fn=self._sleep_fn)
 

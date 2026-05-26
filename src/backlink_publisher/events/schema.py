@@ -78,9 +78,15 @@ _DDL_STATEMENTS: tuple[str, ...] = (
         source TEXT,
         run_id TEXT,
         reason TEXT NOT NULL,
-        raw_payload_json TEXT
+        raw_payload_json TEXT,
+        dedup_key TEXT
     )
     """,
+    # Single NOT-NULL-safe dedupe key. ``quarantine()`` writes a non-null hash
+    # so INSERT OR IGNORE collapses re-projections of the same record. A
+    # multi-column key would fail to dedupe rows with NULL run_id
+    # (banner/image_gen) because SQLite treats NULLs as distinct.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantine_dedup ON quarantine_log(dedup_key)",
     """
     CREATE TABLE IF NOT EXISTS publish_leases (
         target_host TEXT PRIMARY KEY,
@@ -147,6 +153,39 @@ def maybe_upgrade_schema(conn: sqlite3.Connection) -> None:
         initialize_schema(conn)
         if version == 1:
             conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+    # Additive, idempotent, version-independent migrations. These MUST run even
+    # when ``version == SCHEMA_VERSION`` — an existing v2 DB never re-enters the
+    # ``version < SCHEMA_VERSION`` branch, so a new index/column placed only in
+    # ``_DDL_STATEMENTS`` (run by ``initialize_schema``) would never reach it.
+    # Keep this to single, cheap, targeted statements — it runs on every
+    # connect, on the project-on-read hot path. NO SCHEMA_VERSION bump.
+    _ensure_quarantine_dedup_key(conn)
+
+
+def _ensure_quarantine_dedup_key(conn: sqlite3.Connection) -> None:
+    """Add ``quarantine_log.dedup_key`` + its UNIQUE index if missing.
+
+    Idempotent and additive: the column add is guarded by a ``PRAGMA
+    table_info`` check (SQLite ``ADD COLUMN`` is not ``IF NOT EXISTS``), the
+    index is ``CREATE UNIQUE INDEX IF NOT EXISTS``. Fresh DBs already get both
+    via ``_DDL_STATEMENTS``; this back-fills pre-existing v2 databases.
+
+    Concurrency-safe: two processes opening the same pre-migration v2 DB at once
+    could both see the column missing and both ``ALTER``; the loser raises
+    ``OperationalError: duplicate column name``. Treat that as a benign race —
+    the column now exists either way — rather than crashing ``connect()``.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(quarantine_log)")}
+    if "dedup_key" not in cols:
+        try:
+            conn.execute("ALTER TABLE quarantine_log ADD COLUMN dedup_key TEXT")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantine_dedup "
+        "ON quarantine_log(dedup_key)"
+    )
 
 
 def maybe_create_fts5(conn: sqlite3.Connection) -> None:  # pragma: no cover - v1 stub
