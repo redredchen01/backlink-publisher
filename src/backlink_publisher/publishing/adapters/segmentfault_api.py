@@ -105,7 +105,7 @@ class SegmentFaultAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "SegmentFault API rejected (HTTP {resp.status_code}) — "
+                    f"SegmentFault API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from segmentfault.com."
                 )
             if resp.status_code not in (200,):

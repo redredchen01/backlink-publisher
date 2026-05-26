@@ -122,7 +122,7 @@ class NoteAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "Note.com API rejected (HTTP {resp.status_code}) — "
+                    f"Note.com API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from note.com."
                 )
             if resp.status_code not in (200, 201):

@@ -120,7 +120,7 @@ class HabrAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "Habr API rejected (HTTP {resp.status_code}) — "
+                    f"Habr API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from habr.com."
                 )
             if resp.status_code not in (200, 201):

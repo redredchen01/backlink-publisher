@@ -120,7 +120,7 @@ class PikabuAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "Pikabu API rejected (HTTP {resp.status_code}) — "
+                    f"Pikabu API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from pikabu.ru."
                 )
             if resp.status_code not in (200, 201):

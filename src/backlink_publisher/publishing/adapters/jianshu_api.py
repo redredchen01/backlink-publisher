@@ -109,7 +109,7 @@ class JianshuAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "简书 API rejected (HTTP {resp.status_code}) — "
+                    f"简书 API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from jianshu.com."
                 )
             if resp.status_code not in (200, 201):

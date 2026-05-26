@@ -55,7 +55,11 @@ def _write_creds(tmp_path, slug: str) -> None:
 
 
 def _payload():
-    return {"id": "a1", "title": "T", "content_html": "<p>hi</p>", "tags": []}
+    # Both content_html and content_markdown so extract_publish_html yields
+    # non-empty content regardless of the platform's route tier (csdn guards
+    # against empty content before the POST).
+    return {"id": "a1", "title": "T", "content_html": "<p>hi</p>",
+            "content_markdown": "hi there", "tags": []}
 
 
 @pytest.mark.parametrize("slug,cls_name", COOKIE_ADAPTERS)
@@ -85,5 +89,8 @@ def test_publish_401_raises_external_service_error(slug, cls_name, tmp_path):
         f"backlink_publisher.publishing.adapters.{slug}_api.requests.post",
         return_value=resp,
     ):
-        with pytest.raises(ExternalServiceError):
+        with pytest.raises(ExternalServiceError) as exc:
             _adapter(slug, cls_name)().publish(_payload(), "publish", _config(tmp_path))
+    # f-prefix regression: the status code must be interpolated, not literal.
+    assert "401" in str(exc.value)
+    assert "{resp.status_code}" not in str(exc.value)

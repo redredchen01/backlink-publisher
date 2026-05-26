@@ -116,7 +116,7 @@ class CSDNAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "CSDN API rejected (HTTP {resp.status_code}) — cookies expired. "
+                    f"CSDN API rejected (HTTP {resp.status_code}) — cookies expired. "
                     "Re-export cookies from a logged-in mp.csdn.net session."
                 )
             if resp.status_code not in (200,):
