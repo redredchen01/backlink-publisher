@@ -41,9 +41,7 @@ from .._manifests import (
     MEDIUM_MANIFEST,
     NOTE_MANIFEST,
     NOTION_MANIFEST,
-    PIKABU_MANIFEST,
     RENTRY_MANIFEST,
-    SEGMENTFAULT_MANIFEST,
     SUBSTACK_MANIFEST,
     TELEGRAPH_MANIFEST,
     TUMBLR_MANIFEST,
@@ -51,7 +49,6 @@ from .._manifests import (
     VELOG_MANIFEST,
     WORDPRESSCOM_MANIFEST,
     WRITEAS_MANIFEST,
-    ZHIHU_MANIFEST,
 )
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
@@ -73,14 +70,11 @@ from .writeas_api import WriteasAPIAdapter
 from .tumblr_api import TumblrAPIAdapter
 from .juejin_api import JuejinAPIAdapter
 from .csdn_api import CSDNAPIAdapter
-from .zhihu_api import ZhihuAPIAdapter
 from .linkedin_api import LinkedInAPIAdapter
-from .segmentfault_api import SegmentFaultAPIAdapter
 from .substack_api import SubstackAPIAdapter
 from .note_api import NoteAPIAdapter
 from .jianshu_api import JianshuAPIAdapter
 from .rentry_api import RentryAPIAdapter
-from .pikabu_api import PikabuAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
 # RECIPES["velog"] before the registration line below references it.
@@ -158,22 +152,6 @@ register(
     **CSDN_MANIFEST,
 )
 register(
-    "zhihu",
-    ZhihuAPIAdapter,
-    dofollow=False,  # link.zhihu.com 302 interstitial + rel=nofollow noreferrer
-    rationale=_R["zhihu"],
-    referral_value="high",
-    **ZHIHU_MANIFEST,
-)
-register(
-    "segmentfault",
-    SegmentFaultAPIAdapter,
-    dofollow=False,  # link.segmentfault.com 302 interstitial (verified live)
-    rationale=_R["segmentfault"],
-    referral_value="high",
-    **SEGMENTFAULT_MANIFEST,
-)
-register(
     "substack",
     SubstackAPIAdapter,
     dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
@@ -204,14 +182,6 @@ register(
     rationale=_R["rentry"],
     referral_value="low",
     **RENTRY_MANIFEST,
-)
-register(
-    "pikabu",
-    PikabuAPIAdapter,
-    dofollow=False,  # /go/ and /link/ redirect interstitials (verified live)
-    rationale=_R["pikabu"],
-    referral_value="high",
-    **PIKABU_MANIFEST,
 )
 register(
     "linkedin",

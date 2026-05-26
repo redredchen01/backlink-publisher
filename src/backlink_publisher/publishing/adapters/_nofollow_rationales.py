@@ -95,28 +95,18 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
     # lacking an OUR-pipeline canary => dofollow="uncertain" (the
     # livejournal/txtfyi precedent — third-party spot-checks do not
     # discharge the canary burden). Zero stay dofollow=True.
-    "zhihu": (
-        "Zhihu (知乎) rewrites every outbound body link through a "
-        "https://link.zhihu.com/?target= 302 interstitial that carries "
-        "rel=\"nofollow noreferrer\" — server-side and compulsory for all "
-        "accounts, so no PageRank transfers. Retained for referral traffic "
-        "and topical signal from a very high-DA Chinese Q&A platform. "
-        "Confirmed against the documented link.zhihu.com redirect mechanism; "
-        "matches the feedback_grep_dofollow_map_before_shipping_adapter "
-        "warning that flagged zhihu specifically."
-    ),
     "juejin": (
         "Juejin (掘金) wraps all external body links in a "
         "https://link.juejin.cn/?target= redirect/risk-warning interstitial "
         "that strips link equity — server-side and unavoidable per account. "
         "No PageRank transfer; kept for referral traffic and dev-topical "
         "relevance on a high-DA Chinese developer community. Same "
-        "link.<domain>.cn interstitial family as zhihu/csdn/segmentfault."
+        "link.<domain> redirect-interstitial family as csdn/jianshu."
     ),
     "jianshu": (
         "Jianshu (简书) routes outbound body links through a "
         "https://link.jianshu.com/go?to= redirect interstitial (the same "
-        "equity-stripping pattern as zhihu/juejin), so external <a> elements "
+        "equity-stripping pattern as juejin/csdn), so external <a> elements "
         "pass no PageRank. Retained for referral traffic and topical signal "
         "from an established high-DA Chinese blogging platform. Mechanism "
         "corroborated by redirect-skipper userscripts targeting "
@@ -127,16 +117,8 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "https://link.csdn.net/?target= redirect interstitial that strips "
         "link equity server-side for all accounts, so no PageRank transfers. "
         "Retained for referral traffic and dev-topical relevance from a very "
-        "high-DA Chinese developer blog. Same link.<domain> interstitial "
-        "family as zhihu/juejin/segmentfault."
-    ),
-    "segmentfault": (
-        "SegmentFault (思否) wraps external body links via a "
-        "https://link.segmentfault.com/?enc= 302 interstitial that strips "
-        "equity — verified live against a published article. No PageRank "
-        "transfer; kept for referral traffic and dev-topical relevance from a "
-        "high-DA Chinese developer Q&A platform. Same link.<domain> "
-        "interstitial family as zhihu/juejin/csdn."
+        "high-DA Chinese developer blog. Same link.<domain> redirect-"
+        "interstitial family as juejin/jianshu."
     ),
     "note": (
         "note.com auto-applies rel=\"nofollow\" to ALL links — profile, post "
@@ -145,13 +127,6 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "sources documenting the platform policy. No PageRank transfer; "
         "retained for referral traffic and topical signal from a high-DA "
         "Japanese publishing platform."
-    ),
-    "pikabu": (
-        "Pikabu (pikabu.ru) routes external body links through /go/ and "
-        "/link/ redirect/tracking interstitials that strip link equity — "
-        "verified live on the site. No PageRank transfer; retained for "
-        "referral traffic and topical signal from a top-25 Russian "
-        "entertainment/discussion platform with high domain authority."
     ),
     "wordpresscom": (
         "Registered dofollow=\"uncertain\": evidence conflicts. This "

@@ -420,14 +420,8 @@ LINKEDIN_MANIFEST: dict[str, Any] = dict(
 NOTE_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Note", domain="note.com", category="general-blog"),
 )
-PIKABU_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="Pikabu", domain="pikabu.ru", category="social"),
-)
 RENTRY_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Rentry", domain="rentry.co", category="wiki"),
-)
-SEGMENTFAULT_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="SegmentFault", domain="segmentfault.com", category="dev-blog"),
 )
 SUBSTACK_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Substack", domain="substack.com", category="newsletter"),
@@ -440,7 +434,4 @@ WORDPRESSCOM_MANIFEST: dict[str, Any] = dict(
 )
 WRITEAS_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Write.as", domain="write.as", category="general-blog"),
-)
-ZHIHU_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="知乎", domain="zhihu.com", category="dev-blog"),
 )
