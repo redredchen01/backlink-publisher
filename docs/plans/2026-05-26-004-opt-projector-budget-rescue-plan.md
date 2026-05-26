@@ -3,6 +3,7 @@ title: "opt: events/projector.py budget rescue — shared-helper extraction"
 type: opt
 status: active
 date: 2026-05-26
+claims: {}
 ---
 
 # opt: events/projector.py budget rescue
