@@ -5,6 +5,10 @@ status: active
 date: 2026-05-26
 deepened: 2026-05-26
 origin: docs/brainstorms/2026-05-25-events-db-kind-contract-requirements.md
+# claims: {} — explicit opt-out. This plan creates net-new files
+# (events/kinds.py) and modifies events/* on this branch; none exist on
+# origin/main yet, so path/SHA drift validation does not apply pre-merge.
+claims: {}
 ---
 
 # feat: events.db Kind & Classification Contract
