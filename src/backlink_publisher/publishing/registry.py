@@ -174,6 +174,55 @@ _DOFOLLOW_BY_PLATFORM: dict[str, _DofollowStatus] = {}
 _RATIONALE_BY_PLATFORM: dict[str, str] = {}
 _REFERRAL_VALUE_BY_PLATFORM: dict[str, _ReferralValue] = {}
 
+# Plan 2026-05-26-002 Unit 2 — auth-type classification for the WebUI binding
+# surface. Drives per-channel binding-UI template selection (Unit 3).
+#
+# This is a STATIC classification constant, NOT a register()-mutated parallel
+# dict — it is never written by register(), so it is exempt from the
+# snapshot-isolation rule above. Two test-time guards keep it honest
+# (``tests/test_auth_type_classification.py``):
+#   1. coverage — every ``active_platforms()`` channel has an entry;
+#   2. consistency — where a channel also declares ``bind[].backend``, the
+#      auth_type agrees with it (``_BACKEND_AUTH_TYPE_COMPAT``), so this map
+#      can never silently drift from the existing ``BindBackend`` descriptor.
+# (Promoting this to a required ``register()`` kwarg is a viable follow-up
+# hardening; the coverage guard already gives the same fail-loud guarantee.)
+_AUTH_TYPE_VALUES: frozenset[str] = frozenset({
+    "anon", "token", "token_fields", "paste_blob", "userpass", "oauth",
+    "live_browser",
+})
+_AUTH_TYPE_BY_PLATFORM: dict[str, str] = {
+    # ANON — no credentials (anonymous publish / auto-bootstrap)
+    "telegraph": "anon", "txtfyi": "anon", "rentry": "anon",
+    # TOKEN — single secret field
+    "devto": "token", "writeas": "token",
+    # TOKEN+FIELDS — secret + extra config field(s)
+    "ghpages": "token_fields", "beehiiv": "token_fields", "ghost": "token_fields",
+    "notion": "token_fields", "wordpresscom": "token_fields",
+    "hashnode": "token_fields", "tumblr": "token_fields",
+    # PASTE-BLOB — pasted {"cookies":[...]} JSON (cookie-export)
+    "csdn": "paste_blob", "habr": "paste_blob", "jianshu": "paste_blob",
+    "juejin": "paste_blob", "note": "paste_blob", "pikabu": "paste_blob",
+    "segmentfault": "paste_blob", "substack": "paste_blob", "zhihu": "paste_blob",
+    # USERPASS — username + password (stored server-side)
+    "livejournal": "userpass", "cnblogs": "userpass",
+    # OAUTH — redirect flow
+    "blogger": "oauth",
+    # LIVE-BROWSER — driven browser login (Chrome/Playwright)
+    "velog": "live_browser", "medium": "live_browser", "mastodon": "live_browser",
+}
+# Which auth_types are consistent with a declared ``bind[].backend``. Used by
+# the consistency test only (not at runtime). ``cookie`` backend currently
+# means a live browser-cookie login (velog/medium/mastodon); the paste-blob
+# cookie-export channels carry no bind descriptor.
+_BACKEND_AUTH_TYPE_COMPAT: dict[str, frozenset[str]] = {
+    "oauth": frozenset({"oauth"}),
+    "token-paste": frozenset({"token", "token_fields", "userpass"}),
+    "cookie": frozenset({"live_browser"}),
+    "chrome": frozenset({"live_browser"}),
+    "cdp": frozenset({"live_browser"}),
+}
+
 # Plan 2026-05-25-002 Unit 1 — manifest metadata parallel dicts.
 #
 # Following the established convention in this module (see comment above
@@ -362,6 +411,18 @@ def dofollow_status(name: str) -> _DofollowStatus | None:
     Plan 2026-05-20-009 R5.
     """
     return _DOFOLLOW_BY_PLATFORM.get(name)
+
+
+def auth_type(name: str) -> str | None:
+    """Return the binding auth-type for ``name`` (one of ``_AUTH_TYPE_VALUES``),
+    or ``None`` if the platform has no classification.
+
+    Drives per-channel binding-UI template selection in the WebUI settings
+    surface (Plan 2026-05-26-002 Unit 2/3). Authoritative for template
+    selection; kept consistent with any declared ``bind[].backend`` by a
+    test-time guard (see ``_AUTH_TYPE_BY_PLATFORM``).
+    """
+    return _AUTH_TYPE_BY_PLATFORM.get(name)
 
 
 def referral_value(name: str) -> _ReferralValue | None:
