@@ -233,9 +233,9 @@ def test_regen_atomicity_no_partial_state_on_failure(tmp_path, monkeypatch):
         (tmp_path / f"footprint_concentration_{corpus_name}.json").write_text('{"stale": true}', encoding="utf-8")
 
     call_count = {"n": 0}
-    from backlink_publisher.cli import footprint as cli_module
+    from backlink_publisher.cli import _footprint_baseline as fb
 
-    real_make = cli_module.make_corpus
+    real_make = fb.make_corpus
 
     def failing_make_corpus(name):
         call_count["n"] += 1
@@ -243,7 +243,7 @@ def test_regen_atomicity_no_partial_state_on_failure(tmp_path, monkeypatch):
             raise RuntimeError("simulated failure on 2nd corpus")
         return real_make(name)
 
-    monkeypatch.setattr(cli_module, "make_corpus", failing_make_corpus)
+    monkeypatch.setattr(fb, "make_corpus", failing_make_corpus)
     monkeypatch.setenv("PYTHONHASHSEED", "0")
 
     with pytest.raises(RuntimeError, match="simulated failure"):

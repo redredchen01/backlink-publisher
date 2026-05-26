@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from backlink_publisher.cli import plan_check as pc
+from backlink_publisher.cli import _plan_check_git as pc_git
 
 
 # ---------------------------------------------------------------------------
@@ -624,8 +625,7 @@ class TestMaybeFetchOriginMain:
         _git(repo, "commit", "-q", "-m", "init")
         _git(repo, "remote", "add", "origin", "https://does-not-resolve.invalid/x.git")
         monkeypatch.chdir(repo)
-        # Force both stat calls (pre- and post-fetch) to report ``inf``
-        monkeypatch.setattr(pc, "_fetch_head_age_seconds", lambda: float("inf"))
+        monkeypatch.setattr(pc_git, "_fetch_head_age_seconds", lambda: float("inf"))
         outcome = pc._maybe_fetch_origin_main(threshold_seconds=0)
         assert outcome.fetched is False
         assert outcome.skip_reason == "network"
