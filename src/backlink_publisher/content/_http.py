@@ -8,13 +8,12 @@ import requests
 from backlink_publisher.http import get as http_get
 
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
+from backlink_publisher._util.logger import plan_logger
 from backlink_publisher._util.url import validate_https_url
 from backlink_publisher.publishing.adapters.retry import retry_transient_call
 
 _USER_AGENT = "backlink-publisher-scraper/0.2.0"
 _MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MiB
-
-
 class _RetryableHttp(Exception):
     """Marker for 429 responses — bubble up so retry_transient_call retries."""
 

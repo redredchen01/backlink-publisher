@@ -23,7 +23,6 @@ _LLM_IMAGE_GEN_API_KEY_ENV_VAR = "BACKLINK_LLM_IMAGE_GEN_API_KEY"
 
 _log = logging.getLogger(__name__)
 
-
 def _parse_llm_anchor_provider(
     section: Any,
     *,

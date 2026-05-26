@@ -5,6 +5,23 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ._body_templates import (
+    _en_body_a,
+    _en_body_b,
+    _en_body_c,
+    _ko_body_a,
+    _ko_body_b,
+    _ko_body_c,
+    _ru_body_a,
+    _ru_body_b,
+    _ru_body_c,
+    _zh_body_a,
+    _zh_body_b,
+    _zh_body_c,
+)
+
+
+
 _mdit_instance = None
 
 
@@ -354,3 +371,6 @@ def slugify(text: str) -> str:
 def normalize_text(text: str) -> str:
     """Normalize whitespace in text."""
     return re.sub(r"\s+", " ", text).strip()
+
+
+

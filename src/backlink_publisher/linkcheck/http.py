@@ -22,7 +22,6 @@ RETRY_DELAY = 1  # seconds
 def _ssl_context() -> ssl.SSLContext:
     return _SSL_CTX
 
-
 _SSL_CTX: ssl.SSLContext = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE

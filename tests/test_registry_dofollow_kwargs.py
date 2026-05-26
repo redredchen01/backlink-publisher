@@ -165,48 +165,48 @@ class TestDofollowUncertainRequiresRationale:
 
 
 class TestRejectedPlatform:
-    # Phase 3: all three previously rejected platforms (devto, mastodon,
-    # wordpresscom) have been un-rejected and registered.  ``_REJECTED_PLATFORMS``
-    # is empty.  These tests validate the rejection mechanism still works
-    # by temporarily inserting a test entry.
+    # Post Plan 2026-05-21-001 Unit 4b: devto removed from rejection
+    # map (shipped as chrome-publish channel). Remaining canonical
+    # rejected platforms: mastodon, wordpresscom. Mastodon's removal
+    # will follow in Unit 4c.
 
-    def test_rejected_name_raises_with_temp_entry(self) -> None:
-        # Demonstrate that the rejection mechanism still fires
-        # by temporarily inserting a test entry.
-        _REJECTED_PLATFORMS["_test_reject"] = "rationale: at least 80 chars of padding here xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    def test_register_rejected_name_raises_even_with_valid_dofollow(self) -> None:
+        # R12: rejection check fires regardless of dofollow value.
         with pytest.raises(RegistryError, match="previously rejected"):
-            register("_test_reject", FakeAdapter, dofollow=True)
-        del _REJECTED_PLATFORMS["_test_reject"]
+            register("wordpresscom", FakeAdapter, dofollow=False, rationale=RATIONALE_PAD)
+
+    def test_register_rejected_name_with_dofollow_true_still_raises(self) -> None:
+        # mastodon shipped as chrome-publish in Unit 4c so it's no
+        # longer rejected. wordpresscom is the only remaining entry —
+        # the assertion is structural (any rejected name → RegistryError
+        # regardless of dofollow=), so reusing the same key as the
+        # sibling test is fine.
+        with pytest.raises(RegistryError, match="previously rejected"):
+            register("wordpresscom", FakeAdapter, dofollow=True)
 
     def test_error_message_cites_prior_rationale_and_instructs_deletion(self) -> None:
         # R12: failure message must include both prior rationale + the
-        # un-rejection-by-deletion instruction. Use a temp entry.
-        _REJECTED_PLATFORMS["_temp_reject"] = "rationale: at least 80 chars of padding here xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        # un-rejection-by-deletion instruction.
         with pytest.raises(RegistryError) as exc:
-            register("_temp_reject", FakeAdapter, dofollow=True)
-        del _REJECTED_PLATFORMS["_temp_reject"]
+            register("wordpresscom", FakeAdapter, dofollow=True)
         message = str(exc.value)
         assert "previously rejected" in message
         assert "delete this entry" in message
         assert "_REJECTED_PLATFORMS" in message
 
     def test_un_rejection_by_deletion_then_register_succeeds(self) -> None:
-        # R12 happy path: insert a temp entry, delete it, then register succeeds.
-        _REJECTED_PLATFORMS["_tmp"] = "rationale: at least 80 chars of padding here xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-        _REJECTED_PLATFORMS.pop("_tmp")
+        # R12 happy path: delete entry from _REJECTED_PLATFORMS, then
+        # register() succeeds with normal R3 validation. wordpresscom
+        # is the canonical example post Unit 4b.
+        _REJECTED_PLATFORMS.pop("wordpresscom")
         register(
-            "_tmp",
+            "wordpresscom",
             FakeAdapter,
             dofollow=False,
             rationale=RATIONALE_PAD,
             referral_value="low",
         )
-        assert dofollow_status("_tmp") is False
-        assert "_tmp" not in _REJECTED_PLATFORMS
-
-    def test_wordpresscom_now_registers_successfully(self) -> None:
-        # Phase 3: wordpresscom is fully un-rejected and registered.
-        assert "wordpresscom" in _REGISTRY
+        assert dofollow_status("wordpresscom") is False
         assert "wordpresscom" not in _REJECTED_PLATFORMS
 
 

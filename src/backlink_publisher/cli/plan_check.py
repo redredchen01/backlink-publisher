@@ -317,8 +317,8 @@ def _check_filename_date_lock(plan_path: Path, fm: dict[str, Any]) -> None:
         raw_date = raw_date.date()
     if not isinstance(raw_date, _dt.date):
         raise PlanClaimsFrontmatterSchemaError(
-            "plan-doc `date:` must be ISO-8601 (YYYY-MM-DD); "
-            "cannot enforce filename-date lock without a typed date"
+            f"plan-doc `date:` must be ISO-8601 (YYYY-MM-DD); cannot enforce "
+            f"filename-date lock without a typed date"
         )
     fm_date = raw_date.isoformat()
     if filename_date != fm_date:
@@ -478,7 +478,7 @@ def _maybe_fetch_origin_main(threshold_seconds: int = 300) -> FetchOutcome:
             env=_git_env(),
             check=False,
         )
-    except (OSError, FileNotFoundError):
+    except (OSError, FileNotFoundError) as exc:
         # `git` not on PATH or other OS-level failure — treat as "other".
         return FetchOutcome(
             fetched=False,

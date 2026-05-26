@@ -17,7 +17,7 @@ from backlink_publisher._util.errors import (
     ExternalServiceError,
     emit_error,
 )
-from backlink_publisher._util.jsonl import write_jsonl
+from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher._util.logger import publish_logger
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from backlink_publisher.publishing.adapters.base import carry_link_attr_verification
@@ -81,7 +81,7 @@ def _record_resume_failure(
 
 def _run_resume(args: Any) -> None:
     """Handle --resume <run_id>: load checkpoint, process pending/failed items, emit union output."""
-    from .. import checkpoint
+    from .. import checkpoint, config_echo
 
     run_id = args.resume
 

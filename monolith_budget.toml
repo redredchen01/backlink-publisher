@@ -38,8 +38,8 @@ ceiling = 620
 rationale = "U4 read-side projector: flush_for dispatch + 3 reducers (_project_checkpoint / _project_history / _project_drafts) + shared helpers (cursor I/O, dt normalisation, anchor filter, JSON read retry). Reducers share enough plumbing that splitting into a subpackage would re-import most of that surface; keep the unit whole until a real boundary appears. Ceiling raised 560→620 on 2026-05-25 by Plan 2026-05-25-005 (events projector correctness): +~57 SLOC for the R2 fail-safe project-after-run seam — project_run_safe() (resolves checkpoint path, swallows locked-DB/ProjectionError, idempotent) + record_projection_health() (last_ok_at/last_error marker in a reserved projection_cursor row) — plus the D2 platform key and D5 verified gating threaded through the reducer payloads. The inline-flush seam this rationale long anticipated now lives here; ceiling = round_up_to_10(585+30) = 620."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
-ceiling = 650
-rationale = "Registry + re-export hub. Phase-3 expansion added 18 new adapter imports + one-line register() calls, growing SLOC from 523 to 614. All 28 channels now splat their _MANIFEST dict. The SLOC growth is the registration surface, not dispatcher logic — acceptable for a registry hub. round_up_to_10(614+30) = 650."
+ceiling = 560
+rationale = "Registry + re-export hub. Plan 2026-05-25-002 Phase 2 ratchet-down: the second migration PR (telegraph + blogger) hit the prior 600 ceiling and triggered the extract-to-sibling escape hatch the Unit 3 rationale called out. Per-channel manifest data (UiMeta / BindDescriptor / Policy) now lives in publishing/_manifests.py as <SLUG>_MANIFEST dicts splatted into thin one-line register() calls. SLOC dropped 580 → 523 with three channels migrated (velog + telegraph + blogger), and adding the remaining 6 Phase-2 channels = ~1 register line each, well within the new ceiling. round_up_to_10(523+30) = 560."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
 ceiling = 465

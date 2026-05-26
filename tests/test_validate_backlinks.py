@@ -163,13 +163,13 @@ def test_validate_malformed_json():
     assert stdout == ""
 
 
-def test_validate_unknown_platform():
-    """Payload with platform=xyznonexistent must fail."""
-    payload = _make_valid_payload(platform="xyznonexistent")
+def test_validate_linkedin_platform():
+    """Payload with platform=linkedin must fail."""
+    payload = _make_valid_payload(platform="linkedin")
     input_data = json.dumps(payload)
     stdout, stderr, code = _run_validate(input_data, check_urls=False)
     assert code == 2
-    assert "xyznonexistent" in stderr.lower()
+    assert "linkedin" in stderr.lower()
     assert stdout == ""
 
 

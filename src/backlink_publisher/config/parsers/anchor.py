@@ -7,7 +7,6 @@ from typing import Any
 from ..._util.errors import InputValidationError
 from ..types import (
     ANCHOR_TYPES,
-    Config,
     _PROPORTIONS_SUM_TOLERANCE,
     _SAFE_SEO_PROPORTIONS,
 )

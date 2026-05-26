@@ -46,6 +46,7 @@ import mimetypes
 import os
 import random
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -110,20 +111,14 @@ _DEFAULT_SHORT_NAME = "backlink-publisher"
 def _token_path(config: Config) -> Path:
     """Canonical token file path (post-rename, no ``-phase0-`` infix)."""
     return config.config_dir / "telegraph-token.json"
-
-
 def _legacy_token_path(config: Config) -> Path:
     """Legacy ``-phase0-`` path written by ``scripts/telegraph_spike``.
 
     Read-only fallback for one-time migration.  Adapter NEVER writes here.
     """
     return config.config_dir / "telegraph-phase0-token.json"
-
-
 def _lock_path(token_path: Path) -> Path:
     return token_path.with_suffix(token_path.suffix + ".lock")
-
-
 def _load_token(config: Config) -> dict[str, str]:
     """Load ``{access_token, short_name}`` from the token file.
 
@@ -187,8 +182,6 @@ def _load_token(config: Config) -> dict[str, str]:
             "telegraph-token.json missing or empty 'access_token' field"
         )
     return data
-
-
 def _write_token_atomic(path: Path, data: dict[str, str]) -> None:
     """Write ``data`` to ``path`` atomically with 0600 perms.
 
@@ -207,8 +200,6 @@ def _write_token_atomic(path: Path, data: dict[str, str]) -> None:
     mode = os.stat(path).st_mode & 0o777
     if mode != 0o600:
         os.chmod(path, 0o600)
-
-
 def _token_lock(token_path: Path) -> Iterator[None]:
     """Advisory file lock around the rotate-write sequence.
 
@@ -246,8 +237,6 @@ def _token_lock(token_path: Path) -> Iterator[None]:
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
-
-
 def _archive_orphan_token(token_path: Path) -> Path | None:
     """Move ``token_path`` to ``<path>.orphaned-<UTC iso>``.
 
@@ -272,8 +261,6 @@ def _archive_orphan_token(token_path: Path) -> Path | None:
     os.replace(token_path, archive)
     os.chmod(archive, 0o600)
     return archive
-
-
 def _is_invalid_token_error(body: dict[str, Any]) -> bool:
     """Heuristic match for Telegraph's 401-equivalent response.
 
@@ -285,8 +272,6 @@ def _is_invalid_token_error(body: dict[str, Any]) -> bool:
         return False
     err = str(body.get("error", "")).upper()
     return any(marker in err for marker in _INVALID_TOKEN_MARKERS)
-
-
 def _create_account(short_name: str) -> str:
     """POST createAccount, return fresh access_token.
 
@@ -320,8 +305,6 @@ def _create_account(short_name: str) -> str:
             f"Telegraph createAccount returned malformed body: {body}"
         )
     return new_token
-
-
 def _create_page(
     access_token: str,
     title: str,
@@ -353,8 +336,6 @@ def _create_page(
         raise ExternalServiceError(
             f"Telegraph createPage network failure: {exc}"
         ) from exc
-
-
 class TelegraphAPIAdapter(Publisher):
     """Single-path Telegraph publisher with in-adapter 401 recovery."""
 

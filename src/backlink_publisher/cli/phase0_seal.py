@@ -39,7 +39,6 @@ from ._seal_init import (
     EXIT_NOT_IMPLEMENTED,
 )
 
-__all__ = ["EXIT_VERDICT", "EXIT_WORKTREE"]  # exported for test access
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -138,13 +137,20 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
+
 # ---------------------------------------------------------------------------
 # Init helpers
 # ---------------------------------------------------------------------------
 
 
+
+
+
+
+
 def _now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +283,7 @@ def _handle_verify(args: argparse.Namespace) -> int:
                 owner, repo_name, pr_num, comment_id = _parse_comment_url(comment_url)
                 comment = V._run_gh(f"repos/{owner}/{repo_name}/issues/comments/{comment_id}")
                 V.validate_verdict_comment(comment, expected_pr=pr_num, allowlist=allowlist)
-                print("  --check-comment: verdict comment still valid")
+                print(f"  --check-comment: verdict comment still valid")
             except Exception as exc:
                 print(f"  --check-comment: FAIL — {exc}")
                 all_ok = False

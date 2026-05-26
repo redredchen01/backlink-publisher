@@ -53,8 +53,6 @@ _PROFILE_LOCK_NAME = "chrome-profile.lock"
 
 class ChromeSessionError(DependencyError):
     """Chrome lifecycle errors — dispatcher falls through to next adapter."""
-
-
 def _chrome_binary() -> str | None:
     """Resolve Chrome executable path. ``None`` if not found.
 
@@ -78,8 +76,6 @@ def _chrome_binary() -> str | None:
         if candidate and Path(candidate).exists():
             return str(candidate)
     return None
-
-
 def _chrome_port() -> int:
     """Resolve CDP debugging port. Honors ``BACKLINK_PUBLISHER_REAL_CHROME_PORT``.
 
@@ -96,8 +92,6 @@ def _chrome_port() -> int:
     if port < 1 or port > 65535:
         raise ChromeSessionError("chrome_cdp_unavailable")
     return port
-
-
 def _chrome_profile_dir() -> Path:
     """Resolve profile dir, with per-channel split when bind-channel env set.
 
@@ -122,8 +116,6 @@ def _chrome_profile_dir() -> Path:
             raise ChromeSessionError("chrome_invalid_bind_channel")
         return base / channel
     return base
-
-
 def _websocket_available() -> bool:
     """``websocket-client`` import probe (bind uses raw websocket, kept for parity)."""
     try:
@@ -131,23 +123,17 @@ def _websocket_available() -> bool:
     except ImportError:
         return False
     return True
-
-
 def _playwright_available() -> bool:
     try:
         import playwright.sync_api  # noqa: F401
     except ImportError:
         return False
     return True
-
-
 def _cdp_available() -> bool:
     """Both binary and a CDP client library must be importable."""
     return _chrome_binary() is not None and (
         _websocket_available() or _playwright_available()
     )
-
-
 def _lsof_listener_pid(port: int) -> int | None:
     """Parse ``lsof -iTCP:<port> -sTCP:LISTEN -Fp`` for the listener PID.
 
@@ -170,8 +156,6 @@ def _lsof_listener_pid(port: int) -> int | None:
             except ValueError:
                 continue
     return None
-
-
 def _ps_command(pid: int) -> str | None:
     """Return full cmdline via ``ps -o command= -p <pid>``. ``None`` on failure.
 
@@ -190,8 +174,6 @@ def _ps_command(pid: int) -> str | None:
         return None
     out = result.stdout.strip()
     return out or None
-
-
 def _verify_listener_is_chrome(
     port: int, chrome_bin: str, profile: Path
 ) -> tuple[bool, str]:
@@ -217,8 +199,6 @@ def _verify_listener_is_chrome(
     if str(profile) not in cmdline:
         return False, "cmdline_missing_profile_path"
     return True, "ok"
-
-
 def _ensure_profile_perms(profile: Path) -> None:
     """``stat`` + ``chmod 0o700`` profile dir. Raises on permission mismatch.
 
@@ -237,12 +217,8 @@ def _ensure_profile_perms(profile: Path) -> None:
             os.chmod(profile, 0o700)
     except OSError as exc:
         raise ChromeSessionError("chrome_profile_locked") from exc
-
-
 def _pid_file_path() -> Path:
     return _config_dir() / _PID_FILE_NAME
-
-
 def _write_pid_file(pid: int, start_time: float) -> None:
     """Atomic 0o600 write of ``{"pid": ..., "start_time": ...}``."""
     path = _pid_file_path()
@@ -252,8 +228,6 @@ def _write_pid_file(pid: int, start_time: float) -> None:
     tmp.write_text(payload)
     os.chmod(tmp, 0o600)
     os.replace(tmp, path)
-
-
 def _read_pid_file() -> dict | None:
     path = _pid_file_path()
     if not path.exists():
@@ -262,15 +236,11 @@ def _read_pid_file() -> dict | None:
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return None
-
-
 def _unlink_pid_file() -> None:
     try:
         _pid_file_path().unlink()
     except FileNotFoundError:
         pass
-
-
 def reap_orphan_publish_chrome() -> dict:
     """Webui startup hook: reap any leftover publish-launched Chrome.
 
@@ -316,15 +286,11 @@ def reap_orphan_publish_chrome() -> dict:
         pass
     _unlink_pid_file()
     return {"action": "reaped", "pid": pid}
-
-
 def signal_SIGTERM() -> int:
     """Indirection to keep ``signal`` import lazy + Windows-safe."""
     import signal as _signal
 
     return _signal.SIGTERM
-
-
 @dataclass(frozen=True)
 class BrowserPublishRecipe:
     """One channel's browser-publish flow.
@@ -340,8 +306,6 @@ class BrowserPublishRecipe:
     channel: str
     compose_url: str
     publish_flow: Callable[..., str]
-
-
 class ChromeAttachSession(AbstractContextManager):
     """Attach to existing Chrome CDP, or launch a new one. Yields a Page.
 
@@ -557,8 +521,6 @@ class ChromeAttachSession(AbstractContextManager):
         finally:
             self._proc = None
             _unlink_pid_file()
-
-
 def _default_version_probe(base: str, timeout_s: float = 1.0) -> dict | None:
     """Lightweight ``/json/version`` HTTP probe. Returns dict on 200, else None."""
     import urllib.error

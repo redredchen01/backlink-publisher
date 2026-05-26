@@ -188,13 +188,13 @@ def test_publish_missing_adapter_config(mock_verify):
     assert "OAuth" in stderr
 
 
-def test_publish_unknown_platform_rejected():
-    """platform=xyznonexistent rejected with exit code 2."""
-    payload = _make_valid_payload(platform="xyznonexistent")
+def test_publish_linkedin_rejected():
+    """platform=linkedin rejected with exit code 2."""
+    payload = _make_valid_payload(platform="linkedin")
     stdout, stderr, code = _run_publish(json.dumps(payload), ["--mode", "draft"])
 
     assert code == 2
-    assert "xyznonexistent" in stderr.lower()
+    assert "linkedin" in stderr.lower()
     assert stdout == ""
 
 
