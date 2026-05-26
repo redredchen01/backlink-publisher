@@ -31,8 +31,9 @@ class GhostAPIAdapter(Publisher):
     The adapter generates a short-lived JWT from the admin API key and uses
     the ``/ghost/api/admin/posts/`` endpoint to create posts.
 
-    Ghost does not modify outbound links server-side (the API stores HTML
-    verbatim), so registered with ``dofollow=True``. Site URL can end with
+    Ghost stores post HTML verbatim, but the dofollow outcome depends on the
+    target instance's editor/theme config, so registered ``dofollow="uncertain"``
+    pending an OUR-pipeline canary (2026-05-26 audit). Site URL can end with
     or without a trailing slash — the adapter normalises it.
     """
 
@@ -76,8 +77,25 @@ class GhostAPIAdapter(Publisher):
                 "Ghost credentials must contain 'admin_api_key' and 'site_url'"
             )
 
-        # Generate Ghost Admin API JWT (standard per Ghost docs)
-        key_id, secret = admin_api_key.split(":", 1)
+        # Generate Ghost Admin API JWT (standard per Ghost docs).
+        # The admin key is ``<id>:<secret>`` where ``secret`` is HEX-encoded.
+        # The HMAC MUST sign with the raw bytes (bytes.fromhex(secret)), NOT
+        # the ASCII bytes of the hex string (secret.encode()) — signing with
+        # the latter produces a wrong signature and Ghost rejects every
+        # request with HTTP 401, making the adapter 100% unusable.
+        key_id, sep, secret = admin_api_key.partition(":")
+        if not sep or not key_id or not secret:
+            raise DependencyError(
+                "Ghost admin_api_key must be in '<id>:<secret>' form "
+                "(Ghost Admin → Settings → Advanced → Integrations)"
+            )
+        try:
+            secret_bytes = bytes.fromhex(secret)
+        except ValueError:
+            raise DependencyError(
+                "Ghost admin_api_key secret (the part after ':') must be "
+                "hex-encoded per the Ghost Admin API key format"
+            ) from None
         # The JWT header + payload is standard Ghost Admin API auth
         import hmac
         import hashlib
@@ -89,7 +107,7 @@ class GhostAPIAdapter(Publisher):
             json.dumps({"iat": now, "exp": now + 300, "aud": "/admin/"}).encode()
         ).rstrip(b"=")
         sig = hmac.new(
-            secret.encode(), header + b"." + payload_jwt, hashlib.sha256
+            secret_bytes, header + b"." + payload_jwt, hashlib.sha256
         ).digest()
         sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=")
         token = (header + b"." + payload_jwt + b"." + sig_b64).decode()
@@ -126,7 +144,7 @@ class GhostAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "Ghost API rejected (HTTP {resp.status_code}) — "
+                    f"Ghost API rejected (HTTP {resp.status_code}) — "
                     "check admin_api_key and site_url"
                 )
             if resp.status_code not in (200, 201):
