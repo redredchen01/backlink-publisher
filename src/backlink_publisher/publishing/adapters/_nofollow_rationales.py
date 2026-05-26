@@ -153,14 +153,6 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "referral traffic and topical signal from a top-25 Russian "
         "entertainment/discussion platform with high domain authority."
     ),
-    "beehiiv": (
-        "Beehiiv newsletter post links route through tracking redirect "
-        "domains (bhclick.com / link.mail.beehiiv.com) carrying UTM "
-        "parameters rather than raw equity-passing <a> hrefs, so outbound "
-        "links do not transfer PageRank. Referral value is modest: the web "
-        "archive of a newsletter issue has limited standalone DA versus the "
-        "email send itself. Retained for referral traffic only."
-    ),
     "wordpresscom": (
         "Registered dofollow=\"uncertain\": evidence conflicts. This "
         "project's PR #108->#109 (the 9-minute revert) observed that free "
@@ -172,17 +164,6 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "verify_link_attributes, then amending this register(). "
         "referral_value=\"high\" reflects wordpress.com's DA ~94 and strong "
         "referral reach regardless of the rel outcome."
-    ),
-    "cnblogs": (
-        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
-        "2026-05 third-party live check found cnblogs (博客园) renders raw "
-        "external <a> in post bodies with no rel attribute and no redirect "
-        "wrapper (= dofollow) — notably the exception among major Chinese dev "
-        "platforms — but a third-party spot-check does not discharge the "
-        "canary burden (livejournal/txtfyi precedent). Confirm by publishing "
-        "a canary and reading verify_link_attributes, then amend to "
-        "dofollow=True. referral_value=\"high\": established high-DA Chinese "
-        "developer blog."
     ),
     "substack": (
         "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
@@ -222,23 +203,5 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "reading verify_link_attributes, then amend to dofollow=True. "
         "referral_value=\"low\": anonymous markdown paste with low DA and "
         "frequent noindex, so equity is weak even if dofollow holds."
-    ),
-    "ghost": (
-        "Registered dofollow=\"uncertain\": Ghost's editor defaults to plain "
-        "follow links and applies nofollow/sponsored only when the author "
-        "manually inserts an HTML card with that rel — so the dofollow "
-        "outcome depends on the target instance's configuration and the "
-        "publish path, which an OUR-pipeline canary must confirm before any "
-        "dofollow=True claim. referral_value=\"high\": self-hosted Ghost "
-        "instances are typically high-DA owned properties."
-    ),
-    "habr": (
-        "Registered dofollow=\"uncertain\": habr.com could not be verified — "
-        "the site blocked every automated fetch (403/closed socket) and no "
-        "authoritative primary source on post-body link rel attributes was "
-        "found. Russian SEO sources hint at nofollow but are unconfirmed. "
-        "Do NOT claim dofollow until a manual view-source on a live Habr "
-        "article or an OUR-pipeline canary resolves it. referral_value="
-        "\"high\": high-DA Russian tech publication."
     ),
 }

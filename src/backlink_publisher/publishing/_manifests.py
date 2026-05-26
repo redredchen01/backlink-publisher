@@ -402,20 +402,8 @@ MEDIUM_MANIFEST: dict[str, Any] = dict(
 # alive and satisfies the display-name contract until each channel gets a
 # proper manifest with BindDescriptor + Policy.
 
-BEEHIIV_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="Beehiiv", domain="beehiiv.com", category="newsletter"),
-)
-CNBLOGS_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="博客园", domain="cnblogs.com", category="dev-blog"),
-)
 CSDN_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="CSDN", domain="csdn.net", category="dev-blog"),
-)
-GHOST_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="Ghost", domain="ghost.org", category="general-blog"),
-)
-HABR_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="Habr", domain="habr.com", category="dev-blog"),
 )
 HASHNODE_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Hashnode", domain="hashnode.com", category="dev-blog"),

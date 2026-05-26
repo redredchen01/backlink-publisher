@@ -28,14 +28,10 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
 from ..registry import _REGISTRY, dispatch, register, registered_platforms
 from .._manifests import (
-    BEEHIIV_MANIFEST,
     BLOGGER_MANIFEST,
-    CNBLOGS_MANIFEST,
     CSDN_MANIFEST,
     DEVTO_MANIFEST,
-    GHOST_MANIFEST,
     GHPAGES_MANIFEST,
-    HABR_MANIFEST,
     HASHNODE_MANIFEST,
     JIANSHU_MANIFEST,
     JUEJIN_MANIFEST,
@@ -72,7 +68,6 @@ from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 from .wordpresscom_api import WordpresscomAPIAdapter
-from .cnblogs_api import CNBlogsAPIAdapter
 from .hashnode_graphql import HashnodeGraphQLAdapter
 from .writeas_api import WriteasAPIAdapter
 from .tumblr_api import TumblrAPIAdapter
@@ -80,12 +75,9 @@ from .juejin_api import JuejinAPIAdapter
 from .csdn_api import CSDNAPIAdapter
 from .zhihu_api import ZhihuAPIAdapter
 from .linkedin_api import LinkedInAPIAdapter
-from .ghost_api import GhostAPIAdapter
-from .beehiiv_api import BeehiivAPIAdapter
 from .segmentfault_api import SegmentFaultAPIAdapter
 from .substack_api import SubstackAPIAdapter
 from .note_api import NoteAPIAdapter
-from .habr_api import HabrAPIAdapter
 from .jianshu_api import JianshuAPIAdapter
 from .rentry_api import RentryAPIAdapter
 from .pikabu_api import PikabuAPIAdapter
@@ -134,14 +126,6 @@ register(
     **WORDPRESSCOM_MANIFEST,
 )
 register(
-    "cnblogs",
-    CNBlogsAPIAdapter,
-    dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
-    rationale=_R["cnblogs"],
-    referral_value="high",
-    **CNBLOGS_MANIFEST,
-)
-register(
     "hashnode",
     HashnodeGraphQLAdapter,
     dofollow="uncertain",  # 3rd-party live check = dofollow; canary pending; retiring (PR #204)
@@ -182,22 +166,6 @@ register(
     **ZHIHU_MANIFEST,
 )
 register(
-    "ghost",
-    GhostAPIAdapter,
-    dofollow="uncertain",  # instance-dependent; editor default follow but unverified path
-    rationale=_R["ghost"],
-    referral_value="high",
-    **GHOST_MANIFEST,
-)
-register(
-    "beehiiv",
-    BeehiivAPIAdapter,
-    dofollow=False,  # links via bhclick.com / link.mail.beehiiv.com tracking redirects
-    rationale=_R["beehiiv"],
-    referral_value="low",
-    **BEEHIIV_MANIFEST,
-)
-register(
     "segmentfault",
     SegmentFaultAPIAdapter,
     dofollow=False,  # link.segmentfault.com 302 interstitial (verified live)
@@ -220,14 +188,6 @@ register(
     rationale=_R["note"],
     referral_value="high",
     **NOTE_MANIFEST,
-)
-register(
-    "habr",
-    HabrAPIAdapter,
-    dofollow="uncertain",  # unverifiable (fetch blocked, no primary source)
-    rationale=_R["habr"],
-    referral_value="high",
-    **HABR_MANIFEST,
 )
 register(
     "jianshu",

@@ -38,8 +38,8 @@ ceiling = 580
 rationale = "11 shared helpers (cursor I/O, datetime normalisation, JSON read, anchor extraction, host_of, quarantine writer, checkpoint_event_timestamp, article_payload) extracted to events/_project_helpers.py (2026-05-26 Plan 2026-05-26-004). projector.py dropped from 671 to 542 SLOC — holds flush_for dispatch, 3 reducers, record_projection_health, project_run_safe, and ProjectionResult only. Ceiling 580 = round_up_to_10(542+30) per policy."
 
 [files."src/backlink_publisher/publishing/adapters/__init__.py"]
-ceiling = 680
-rationale = "verify-consolidation R2 (2026-05-26): 6 shared VerifyResult helpers eliminate 6-line boilerplate across 4 _verify_*_live() functions; verify_adapter_setup() if/elif chain (110 LOC, 8 branches) converted to _SETUP_CHECKS dispatch table + 3 extracted helper functions. SLOC dropped 726 → 646 (−80, −11%). Ceiling 680 = round_up_to_10(646+30) per policy."
+ceiling = 640
+rationale = "Removed beehiiv/cnblogs/habr/ghost channels (2026-05-26): operator has no accounts on these four, so their register() blocks + manifest/adapter imports were deleted (28 → 24 platforms). SLOC dropped 646 → 607 (−39). Ceiling re-tightened 680 → 640 = round_up_to_10(607+30) per policy."
 
 [files."src/backlink_publisher/cli/phase0_seal.py"]
 ceiling = 465

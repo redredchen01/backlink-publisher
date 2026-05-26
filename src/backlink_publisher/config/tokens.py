@@ -33,8 +33,6 @@ def snapshot_token_revs() -> dict[str, int]:
         ("writeas", "writeas-token.json"),
         ("tumblr", "tumblr-credentials.json"),
         ("linkedin", "linkedin-token.json"),
-        ("ghost", "ghost-token.json"),
-        ("beehiiv", "beehiiv-token.json"),
     ]:
         token = _load_token(None, filename)
         if token:

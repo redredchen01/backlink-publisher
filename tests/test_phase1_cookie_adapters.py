@@ -29,7 +29,6 @@ COOKIE_ADAPTERS = [
     ("csdn", "CSDNAPIAdapter"),
     ("segmentfault", "SegmentFaultAPIAdapter"),
     ("note", "NoteAPIAdapter"),
-    ("habr", "HabrAPIAdapter"),
     ("pikabu", "PikabuAPIAdapter"),
 ]
 
