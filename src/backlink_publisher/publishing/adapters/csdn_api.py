@@ -168,7 +168,7 @@ class CSDNAPIAdapter(Publisher):
             adapter="csdn", phase="done", id=article_id, elapsed_ms=elapsed,
         )))
         return AdapterResult(
-            status="published",
+            status="drafted" if mode == "draft" else "published",
             adapter="csdn",
             platform="csdn",
             published_url=published_url,

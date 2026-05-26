@@ -75,3 +75,21 @@ def test_missing_urn_header_and_body_raises(config_with_token):
 def test_missing_token_raises_dependency_error(config):
     with pytest.raises(DependencyError):
         LinkedInAPIAdapter().publish(_payload(), "publish", config)
+
+
+def test_draft_mode_reports_drafted(config_with_token):
+    """P1#13: draft mode sets lifecycleState=DRAFT, so the result must
+    report 'drafted', not 'published'."""
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["body"] = json
+        return _resp(status=201, headers={"x-restli-id": "urn:li:share:1"}, body=None)
+
+    with patch(
+        "backlink_publisher.publishing.adapters.linkedin_api.requests.post",
+        side_effect=fake_post,
+    ):
+        result = LinkedInAPIAdapter().publish(_payload(), "draft", config_with_token)
+    assert captured["body"]["lifecycleState"] == "DRAFT"
+    assert result.status == "drafted"

@@ -125,6 +125,24 @@ class TestHappyPath:
         assert result.platform == "ghost"
         assert result.published_url == f"{_SITE_URL}/my-post/"
 
+    def test_draft_mode_reports_drafted(self, config_with_creds):
+        """P1#13: draft mode sends status=draft to the API, so the result
+        must report 'drafted' — not 'published' (which the events projector
+        would miscount as a live backlink)."""
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["body"] = json
+            return _ok_response()
+
+        with patch(
+            "backlink_publisher.publishing.adapters.ghost_api.requests.post",
+            side_effect=fake_post,
+        ):
+            result = GhostAPIAdapter().publish(_payload(), "draft", config_with_creds)
+        assert captured["body"]["posts"][0]["status"] == "draft"
+        assert result.status == "drafted"
+
 
 class TestDependencyErrors:
     def test_missing_cred_file_unavailable_and_raises(self, config):

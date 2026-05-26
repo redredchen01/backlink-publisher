@@ -190,7 +190,7 @@ class LinkedInAPIAdapter(Publisher):
             adapter="linkedin", phase="done", id=article_id, elapsed_ms=elapsed,
         )))
         return AdapterResult(
-            status="published",
+            status="drafted" if mode == "draft" else "published",
             adapter="linkedin",
             platform="linkedin",
             published_url=published_url,
