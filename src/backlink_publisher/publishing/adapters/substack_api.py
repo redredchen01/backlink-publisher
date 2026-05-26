@@ -65,10 +65,12 @@ class SubstackAPIAdapter(Publisher):
     and a title. The adapter creates a draft that can be manually
     published from the Substack dashboard.
 
-    Substack does not modify outbound links so registered with
-    ``dofollow=True``. Note: Substack's API is limited; for fully
-    automated publishing (not just drafts), the operator may need to
-    use the RSS-import approach instead.
+    Registered ``dofollow="uncertain"`` (2026-05-26 audit): a 3rd-party
+    live check found Substack post bodies carry no rel, but an OUR-pipeline
+    canary hasn't confirmed it. Note: Substack's API is limited; this
+    adapter only creates drafts (it reports ``status="drafted"``), and
+    fully automated publishing would need a verified two-step flow or the
+    RSS-import approach instead.
     """
 
     post_publish_delay_seconds: int = _POST_PUBLISH_DELAY_S
@@ -103,6 +105,11 @@ class SubstackAPIAdapter(Publisher):
         }
 
         if mode == "publish":
+            # Best-effort hint only. This endpoint is /api/v1/drafts and its
+            # response does not confirm publication, so we cannot verify the
+            # post actually went live — the reported status stays "drafted"
+            # (see the return below). Operator confirms/publishes from the
+            # Substack dashboard, per the class docstring.
             body_json["publish"] = True
             body_json["send"] = False  # don't email — backlinks are SEO, not broadcast
 
@@ -125,7 +132,7 @@ class SubstackAPIAdapter(Publisher):
             )
             if resp.status_code in (401, 403):
                 raise ExternalServiceError(
-                    "Substack API rejected (HTTP {resp.status_code}) — "
+                    f"Substack API rejected (HTTP {resp.status_code}) — "
                     "cookies expired. Re-export cookies from substack.com."
                 )
             if resp.status_code not in (200, 201):
@@ -174,7 +181,11 @@ class SubstackAPIAdapter(Publisher):
             adapter="substack", phase="done", id=article_id, elapsed_ms=elapsed,
         )))
         return AdapterResult(
-            status="drafted" if mode == "draft" else "published",
+            # Always "drafted": the only confirmed action is draft creation
+            # via /api/v1/drafts. Reporting "published" in publish mode was a
+            # lie — the response never confirms a live post, and the events
+            # projector would miscount it as a published backlink.
+            status="drafted",
             adapter="substack",
             platform="substack",
             published_url=published_url,

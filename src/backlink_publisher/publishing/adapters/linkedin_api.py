@@ -148,16 +148,21 @@ class LinkedInAPIAdapter(Publisher):
                 raise ExternalServiceError(
                     f"LinkedIn API returned HTTP {resp.status_code}: {resp.text[:200]}"
                 )
-            try:
-                resp_body = resp.json()
-            except ValueError as exc:
-                raise ExternalServiceError(
-                    f"LinkedIn returned non-JSON response: {exc}"
-                )
-            post_id = resp_body.get("id", "")
+            # LinkedIn POST /v2/posts returns 201 with an EMPTY body; the
+            # created post URN is in the ``x-restli-id`` response header, not
+            # the JSON body. (requests' headers are case-insensitive.)
+            # Reading resp.json()["id"] therefore failed on every success.
+            post_id = (resp.headers.get("x-restli-id") or "").strip()
+            if not post_id:
+                # Fallback: some API versions / proxies echo an id in a body.
+                try:
+                    post_id = ((resp.json() or {}).get("id") or "").strip()
+                except ValueError:
+                    post_id = ""
             if not post_id:
                 raise ExternalServiceError(
-                    "LinkedIn createPost returned no ID"
+                    "LinkedIn createPost returned no post URN "
+                    "(x-restli-id header absent and no body id)"
                 )
             return f"https://www.linkedin.com/feed/update/{post_id}"
 

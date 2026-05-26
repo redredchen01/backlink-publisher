@@ -79,6 +79,18 @@ class _TimeoutTransport(SafeTransport):
 
 
 class CNBlogsAPIAdapter(Publisher):
+    @classmethod
+    def available(cls, config: Config) -> bool:
+        """Report availability from the credentials file's presence.
+
+        Without this override the base ``available()`` returns True, so a
+        missing-credentials run reaches ``publish()`` and raises
+        DependencyError — which aborts the entire batch (exit 3) instead of
+        skipping this one channel. Mirrors every other token/credential
+        adapter (ghost, notion, ...).
+        """
+        return _credentials_path(config).exists()
+
     def _metaweblog_url(self, username: str) -> str:
         return f"https://rpc.cnblogs.com/metaweblog/{username}"
 
