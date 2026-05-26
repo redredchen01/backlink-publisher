@@ -301,15 +301,15 @@ def _write_quarantines(store: EventStore, pending: list[dict[str, Any]]) -> None
         try:
             store.quarantine(**q)
             _log.warning(
-                "RECON projector: quarantined unmapped %s status %r (run=%s id=%s)",
-                q.get("source"), q.get("source_status"),
+                "RECON projector: quarantined [%s] %s (run=%s id=%s)",
+                q.get("failure_type"), q.get("reason"),
                 q.get("run_id"), q.get("record_identity"),
             )
         except Exception as exc:  # noqa: BLE001 — never let quarantine abort the run
             _log.error(
-                "RECON projector: FAILED to quarantine unmapped %s status %r "
-                "(run=%s id=%s): %s — continuing",
-                q.get("source"), q.get("source_status"),
+                "RECON projector: FAILED to quarantine [%s] %s (run=%s id=%s): "
+                "%s — continuing",
+                q.get("failure_type"), q.get("reason"),
                 q.get("run_id"), q.get("record_identity"), exc,
             )
 
@@ -397,6 +397,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     ts_raw=ts_raw,
                     ts_utc=ts_utc,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
 
@@ -457,6 +458,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     ts_raw=ts_raw,
                     ts_utc=ts_utc,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
 
@@ -482,6 +484,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     ts_raw=ts_raw,
                     ts_utc=ts_utc,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
 
@@ -594,6 +597,11 @@ def _project_history(
     articles_inserted = 0
     skipped_due_to_dedup = 0
     records_considered = 0
+    # R9 required-field misses (deferred like the checkpoint reducer's, since
+    # quarantine() opens its own connection — writing under the held WAL write
+    # lock would deadlock). Today's emitters satisfy their floors, so this stays
+    # empty unless a future edit drops a load-bearing payload key.
+    pending_quarantines: list[dict[str, Any]] = []
 
     with store.connect() as conn:
         prior = _cursor_load(conn, source)
@@ -645,6 +653,7 @@ def _project_history(
                         ts_raw=ts_raw,
                         ts_utc=ts_utc,
                         conn=conn,
+                        pending_quarantines=pending_quarantines,
                     )
                     events_inserted += 1
                     next_seen.append(row_id)
@@ -681,6 +690,7 @@ def _project_history(
                         ts_raw=ts_raw,
                         ts_utc=ts_utc,
                         conn=conn,
+                        pending_quarantines=pending_quarantines,
                     )
                     events_inserted += 1
                     emitted_any = True
@@ -707,6 +717,7 @@ def _project_history(
                     ts_raw=ts_raw,
                     ts_utc=ts_utc,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
                 next_seen.append(row_id)
@@ -725,11 +736,14 @@ def _project_history(
             mtime=path.stat().st_mtime,
         )
 
+    _write_quarantines(store, pending_quarantines)
+
     return ProjectionResult(
         events_inserted=events_inserted,
         articles_inserted=articles_inserted,
         skipped_due_to_dedup=skipped_due_to_dedup,
         cursor_updated=True,
+        quarantined=len(pending_quarantines),
         records_considered=records_considered,
     )
 
@@ -748,6 +762,10 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
     articles_inserted = 0
     skipped_due_to_dedup = 0
     records_considered = 0
+    # R9 required-field misses, deferred past the reducer transaction (see the
+    # history/checkpoint reducers — quarantine() would deadlock under the held
+    # WAL write lock). Empty unless a future edit drops a floor field.
+    pending_quarantines: list[dict[str, Any]] = []
 
     with store.connect() as conn:
         prior = _cursor_load(conn, source)
@@ -796,6 +814,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                         ts_raw=ts_raw,
                         ts_utc=ts_utc,
                         conn=conn,
+                        pending_quarantines=pending_quarantines,
                     )
                     events_inserted += 1
                     continue
@@ -826,6 +845,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                         ts_raw=ts_raw,
                         ts_utc=ts_utc,
                         conn=conn,
+                        pending_quarantines=pending_quarantines,
                     )
                     events_inserted += 1
 
@@ -838,6 +858,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                     target_url=target_url,
                     host=host,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
 
@@ -852,6 +873,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                     target_url=target_url,
                     host=host,
                     conn=conn,
+                    pending_quarantines=pending_quarantines,
                 )
                 events_inserted += 1
 
@@ -869,10 +891,13 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
             mtime=path.stat().st_mtime,
         )
 
+    _write_quarantines(store, pending_quarantines)
+
     return ProjectionResult(
         events_inserted=events_inserted,
         articles_inserted=articles_inserted,
         skipped_due_to_dedup=skipped_due_to_dedup,
         cursor_updated=True,
+        quarantined=len(pending_quarantines),
         records_considered=records_considered,
     )

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backlink_publisher.events import EventStore
+from backlink_publisher.events import EventStore, kinds
 from webui_app import health_metrics as hm
 
 # Wide-open lower bound so the window never excludes a seeded row unless a test
@@ -39,9 +39,14 @@ def _append(
     error_class: str | None = None,
     ts_utc: str = "2026-05-20T10:00:00+00:00",
 ) -> int:
-    payload: dict[str, object] = {"platform": platform}
-    if error_class is not None:
-        payload["error_class"] = error_class
+    # error_class is always present (value may be None — the "unclassified"
+    # bucket); a present-but-None key satisfies the presence-only floor.
+    payload: dict[str, object] = {"platform": platform, "error_class": error_class}
+    # Satisfy the kind's R9 required-field floor with placeholders so these
+    # metric tests exercise the real insert path instead of being quarantined.
+    # Presence-only check, so the values are irrelevant to what the metrics read.
+    for field in kinds.REQUIRED_FIELDS.get(kind, frozenset()):
+        payload.setdefault(field, f"_test_{field}")
     return store.append(kind, payload, target_url=target_url, ts_utc=ts_utc)
 
 

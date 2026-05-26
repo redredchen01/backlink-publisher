@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from backlink_publisher.events import EventStore
+from backlink_publisher.events import EventStore, kinds
 from backlink_publisher.events.reconcile import ReadProjectionResult
 
 
@@ -38,6 +38,10 @@ def _seed_events(rows: list[dict]) -> None:
         payload = {"platform": r.get("platform", "medium")}
         if "error_class" in r:
             payload["error_class"] = r["error_class"]
+        # Satisfy the kind's R9 required-field floor with placeholders so the
+        # seeded events take the real insert path instead of being quarantined.
+        for field in kinds.REQUIRED_FIELDS.get(r["kind"], frozenset()):
+            payload.setdefault(field, f"_test_{field}")
         store.append(
             r["kind"],
             payload,
