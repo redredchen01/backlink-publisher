@@ -110,7 +110,7 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
     """
     # Lazy import to avoid circular: webui_app → publishing → webui_app helpers
     from backlink_publisher.publishing.adapters import verify_adapter_setup
-    from backlink_publisher.publishing.registry import dofollow_status
+    from backlink_publisher.publishing.registry import auth_type, dofollow_status
 
     base: dict[str, Any] = {
         "channel": name,
@@ -120,6 +120,8 @@ def get_channel_status(name: str, config: Config) -> dict[str, Any]:
         "last_verify_result": "never",
         "dofollow": dofollow_status(name),
         "publish_backend": _publish_backend_for(name),
+        # Plan 2026-05-26-002 Unit 2/3 — drives binding-UI template selection.
+        "auth_type": auth_type(name),
         "blockers": [],
     }
 

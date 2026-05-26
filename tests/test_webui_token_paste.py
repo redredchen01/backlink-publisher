@@ -157,9 +157,14 @@ class TestSettingsRenderWithCards:
         # Units 4b/4c shipped devto + mastodon as chrome-publish channels —
         # both must appear in the binding dashboard. wpcom permanently rejected;
         # All retired channels absent from token paste page.
+        #
+        # Plan 2026-05-26-002 Unit 3: mastodon has no #section-channels card, so
+        # it no longer emits a dead "#channel-mastodon" Configure anchor — it
+        # appears as a dashboard card via its data-channel attribute (with a
+        # deferred-bind stub). devto keeps its real card (#channel-devto).
         resp = client.get("/settings")
         assert b'channel-devto' in resp.data
-        assert b'channel-mastodon' in resp.data
+        assert b'data-channel="mastodon"' in resp.data
         assert b'channel-wpcom' not in resp.data
 
     def test_settings_page_includes_notion_card(self, client):
