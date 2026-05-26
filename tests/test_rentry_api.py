@@ -53,6 +53,20 @@ def test_api_error_status_raises_external_service_error():
             RentryAPIAdapter().publish(_payload(), "publish", MagicMock())
 
 
+def test_post_429_not_retried_no_duplicate_paste():
+    """P2: the non-idempotent create POST must run exactly once even on a
+    429 — retrying it (the old behavior, when the whole GET+POST was inside
+    retry_transient_call) would create a duplicate paste."""
+    post = MagicMock()
+    post.status_code = 429
+    post.text = "rate limited"
+    post_mock = MagicMock(return_value=post)
+    with patch(_GET, return_value=_home_ok()), patch(_POST, post_mock):
+        with pytest.raises(ExternalServiceError):
+            RentryAPIAdapter().publish(_payload(), "publish", MagicMock())
+    assert post_mock.call_count == 1
+
+
 def test_happy_path_returns_adapter_result():
     post = MagicMock()
     post.status_code = 200

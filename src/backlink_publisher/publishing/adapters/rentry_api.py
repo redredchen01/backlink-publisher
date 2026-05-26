@@ -60,8 +60,9 @@ class RentryAPIAdapter(Publisher):
         body = payload.get("content_markdown") or extract_publish_html(payload, "rentry") or ""
         content = f"# {title}\n\n{body}"
 
-        # Step 1: fetch homepage for CSRF token
-        def execute():
+        # Step 1: fetch the homepage for a CSRF token. This GET is
+        # idempotent, so it is safe to retry on transient (429) errors.
+        def _fetch_csrf():
             home_resp = requests.get(
                 RENTRY_BASE,
                 timeout=_HTTP_TIMEOUT_S,
@@ -78,10 +79,25 @@ class RentryAPIAdapter(Publisher):
                 raise ExternalServiceError(
                     "Could not extract CSRF token from Rentry homepage"
                 )
-            csrf_token = match.group(1)
-            cookies = home_resp.cookies.get_dict()
+            return match.group(1), home_resp.cookies.get_dict()
 
-            # Step 2: create the paste
+        try:
+            csrf_token, cookies = retry_transient_call(
+                _fetch_csrf,
+                is_retryable=lambda exc: (
+                    isinstance(exc, ExternalServiceError)
+                    and any(
+                        f"HTTP {code}" in str(exc)
+                        for code in RETRYABLE_HTTP_STATUSES
+                    )
+                ),
+                adapter="rentry",
+            )
+
+            # Step 2: create the paste — exactly ONCE. Paste creation has no
+            # idempotency key, so retrying it on a transient 429 would create
+            # a DUPLICATE paste. The non-idempotent POST is deliberately
+            # outside retry_transient_call (P2 fix).
             form_data = {
                 "csrfmiddlewaretoken": csrf_token,
                 "text": content,
@@ -90,7 +106,6 @@ class RentryAPIAdapter(Publisher):
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Referer": RENTRY_BASE,
             }
-
             post_resp = requests.post(
                 f"{RENTRY_BASE}/api/new",
                 headers=post_headers,
@@ -112,27 +127,11 @@ class RentryAPIAdapter(Publisher):
             if result.get("status") != "created":
                 msg = result.get("message", post_resp.text[:200])
                 raise ExternalServiceError(f"Rentry API error: {msg}")
-
             edit_code = result.get("edit_code", "")
             url_id = result.get("url_id", result.get("id", edit_code))
             if not url_id:
                 raise ExternalServiceError("Rentry create returned no ID")
-
             published_url = f"{RENTRY_BASE}/{url_id}"
-            return published_url
-
-        try:
-            published_url = retry_transient_call(
-                execute,
-                is_retryable=lambda exc: (
-                    isinstance(exc, ExternalServiceError)
-                    and any(
-                        f"HTTP {code}" in str(exc)
-                        for code in RETRYABLE_HTTP_STATUSES
-                    )
-                ),
-                adapter="rentry",
-            )
         except (ExternalServiceError):
             raise
         except Exception as exc:
