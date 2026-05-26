@@ -39,7 +39,11 @@ def store(tmp_path):
     _add_article(s, "https://velog.io/l3a", T2)
     _add_article(s, "https://velog.io/l3b", T2)
     # T3: attempted (publish.failed) but never published → 0/0
-    s.append("publish.failed", {"reason": "boom"}, target_url=T3)
+    s.append(
+        "publish.failed",
+        {"error_class": "RuntimeError", "error_message_clean": "boom"},
+        target_url=T3,
+    )
     return s
 
 

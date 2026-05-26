@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from ..config import _config_dir
+from . import kinds
 from . import schema as _schema
 
 #: Default filename inside ``_config_dir()``.
@@ -298,13 +299,14 @@ class EventStore:
         ts_raw: str | None = None,
         ts_utc: str | None = None,
         conn: sqlite3.Connection | None = None,
+        pending_quarantines: list[dict[str, Any]] | None = None,
     ) -> int:
         """INSERT one row into ``events`` and return its id.
 
         ``payload`` is JSON-serialised with ``sort_keys=True`` so a given
         logical event always produces the same byte string regardless of
         dict construction order — eases round-trip tests and diff
-        tooling. Whitelist-based field pruning lands in U2.
+        tooling.
 
         ``ts_raw`` defaults to ``ts_utc``; both default to "now" UTC. The
         projector (U4) supplies the source's original timestamp.
@@ -315,11 +317,47 @@ class EventStore:
         ``conn`` is ``None`` a private connection is opened, used, and
         committed; callers are then *not* protected against partial
         writes across multiple operations.
+
+        R9 required-field floor (see ``kinds.REQUIRED_FIELDS``): a payload
+        missing a floor field for its ``kind`` is **quarantined for triage
+        instead of written** — a malformed event must not enter events.db as
+        if it were truthful. The method then returns ``-1`` (no row inserted).
+        Because ``quarantine()`` always opens its own private connection (it
+        must never share a reducer ``conn`` — a rollback would discard the
+        quarantine row), the miss is handled by caller context:
+
+        * ``pending_quarantines`` provided (projector reducer holding the WAL
+          write lock) → the record is appended to that sink and the reducer
+          flushes it via ``_write_quarantines`` **after** its transaction
+          commits (writing now would deadlock);
+        * ``conn`` is ``None`` (direct caller, e.g. image_gen) → quarantined
+          immediately on a private connection (safe; no held lock);
+        * ``conn`` set but no sink → ``ValueError`` (a misuse guard: we can
+          neither quarantine inline nor share the conn safely).
         """
         if ts_utc is None:
             ts_utc = _now_iso_utc()
         if ts_raw is None:
             ts_raw = ts_utc
+
+        missing = kinds.missing_required_fields(kind, payload)
+        if missing:
+            record = self._missing_field_record(
+                kind, payload, missing, run_id=run_id, target_url=target_url
+            )
+            if pending_quarantines is not None:
+                pending_quarantines.append(record)
+            elif conn is not None:
+                raise ValueError(
+                    f"append({kind!r}) on a shared connection is missing "
+                    f"required field(s) {sorted(missing)} but no "
+                    "pending_quarantines sink was provided to defer the "
+                    "quarantine write safely"
+                )
+            else:
+                self.quarantine(**record)
+            return -1  # sentinel: payload quarantined, no event row written
+
         payload_json = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         params = (
             ts_raw, ts_utc, run_id, kind, target_url, host,
@@ -423,6 +461,36 @@ class EventStore:
                 return list(conn.execute(sql, params))
 
         return _retry_sqlite(_op, sleep_fn=self._sleep_fn)
+
+    @staticmethod
+    def _missing_field_record(
+        kind: str,
+        payload: dict[str, Any],
+        missing: frozenset[str],
+        *,
+        run_id: str | None,
+        target_url: str | None,
+    ) -> dict[str, Any]:
+        """Build ``quarantine()`` kwargs for an R9 required-field miss.
+
+        ``record_identity`` falls back ``target_url`` → payload ``draft_id`` →
+        ``None``. A null identity is tolerated: ``quarantine()`` folds NULLs
+        into the dedup key, so a repeated code-level miss (e.g. an image_gen
+        caller with no run id) collapses to one row rather than flooding.
+        ``source`` is the kind itself so quarantine_log triage shows which
+        writer drifted; ``failure_type="missing_field"`` discriminates these
+        from the projector's ``"unmapped_status"`` rows (R6 vs R9).
+        """
+        identity = target_url or payload.get("draft_id")
+        return {
+            "reason": f"missing_field: {kind} missing {sorted(missing)}",
+            "failure_type": "missing_field",
+            "source": kind,
+            "run_id": run_id,
+            "source_status": None,
+            "record_identity": identity if isinstance(identity, str) else None,
+            "raw_payload": dict(payload),
+        }
 
     def quarantine(
         self,

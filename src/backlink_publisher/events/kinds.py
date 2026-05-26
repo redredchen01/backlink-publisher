@@ -72,6 +72,63 @@ KINDS: Final[frozenset[str]] = frozenset(
 )
 
 
+# --- Seam A: per-kind required-field floors (R2/R9) ----------------------
+#
+# The *floor* is the minimal set of payload keys an ``EventStore.append`` of
+# this kind must carry — the load-bearing field(s) a downstream reader needs to
+# make sense of the row (R2). It is deliberately a **subset** of the
+# intersection of what today's emitters send, not the full intersection: a
+# lightweight tripwire, not a schema. Two consequences:
+#
+#   * Zero false-positives on real writers — every current emitter already
+#     sends its floor field(s), so today nothing trips (verified by the R9
+#     projector tests). The floor only fires when a *future* edit drops the
+#     load-bearing key, which is exactly the drift R9 guards.
+#   * Optional enrichment stays optional — a caller may append a sparse payload
+#     (e.g. ``publish.intent`` with only ``target_url``, no ``title``/
+#     ``platform``) without being quarantined. Requiring every emitter key
+#     would reject legitimate sparse writes.
+#
+# Where a kind has several emitters with different shapes the floor must be a
+# key common to all of them: ``publish.confirmed`` is emitted by the checkpoint,
+# history AND drafts reducers, and only ``live_url`` is shared (drafts carries
+# ``draft_id`` not ``target_url``), so its floor is ``live_url``.
+#
+# The check is presence-only: ``None`` is a valid value for a present key, so
+# the legitimate ``{"live_url": None, ...}`` shape (a published row with no live
+# URL) passes. A floor entry exists for every kind in ``KINDS`` (asserted by the
+# R2 gate) so a new kind can't ship without declaring one.
+REQUIRED_FIELDS: Final[dict[str, frozenset[str]]] = {
+    PUBLISH_INTENT: frozenset({"target_url"}),
+    PUBLISH_CONFIRMED: frozenset({"live_url"}),  # only key shared by 3 emitters
+    PUBLISH_UNVERIFIED: frozenset({"live_url"}),
+    PUBLISH_FAILED: frozenset({"error_class", "error_message_clean"}),
+    DRAFT_CREATED: frozenset({"draft_id"}),
+    DRAFT_SCHEDULED: frozenset({"draft_id"}),
+    BANNER_EMBEDDED: frozenset({"platform"}),
+    BANNER_SKIPPED_NO_METHOD: frozenset({"platform"}),
+    BANNER_SKIPPED_NO_ARTIFACT: frozenset({"platform"}),
+    BANNER_SOURCE_URL_FALLBACK: frozenset({"platform", "reason"}),
+    BANNER_FAILED: frozenset({"platform", "reason"}),
+    IMAGE_GEN_INVOKED: frozenset({"prompt_sha"}),
+    IMAGE_GEN_CAPPED: frozenset({"reason"}),
+    IMAGE_GEN_DISABLED_AUTO: frozenset({"threshold"}),
+}
+
+
+def missing_required_fields(kind: str, payload: dict[str, object]) -> frozenset[str]:
+    """Return the floor fields ``payload`` is missing for ``kind`` (R9).
+
+    Presence-only: a key whose value is ``None`` counts as present, so the
+    legitimate ``publish.confirmed`` shape ``{"live_url": None, ...}`` passes.
+    An empty result means the payload satisfies the floor. A ``kind`` with no
+    declared floor returns empty (no enforcement) — but every member of
+    ``KINDS`` has a floor, asserted by the R2 gate.
+    """
+    floor = REQUIRED_FIELDS.get(kind, frozenset())
+    return frozenset(field for field in floor if field not in payload)
+
+
 # --- Seam B: classification outcome sentinels ----------------------------
 
 

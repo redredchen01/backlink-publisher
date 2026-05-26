@@ -121,7 +121,7 @@ def test_payload_size_is_not_capped_at_store_layer(tmp_path):
     store = EventStore()
     event_id = store.append(
         kind="publish.intent",
-        payload={"big": big_blob},
+        payload={"big": big_blob, "target_url": "https://x.com/a"},
     )
     rows = store.query(
         "SELECT payload_json FROM events WHERE id = ?", (event_id,)
@@ -132,7 +132,7 @@ def test_payload_size_is_not_capped_at_store_layer(tmp_path):
 
 def test_connect_rebuilds_schema_after_db_deletion(tmp_path):
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert store.path.exists()
 
     # Delete the database file and any WAL sidecars.
@@ -144,7 +144,10 @@ def test_connect_rebuilds_schema_after_db_deletion(tmp_path):
     assert not store.path.exists()
 
     # Next connect should recreate the schema cleanly.
-    event_id = store.append(kind="publish.intent", payload={"after": "reset"})
+    event_id = store.append(
+        kind="publish.intent",
+        payload={"after": "reset", "target_url": "https://x.com/a"},
+    )
     assert event_id == 1, "fresh DB should restart AUTOINCREMENT at 1"
     rows = store.query("SELECT version FROM schema_version")
     assert rows[0]["version"] == 2
@@ -165,7 +168,7 @@ def test_schema_version_zero_upgrades_to_two(tmp_path):
 
 def test_wal_mode_is_enabled(tmp_path):
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     with store.connect() as conn:
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
@@ -175,7 +178,7 @@ def test_db_file_mode_is_0600_on_first_create(tmp_path):
     if sys.platform == "win32":
         pytest.skip("POSIX file mode is not meaningful on Windows")
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     mode = store.path.stat().st_mode & 0o777
     assert mode == 0o600, f"expected 0o600, got {oct(mode)}"
 
@@ -187,7 +190,7 @@ def test_parent_dir_mode_is_0700_on_first_create(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(nested))
     assert not nested.exists()
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert nested.exists()
     mode = nested.stat().st_mode & 0o777
     assert mode == 0o700, f"expected 0o700, got {oct(mode)}"
@@ -205,7 +208,7 @@ def test_parent_dir_tightened_when_pre_existing_with_wider_mode(
     pre.mkdir(mode=0o755)
     monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(pre))
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     mode = pre.stat().st_mode & 0o777
     assert mode == 0o700, f"expected 0o700, got {oct(mode)}"
 
@@ -214,10 +217,10 @@ def test_wal_and_shm_side_files_are_0600(tmp_path):
     if sys.platform == "win32":
         pytest.skip("POSIX file mode is not meaningful on Windows")
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     # Open a second connect to force WAL/SHM materialisation if not
     # already present after a single commit.
-    store.append(kind="publish.intent", payload={"b": 2})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/b"})
     for suffix in ("-wal", "-shm"):
         side = store.path.with_name(store.path.name + suffix)
         if side.exists():
@@ -238,7 +241,7 @@ def test_macos_xattr_attempted_on_first_create(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store_module.subprocess, "run", fake_run)
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert any(
         "com.apple.metadata:com_apple_backup_excludeItem" in cmd
         for cmd in calls
@@ -255,7 +258,7 @@ def test_macos_xattr_failure_is_silent(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module.subprocess, "run", fake_run)
     store = EventStore()
     # Must not propagate the FileNotFoundError to the caller.
-    event_id = store.append(kind="publish.intent", payload={"a": 1})
+    event_id = store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert event_id == 1
 
 
@@ -313,14 +316,14 @@ def test_append_actually_routes_through_retry_layer(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store_module.sqlite3, "connect", flaky_connect)
     store = EventStore(sleep_fn=lambda _s: None)
-    event_id = store.append(kind="publish.intent", payload={"a": 1})
+    event_id = store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert event_id > 0
     assert call_n["n"] >= 3, "append() should route through _retry_sqlite"
 
 
 def test_query_rejects_non_select_statement(tmp_path):
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     with pytest.raises(ValueError, match="SELECT-only"):
         store.query("DROP TABLE events")
     with pytest.raises(ValueError, match="SELECT-only"):
@@ -335,7 +338,7 @@ def test_query_rejects_non_select_statement(tmp_path):
 
 def test_query_accepts_select_and_with_select(tmp_path):
     store = EventStore()
-    store.append(kind="publish.intent", payload={"a": 1})
+    store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     rows = store.query("SELECT COUNT(*) AS n FROM events")
     assert rows[0]["n"] == 1
     rows = store.query(
@@ -354,7 +357,7 @@ def test_schema_too_new_raises_on_open(tmp_path):
     with store.connect() as conn:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (99,))
     with pytest.raises(schema_module.SchemaTooNewError):
-        store.append(kind="publish.intent", payload={"a": 1})
+        store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
 
 
 def test_retry_does_not_retry_non_transient_error():
@@ -398,7 +401,7 @@ def test_transaction_rolls_back_on_exception(tmp_path):
         with store.connect() as conn:
             store.append(
                 kind="publish.intent",
-                payload={"step": "before failure"},
+                payload={"step": "before failure", "target_url": "https://x.com/a"},
                 conn=conn,
             )
             # This will violate the live_url UNIQUE constraint and abort
@@ -424,7 +427,10 @@ def _child_writer(db_path: str, payload_marker: str) -> None:
     from pathlib import Path as _P
 
     s = _ES(path=_P(db_path))
-    s.append(kind="publish.intent", payload={"marker": payload_marker})
+    s.append(
+        kind="publish.intent",
+        payload={"marker": payload_marker, "target_url": "https://x.com/a"},
+    )
 
 
 def test_two_processes_can_append_serially(tmp_path):
@@ -433,7 +439,10 @@ def test_two_processes_can_append_serially(tmp_path):
     # event; both must succeed without crashing. Real lock contention
     # requires WAL + busy_timeout, both enabled.
     store = EventStore()
-    store.append(kind="publish.intent", payload={"warmup": True})  # create schema
+    store.append(
+        kind="publish.intent",
+        payload={"warmup": True, "target_url": "https://x.com/a"},
+    )  # create schema
 
     ctx = multiprocessing.get_context("spawn")
     procs = [
