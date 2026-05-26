@@ -1,21 +1,19 @@
 ---
 title: "refactor: retire orphaned quality guards (guardrail honesty)"
 type: refactor
-status: active
+status: shipped
 date: 2026-05-26
 origin: docs/brainstorms/2026-05-26-guardrail-honesty-requirements.md
 claims:
-  # Anchors that exist on origin/main now (deletion + modification targets). The
-  # to-be-created tests/test_no_orphaned_guard_scripts.py is intentionally NOT listed
-  # until it exists — it is added when status flips to shipped (AGENTS.md update-on-ship).
+  # Shipped via PR #252 (squash 4f1b38a). Re-resolved against post-merge origin/main:
+  # the surviving touched paths (the 3 deletion targets are intentionally gone).
   paths:
-    - scripts/check_imports.py
-    - scripts/check_monolith_budget.py
-    - docs/quality_optimization_plan.md
     - .coveragerc
     - .github/workflows/ci.yml
     - AGENTS.md
-  shas: []
+    - tests/test_no_orphaned_guard_scripts.py
+  shas:
+    - '4f1b38a'
 ---
 
 # refactor: retire orphaned quality guards (guardrail honesty)
