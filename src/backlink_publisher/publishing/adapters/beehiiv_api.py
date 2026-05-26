@@ -15,26 +15,32 @@ from .base import AdapterResult
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
 
-BEEHIIV_API_BASE = "https://api.beehiiv.com/v1"
+BEEHIIV_API_BASE = "https://api.beehiiv.com/v2"
 _HTTP_TIMEOUT_S = 30
 _POST_PUBLISH_DELAY_S = 30
 
 
 class BeehiivAPIAdapter(Publisher):
-    """Publishes to Beehiiv via REST API v1 (Bearer Token).
+    """Publishes to Beehiiv via REST API v2 (Bearer Token).
 
     Authentication: Beehiiv API key stored in a 0600 JSON file
     (``beehiiv-token.json``)::
 
-        { "api_key": "<your-api-key>", "publication_id": "<pub-id>" }
+        { "api_key": "<your-api-key>", "publication_id": "pub_<id>" }
 
-    The adapter uses the ``/v1/posts`` endpoint with a block-based JSON
-    body. Content is sent as a "paragraph" block.
+    Uses ``POST /v2/publications/{publication_id}/posts`` with a
+    ``body_content`` raw-HTML string (Beehiiv wraps it in an htmlSnippet
+    block server-side). The created post is returned in a ``data``
+    envelope: ``{"data": {"id": "post_..."}}``. ``status`` must be
+    ``"draft"`` or ``"confirmed"`` ("confirmed" = go live) — "published"
+    is not a valid Beehiiv status.
 
-    Beehiiv does not modify outbound links so registered with
-    ``dofollow=True``. Note: Beehiiv's API uses their custom block JSON
-    format — the adapter wraps the HTML content into a single text block
-    for simplicity.
+    NOTE: the Create Post endpoint is beta and Enterprise-only; non-
+    Enterprise accounts get HTTP 403.
+
+    Registered ``dofollow=False`` (2026-05-26 audit): Beehiiv routes
+    outbound links through tracking redirects (bhclick.com /
+    link.mail.beehiiv.com), so links do not transfer PageRank.
     """
 
     post_publish_delay_seconds: int = _POST_PUBLISH_DELAY_S
@@ -82,17 +88,15 @@ class BeehiivAPIAdapter(Publisher):
             or ""
         )
 
-        # Beehiiv posts API uses a block-based format.
-        # We wrap the HTML content in a single "text" block.
+        # body_content is a raw-HTML string Beehiiv wraps in an htmlSnippet
+        # block server-side (simpler + correct vs the old ad-hoc "content"
+        # blocks array, which v2 rejects). status must be "draft" or
+        # "confirmed" ("confirmed" = go live); the old "published" value is
+        # not a valid Beehiiv status and was silently rejected.
         body: dict[str, Any] = {
             "title": title,
-            "content": [
-                {
-                    "type": "paragraph",
-                    "content": content,
-                }
-            ],
-            "status": "draft" if mode == "draft" else "published",
+            "body_content": content,
+            "status": "draft" if mode == "draft" else "confirmed",
         }
 
         headers = {
@@ -113,6 +117,12 @@ class BeehiivAPIAdapter(Publisher):
                 raise ExternalServiceError(
                     "Beehiiv API rejected (HTTP 401) — check api_key"
                 )
+            if resp.status_code == 403:
+                raise ExternalServiceError(
+                    "Beehiiv API forbidden (HTTP 403) — the Create Post "
+                    "endpoint is beta and Enterprise-only; this account "
+                    "likely lacks access"
+                )
             if resp.status_code == 404:
                 raise ExternalServiceError(
                     "Beehiiv API returned 404 — check publication_id"
@@ -127,14 +137,19 @@ class BeehiivAPIAdapter(Publisher):
                 raise ExternalServiceError(
                     f"Beehiiv returned non-JSON response: {exc}"
                 )
-            post_id = resp_body.get("id", "")
+            # v2 wraps the created post in a "data" envelope:
+            # {"data": {"id": "post_..."}}. Reading top-level "id" (the old
+            # code) always missed it.
+            data = resp_body.get("data") or {}
+            post_id = (data.get("id") or "").strip()
             if not post_id:
                 raise ExternalServiceError(
-                    "Beehiiv createPost returned no ID"
+                    "Beehiiv createPost returned no post id in the data envelope"
                 )
             return (
-                resp_body.get("url")
-                or f"https://www.beehiiv.com/p/{post_id}"
+                data.get("web_url")
+                or data.get("url")
+                or f"https://app.beehiiv.com/posts/{post_id}"
             )
 
         try:
@@ -161,7 +176,9 @@ class BeehiivAPIAdapter(Publisher):
             adapter="beehiiv", phase="done", id=article_id, elapsed_ms=elapsed,
         )))
         return AdapterResult(
-            status="published",
+            # draft mode posts status="draft"; publish mode posts
+            # status="confirmed" (Beehiiv's go-live value).
+            status="drafted" if mode == "draft" else "published",
             adapter="beehiiv",
             platform="beehiiv",
             published_url=published_url,
