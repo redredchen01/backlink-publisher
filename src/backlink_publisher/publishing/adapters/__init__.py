@@ -118,22 +118,141 @@ from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
 # ``**<SLUG>_MANIFEST`` splat here. The dispatcher module stays focused
 # on register() wiring and adapter imports.
 register("blogger", BloggerAPIAdapter, dofollow=True, **BLOGGER_MANIFEST)
-register("wordpresscom", WordpresscomAPIAdapter, dofollow=True, **WORDPRESSCOM_MANIFEST)
-register("cnblogs", CNBlogsAPIAdapter, dofollow=True, **CNBLOGS_MANIFEST)
-register("hashnode", HashnodeGraphQLAdapter, dofollow=True, **HASHNODE_MANIFEST)
-register("writeas", WriteasAPIAdapter, dofollow=True, **WRITEAS_MANIFEST)
-register("juejin", JuejinAPIAdapter, dofollow=True, **JUEJIN_MANIFEST)
-register("csdn", CSDNAPIAdapter, dofollow=True, **CSDN_MANIFEST)
-register("zhihu", ZhihuAPIAdapter, dofollow=True, **ZHIHU_MANIFEST)
-register("ghost", GhostAPIAdapter, dofollow=True, **GHOST_MANIFEST)
-register("beehiiv", BeehiivAPIAdapter, dofollow=True, **BEEHIIV_MANIFEST)
-register("segmentfault", SegmentFaultAPIAdapter, dofollow=True, **SEGMENTFAULT_MANIFEST)
-register("substack", SubstackAPIAdapter, dofollow=True, **SUBSTACK_MANIFEST)
-register("note", NoteAPIAdapter, dofollow=True, **NOTE_MANIFEST)
-register("habr", HabrAPIAdapter, dofollow=True, **HABR_MANIFEST)
-register("jianshu", JianshuAPIAdapter, dofollow=True, **JIANSHU_MANIFEST)
-register("rentry", RentryAPIAdapter, dofollow=True, **RENTRY_MANIFEST)
-register("pikabu", PikabuAPIAdapter, dofollow=True, **PIKABU_MANIFEST)
+# Phase 1 dofollow truth audit (2026-05-26): every adapter below shipped
+# with bare ``dofollow=True`` and no evidence. Hard server-side
+# nofollow/redirect-interstitial evidence => dofollow=False; no
+# OUR-pipeline canary => dofollow="uncertain". Rationales live in
+# ``_nofollow_rationales`` (_R). Operator flips "uncertain" -> True by
+# running a fresh canary and reading verify_link_attributes (the
+# livejournal/txtfyi workflow).
+register(
+    "wordpresscom",
+    WordpresscomAPIAdapter,
+    dofollow="uncertain",  # evidence conflict (#108->#109 vs 2026-05 recheck); canary pending
+    rationale=_R["wordpresscom"],
+    referral_value="high",
+    **WORDPRESSCOM_MANIFEST,
+)
+register(
+    "cnblogs",
+    CNBlogsAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
+    rationale=_R["cnblogs"],
+    referral_value="high",
+    **CNBLOGS_MANIFEST,
+)
+register(
+    "hashnode",
+    HashnodeGraphQLAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; canary pending; retiring (PR #204)
+    rationale=_R["hashnode"],
+    referral_value="high",
+    **HASHNODE_MANIFEST,
+)
+register(
+    "writeas",
+    WriteasAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; canary pending; retiring (PR #202)
+    rationale=_R["writeas"],
+    referral_value="low",
+    **WRITEAS_MANIFEST,
+)
+register(
+    "juejin",
+    JuejinAPIAdapter,
+    dofollow=False,  # link.juejin.cn redirect interstitial strips equity
+    rationale=_R["juejin"],
+    referral_value="high",
+    **JUEJIN_MANIFEST,
+)
+register(
+    "csdn",
+    CSDNAPIAdapter,
+    dofollow=False,  # link.csdn.net redirect interstitial strips equity
+    rationale=_R["csdn"],
+    referral_value="high",
+    **CSDN_MANIFEST,
+)
+register(
+    "zhihu",
+    ZhihuAPIAdapter,
+    dofollow=False,  # link.zhihu.com 302 interstitial + rel=nofollow noreferrer
+    rationale=_R["zhihu"],
+    referral_value="high",
+    **ZHIHU_MANIFEST,
+)
+register(
+    "ghost",
+    GhostAPIAdapter,
+    dofollow="uncertain",  # instance-dependent; editor default follow but unverified path
+    rationale=_R["ghost"],
+    referral_value="high",
+    **GHOST_MANIFEST,
+)
+register(
+    "beehiiv",
+    BeehiivAPIAdapter,
+    dofollow=False,  # links via bhclick.com / link.mail.beehiiv.com tracking redirects
+    rationale=_R["beehiiv"],
+    referral_value="low",
+    **BEEHIIV_MANIFEST,
+)
+register(
+    "segmentfault",
+    SegmentFaultAPIAdapter,
+    dofollow=False,  # link.segmentfault.com 302 interstitial (verified live)
+    rationale=_R["segmentfault"],
+    referral_value="high",
+    **SEGMENTFAULT_MANIFEST,
+)
+register(
+    "substack",
+    SubstackAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
+    rationale=_R["substack"],
+    referral_value="high",
+    **SUBSTACK_MANIFEST,
+)
+register(
+    "note",
+    NoteAPIAdapter,
+    dofollow=False,  # note.com auto rel=nofollow on all links (JP SEO documented)
+    rationale=_R["note"],
+    referral_value="high",
+    **NOTE_MANIFEST,
+)
+register(
+    "habr",
+    HabrAPIAdapter,
+    dofollow="uncertain",  # unverifiable (fetch blocked, no primary source)
+    rationale=_R["habr"],
+    referral_value="high",
+    **HABR_MANIFEST,
+)
+register(
+    "jianshu",
+    JianshuAPIAdapter,
+    dofollow=False,  # link.jianshu.com/go redirect interstitial strips equity
+    rationale=_R["jianshu"],
+    referral_value="high",
+    **JIANSHU_MANIFEST,
+)
+register(
+    "rentry",
+    RentryAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow (rel=noreferrer); canary pending
+    rationale=_R["rentry"],
+    referral_value="low",
+    **RENTRY_MANIFEST,
+)
+register(
+    "pikabu",
+    PikabuAPIAdapter,
+    dofollow=False,  # /go/ and /link/ redirect interstitials (verified live)
+    rationale=_R["pikabu"],
+    referral_value="high",
+    **PIKABU_MANIFEST,
+)
 register(
     "linkedin",
     LinkedInAPIAdapter,

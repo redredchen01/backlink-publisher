@@ -138,9 +138,12 @@ _REJECTED_PLATFORMS: dict[str, str] = {
     # mastodon: re-registered as nofollow chrome-publish channel in
     #   Plan 2026-05-21-001 Unit 4c — Fediverse referral traffic +
     #   topical signal value despite the hardcoded nofollow attribute.
-    # wordpresscom: un-rejected 2026-05-25 — channel expansion plan
-    #   Phase 1 P0; new adapter registers with dofollow=True. The free
-    #   tier nofollow limitation is accepted for entity/D52DA referral value.
+    # wordpresscom: un-rejected 2026-05-25 (channel expansion Phase 1) and
+    #   re-registered. The 2026-05-26 dofollow audit corrected its claim
+    #   from dofollow=True to dofollow="uncertain": this project's
+    #   PR #108->#109 observed free-tier rel=nofollow, but a 2026-05 recheck
+    #   found nofollow opt-in only — the conflict is resolved by an
+    #   operator canary, not by re-rejecting. See _R["wordpresscom"].
 }
 
 
