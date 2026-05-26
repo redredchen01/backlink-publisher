@@ -26,7 +26,7 @@ from typing import Any, Callable, Literal, Optional
 
 from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
-from ..registry import dispatch, register, registered_platforms
+from ..registry import _REGISTRY, dispatch, register, registered_platforms
 from .._manifests import (
     BEEHIIV_MANIFEST,
     BLOGGER_MANIFEST,
@@ -367,14 +367,54 @@ def verify_adapter_setup(
     if mode == "dry-run":
         return _verify_dry_run(platform, config, payload or {})
 
-    # mode == "offline" — dispatch table
+    # mode == "offline" — dispatch table first, then registry-driven fallback
     check = _SETUP_CHECKS.get(platform)
-    if check is None:
+    if check is not None:
+        error = check(config)
+        if error:
+            raise DependencyError(error)
+        return None
+
+    # ── Plan 2026-05-26-002 Unit 1: registry-driven fallback ──────────────
+    # Platforms not in _SETUP_CHECKS delegate to their adapter chain's
+    # ``available(config)`` — EXCEPT two whose ``available()`` does not reflect
+    # per-account binding and would false-positive as "bound":
+    #   • livejournal — USERPASS adapter inherits base ``available()`` (always
+    #     True); probe its stored credential file instead.
+    #   • mastodon    — chrome dispatcher gates on environment, not login;
+    #     probe its per-channel Chrome profile instead.
+    # Delegating ``available()`` is correct for the rest: the credential
+    # adapters return False when unconfigured, and the ANON adapters
+    # (txtfyi/rentry) return True ("免绑定·就绪"). Replaces the old terminal
+    # raise that misreported 20 registered channels as "No adapter configured".
+    if platform not in registered_platforms():
         raise DependencyError(f"No adapter configured for platform: {platform}")
-    error = check(config)
-    if error:
-        raise DependencyError(error)
-    return None
+
+    if platform == "livejournal":
+        cred = config.config_dir / "livejournal-credentials.json"
+        if cred.exists():
+            return
+        raise DependencyError(
+            "LiveJournal not bound: no stored credentials. Save "
+            f'{{"username": "...", "hpassword": "..."}} to {cred} '
+            "(use a throwaway account — the secret is password-equivalent)."
+        )
+
+    if platform == "mastodon":
+        profile = config.config_dir / "real-chrome-profile" / "mastodon"
+        if profile.exists() and any(profile.iterdir()):
+            return
+        raise DependencyError(
+            f"Mastodon not bound: no Chrome login profile at {profile}. "
+            "Bind via browser login (set [mastodon] instance_url first)."
+        )
+
+    chain = _REGISTRY.get(platform) or []
+    for entry in chain:
+        publisher_cls = entry if isinstance(entry, type) else type(entry)
+        if publisher_cls.available(config):
+            return
+    raise DependencyError(f"{platform} not bound: credentials not configured.")
 
 
 def _check_medium_setup(config: Config) -> str | None:
