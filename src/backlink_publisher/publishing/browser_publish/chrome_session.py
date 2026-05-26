@@ -35,7 +35,12 @@ from ._chrome_session_impl import (
     _cdp_available,
     _verify_listener_is_chrome,
     _ensure_profile_perms,
+    _pid_file_path,
+    _read_pid_file,
+    _unlink_pid_file,
+    _write_pid_file,
     reap_orphan_publish_chrome,
+    signal_SIGTERM,
 )
 
 _DEFAULT_PORT = 9222
@@ -58,5 +63,10 @@ __all__ = [
     "_cdp_available",
     "_verify_listener_is_chrome",
     "_ensure_profile_perms",
+    "_pid_file_path",
+    "_read_pid_file",
+    "_unlink_pid_file",
+    "_write_pid_file",
     "reap_orphan_publish_chrome",
+    "signal_SIGTERM",
 ]
