@@ -97,12 +97,19 @@ class StoreSnapshot:
 
 
 def _fingerprint(path: Path) -> tuple[float, str] | None:
-    """``(mtime, sha256)`` for ``path``, or ``None`` if absent."""
+    """``(mtime, sha256)`` for ``path``, or ``None`` if absent/unreadable.
+
+    Total by design (never raises): an unreadable *present* file surfaces as an
+    ``AuditReadError`` from the actual read path (``shutil.copy2`` for the db,
+    ``_read_history`` for the history file), not here — so a fingerprint never
+    leaks a bare ``OSError`` past the CLI's ``AuditReadError`` handler.
+    """
     try:
         stat = path.stat()
-    except FileNotFoundError:
+        data = path.read_bytes()
+    except OSError:
         return None
-    return (stat.st_mtime, hashlib.sha256(path.read_bytes()).hexdigest())
+    return (stat.st_mtime, hashlib.sha256(data).hexdigest())
 
 
 def _read_articles_from_snapshot(db_path: Path) -> tuple[list[ArticleRow], bool]:
@@ -173,10 +180,16 @@ def read_snapshot() -> StoreSnapshot:
     if not db_path.exists() and not history_path.exists():
         return StoreSnapshot(articles=[], history=[], nothing_to_audit=True)
 
+    hist_before = _fingerprint(history_path)
     history = _read_history(history_path)
     if db_path.exists():
         articles, transient = _read_articles_from_snapshot(db_path)
     else:
         articles, transient = [], False
+
+    # R10: the history file changing across the read window is also a transient
+    # condition (the two stores would be read at inconsistent points in time).
+    if _fingerprint(history_path) != hist_before:
+        transient = True
 
     return StoreSnapshot(articles=articles, history=history, transient=transient)

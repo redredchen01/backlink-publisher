@@ -21,7 +21,12 @@ from backlink_publisher._util.errors import (
     handle_error,
 )
 from backlink_publisher._util.jsonl import write_jsonl
-from backlink_publisher.audit import AuditReadError, find_divergences, read_snapshot
+from backlink_publisher.audit import (
+    AuditReadError,
+    DivergenceRecord,
+    find_divergences,
+    read_snapshot,
+)
 from backlink_publisher.config import load_config
 
 _FORMATS = {"jsonl"}
@@ -42,7 +47,7 @@ _REMEDIATION: dict[str, str] = {
 }
 
 
-def _emit_summary(records: list, *, transient: bool) -> None:
+def _emit_summary(records: list[DivergenceRecord], *, transient: bool) -> None:
     """R7 — human summary on stderr, high-signal vs informational separated."""
     if not records:
         print("audit-state: no divergence found.", file=sys.stderr)

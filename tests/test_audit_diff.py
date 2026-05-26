@@ -128,6 +128,37 @@ def test_transient_marks_possibly_transient_authority():
     assert recs[0].authority == "possibly-transient"
 
 
+def test_malformed_article_urls_non_list_does_not_crash():
+    # A record whose article_urls is an int/dict (corrupt history) must not
+    # crash find_divergences; it's simply treated as having no published URLs.
+    snap = _snap(
+        articles=[_article(1, "https://medium.com/post1")],
+        history=[
+            {"id": "bad1", "status": "published", "article_urls": 123},
+            {"id": "bad2", "status": "published", "article_urls": {"x": "y"}},
+        ],
+    )
+    recs = find_divergences(snap)
+    # post1 has no history match -> article_orphan; the malformed rows contribute
+    # nothing and do not raise.
+    assert _classes(recs) == ["article_orphan"]
+
+
+def test_canonical_collision_reports_all_article_ids():
+    # Two articles whose raw live_urls differ but canonicalize identically
+    # (trailing slash) — both article_ids must be reported, not just one.
+    snap = _snap(
+        articles=[
+            _article(1, "https://medium.com/dup"),
+            _article(2, "https://medium.com/dup/"),
+        ],
+        history=[],
+    )
+    recs = find_divergences(snap)
+    assert _classes(recs) == ["article_orphan", "article_orphan"]
+    assert sorted(r.article_id for r in recs) == [1, 2]
+
+
 def test_to_jsonl_dict_shape():
     recs = find_divergences(_snap(articles=[_article(7, None)]))
     d = recs[0].to_jsonl_dict()

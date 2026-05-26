@@ -160,6 +160,31 @@ def test_temp_copy_cleaned_up(monkeypatch):
         assert not os.path.exists(d), "temp snapshot dir must be cleaned up"
 
 
+def test_history_change_during_read_flags_transient(monkeypatch):
+    _seed_article("https://medium.com/post1")
+    _write_history([{"id": "h1", "status": "published", "article_urls": ["x"]}])
+
+    # Mutate the history file while articles are being read (between the pre- and
+    # post- history fingerprints), so the two stores are read inconsistently.
+    real = readers._read_articles_from_snapshot
+
+    def _read_then_touch_history(db_path):
+        result = real(db_path)
+        _write_history([{"id": "h2", "status": "published", "article_urls": ["y"]}])
+        return result
+
+    monkeypatch.setattr(readers, "_read_articles_from_snapshot", _read_then_touch_history)
+    snap = read_snapshot()
+    assert snap.transient, "history file changing across the read window must flag transient"
+
+
+def test_malformed_history_json_raises_audit_read_error():
+    _seed_article("https://medium.com/post1")
+    (_config_dir() / "publish-history.json").write_text("{not valid json")
+    with pytest.raises(AuditReadError):
+        read_snapshot()
+
+
 def test_tear_flagged_when_source_changes_mid_read(monkeypatch):
     _seed_article("https://medium.com/post1")
     db_path = _config_dir() / "events.db"

@@ -69,9 +69,12 @@ class DivergenceRecord:
 
 
 def _published_url_set(record: dict[str, Any]) -> set[str]:
-    """Canonical published URLs declared by one history record."""
-    urls = record.get("article_urls") or []
-    return {_canon(u) for u in urls if u}
+    """Canonical published URLs declared by one history record. Tolerates a
+    malformed (non-list) ``article_urls`` rather than crashing."""
+    urls = record.get("article_urls")
+    if not isinstance(urls, list):
+        return set()
+    return {_canon(u) for u in urls if isinstance(u, str) and u}
 
 
 def find_divergences(snapshot: StoreSnapshot) -> list[DivergenceRecord]:
@@ -94,29 +97,33 @@ def find_divergences(snapshot: StoreSnapshot) -> list[DivergenceRecord]:
                 )
             )
 
-    # Canonical published-URL universe on each side.
-    article_urls: set[str] = {
-        _canon(art.live_url) for art in snapshot.articles if art.live_url
-    }
-    article_by_url: dict[str, int] = {
-        _canon(art.live_url): art.article_id
-        for art in snapshot.articles
-        if art.live_url
-    }
-    published_records = [
-        r
-        for r in snapshot.history
-        if r.get("status") == _PUBLISHED_STATUS and _published_url_set(r)
-    ]
+    # Canonical published-URL universe on the articles side. ``article_by_url``
+    # maps each canonical URL to ALL article_ids that canonicalize to it —
+    # articles.live_url is UNIQUE on the *raw* URL, so two rows can collide on
+    # the canonical form; reporting only one would silently drop the others.
+    article_urls: set[str] = set()
+    article_by_url: dict[str, list[int]] = {}
+    for art in snapshot.articles:
+        if art.live_url:
+            key = _canon(art.live_url)
+            article_urls.add(key)
+            article_by_url.setdefault(key, []).append(art.article_id)
+
+    # Cache each published record's canonical URL set once (used twice below).
+    published: list[tuple[dict[str, Any], set[str]]] = []
     history_urls: set[str] = set()
-    for rec in published_records:
-        history_urls |= _published_url_set(rec)
+    for rec in snapshot.history:
+        if rec.get("status") != _PUBLISHED_STATUS:
+            continue
+        rec_urls = _published_url_set(rec)
+        if not rec_urls:
+            continue
+        published.append((rec, rec_urls))
+        history_urls |= rec_urls
 
     # R3a: published history records entirely absent from articles.
-    for rec in published_records:
-        rec_urls = _published_url_set(rec)
+    for rec, rec_urls in published:
         if rec_urls.isdisjoint(article_urls):
-            # Report once per record, keyed by a representative canonical URL.
             records.append(
                 DivergenceRecord(
                     divergence_class="history_orphan",
@@ -131,16 +138,18 @@ def find_divergences(snapshot: StoreSnapshot) -> list[DivergenceRecord]:
                 )
             )
 
-    # R3b: article rows whose live_url matches no published history URL.
+    # R3b: article rows whose live_url matches no published history URL. Emit
+    # one record per colliding article_id so none is dropped.
     for url in sorted(article_urls - history_urls):
-        records.append(
-            DivergenceRecord(
-                divergence_class="article_orphan",
-                source="articles",
-                authority=authority,
-                canonical_url=url,
-                article_id=article_by_url.get(url),
+        for article_id in article_by_url.get(url, [None]):
+            records.append(
+                DivergenceRecord(
+                    divergence_class="article_orphan",
+                    source="articles",
+                    authority=authority,
+                    canonical_url=url,
+                    article_id=article_id,
+                )
             )
-        )
 
     return records
