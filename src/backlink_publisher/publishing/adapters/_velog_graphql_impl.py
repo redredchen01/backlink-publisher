@@ -119,8 +119,12 @@ def _slugify(text: str) -> str:
     slug = re.sub(r"-+", "-", slug)        # collapse repeated hyphens
     slug = slug.strip("-")
     return slug or "post"
+
+
 def _json_log(**kwargs: Any) -> str:
     return json.dumps(kwargs)
+
+
 def _load_cookies(cookies_path: Path) -> dict[str, str]:
     """Load velog cookies from *cookies_path* (must be 0600).
 
@@ -207,10 +211,14 @@ def _load_cookies(cookies_path: Path) -> dict[str, str]:
             reason="velog credential file has no access_token or refresh_token",
         )
     return cookies
+
+
 def _effective_cap() -> int:
     if datetime.now(timezone.utc) >= UNLOCK_DATE_UTC:
         return _VELOG_DAILY_CAP_PROD
     return _VELOG_DAILY_CAP_INITIAL
+
+
 def _acquire_lock(lock_path: Path) -> int:
     """Open and ``LOCK_EX`` *lock_path*, polling up to 60 s.
 
@@ -238,12 +246,16 @@ def _acquire_lock(lock_path: Path) -> int:
     raise ExternalServiceError(
         "velog rate-limit lock held > 60 s; check for stale process"
     )
+
+
 def _release_lock(fd: int) -> None:
     try:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
     except OSError:
         pass
+
+
 def _utc_today_iso() -> str:
     """Return today's date in UTC as ISO-8601 — the canonical reset boundary.
 
@@ -254,6 +266,8 @@ def _utc_today_iso() -> str:
     or opening an early second quota window.
     """
     return datetime.now(timezone.utc).date().isoformat()
+
+
 def _read_count(count_path: Path) -> tuple[int, float]:
     """Read ``(count, last_publish_at)`` from *count_path*, resetting on new UTC day."""
     today = _utc_today_iso()
@@ -264,6 +278,8 @@ def _read_count(count_path: Path) -> tuple[int, float]:
         return int(data.get("count", 0)), float(data.get("last_publish_at", 0.0))
     except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return 0, 0.0
+
+
 def _write_count(count_path: Path, count: int, last_publish_at: float) -> None:
     today = _utc_today_iso()
     payload = {"date_utc": today, "count": count, "last_publish_at": last_publish_at}
@@ -276,10 +292,14 @@ def _write_count(count_path: Path, count: int, last_publish_at: float) -> None:
         os.chmod(count_path, 0o600)
     finally:
         os.umask(old_umask)
+
+
 class _TransientHTTPError(Exception):
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
         super().__init__(f"HTTP {status_code}")
+
+
 class VelogGraphQLAdapter(Publisher):
     """Publishes to velog.io via internal GraphQL writePost mutation.
 

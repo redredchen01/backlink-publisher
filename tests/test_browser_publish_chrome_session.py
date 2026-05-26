@@ -486,7 +486,7 @@ class TestChromeAttachSession:
         version_probe = MagicMock(side_effect=lambda base: next(version_responses))
         factory, _, _ = _stub_playwright_factory(stub_page)
 
-        with patch.object(cs.os, "killpg") as killpg_spy:
+        with patch.object(_cs_impl.os, "killpg") as killpg_spy:
             session = ChromeAttachSession(
                 "devto",
                 port=9999,

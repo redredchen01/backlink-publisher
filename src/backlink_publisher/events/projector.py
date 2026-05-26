@@ -44,7 +44,6 @@ _DRAFTS_FILENAME = "draft-queue.json"
 # now live in events/kinds.py STATUS_MAP, classified via kinds.classify().
 
 
-
 class ProjectionError(RuntimeError):
     """Cursor table corruption, unknown source dispatch, schema mismatch.
 

@@ -227,5 +227,6 @@ def main(argv: list[str] | None = None) -> None:
         f"({len(outputs)} passed, {failed_count} failed)"
     )
 
+
 if __name__ == "__main__":
     main()

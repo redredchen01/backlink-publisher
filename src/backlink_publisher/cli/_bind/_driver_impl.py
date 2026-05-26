@@ -55,11 +55,17 @@ class PlaywrightLaunchError(RuntimeError):
     def __init__(self, error_code: str = "playwright_launch_failed") -> None:
         super().__init__(error_code)
         self.error_code = error_code
+
+
 class BoundPredicateTimeout(RuntimeError):
     """Raised when ``recipe.bound_predicate(page)`` exceeds the bind timeout."""
+
+
 class PersistIOError(RuntimeError):
     """Raised when writing the storage_state file fails (disk full, EROFS,
     permission denied, etc)."""
+
+
 class IdentityMismatch(RuntimeError):
     """Raised by a recipe's ``bound_predicate`` when the operator's current
     login is for a different account than the previously-bound one (Plan
@@ -75,6 +81,8 @@ class IdentityMismatch(RuntimeError):
         )
         self.old_account = old_account
         self.new_account = new_account
+
+
 class ChromeLaunchError(RuntimeError):
     """Raised by the Real Chrome backend when it cannot launch or connect to
     an existing Chrome instance via CDP. The ``error_code`` string maps to
@@ -83,6 +91,8 @@ class ChromeLaunchError(RuntimeError):
     def __init__(self, error_code: str = "chrome_not_available") -> None:
         super().__init__(error_code)
         self.error_code = error_code
+
+
 @dataclass
 class BindResult:
     """Terminal outcome of ``run_bind``. Consumed by the CLI's ``main`` to
@@ -98,6 +108,8 @@ class BindResult:
     storage_state_path: Path | None
     error_code: str | None
     extras: dict[str, Any] | None = None
+
+
 class BrowserRunner(Protocol):
     """Injection seam for tests — the real implementation is
     ``_PlaywrightBrowserRunner`` (created inside ``run_bind`` on demand)."""
@@ -118,6 +130,8 @@ class BrowserRunner(Protocol):
             PlaywrightLaunchError: launch failed (missing browser, etc).
             BoundPredicateTimeout: predicate exceeded ``BIND_TIMEOUT_MS``.
         """
+
+
 def _emit(event: str, **payload: Any) -> None:
     """Write one JSONL line to stdout. ``event`` must be a member of
     ``EVENTS``; typos raise ``AssertionError`` at emit time (fail loud here,
@@ -132,6 +146,8 @@ def _emit(event: str, **payload: Any) -> None:
         **payload,
     }
     print(json.dumps(record, ensure_ascii=False), flush=True)
+
+
 def _browser_profile_dir() -> Path:
     """Persistent Chromium profile shared across all channels.
 
@@ -152,6 +168,8 @@ def _browser_profile_dir() -> Path:
     if raw:
         return Path(raw)
     return _config_dir() / "browser-profile"
+
+
 def _validate_storage_state_path(path: Path | str) -> Path:
     """Reject any storage_state target that resolves outside ``_config_dir()``.
 
@@ -172,6 +190,8 @@ def _validate_storage_state_path(path: Path | str) -> Path:
             f"inside {str(config_root)!r}"
         ) from exc
     return resolved
+
+
 def _persist_storage_state(
     *,
     channel: str,
@@ -221,6 +241,8 @@ def _persist_storage_state(
         raise PersistIOError(f"failed to persist storage_state: {exc}") from exc
 
     return resolved
+
+
 def run_bind(
     *,
     channel: str,
@@ -360,6 +382,8 @@ def run_bind(
         storage_state_path=canonical_path,
         error_code=None,
     )
+
+
 def _promote_last_account_if_pending(channel: str) -> None:
     """Atomically promote ``<config_dir>/<channel>-last-account.tentative`` to
     ``<channel>-last-account.txt`` if the tentative exists.
@@ -380,6 +404,8 @@ def _promote_last_account_if_pending(channel: str) -> None:
         # Don't mask the successful bind on rename failure. The tentative
         # orphan will be overwritten on the next bind attempt.
         pass
+
+
 class _PlaywrightBrowserRunner:
     """The production browser runner. Lazy-imports Playwright so the module
     can be imported without it (the webui side wants ``BindResult`` types
@@ -478,6 +504,8 @@ class _PlaywrightBrowserRunner:
                     pass
 
         return _provider
+
+
 def _apply_host_filter(
     storage_state: dict[str, Any],
     host_filter: Callable[[str], bool],
@@ -501,6 +529,8 @@ def _apply_host_filter(
         if isinstance(o, dict) and host_filter(_origin_host(o.get("origin", "")))
     ]
     return {"cookies": filtered_cookies, "origins": filtered_origins}
+
+
 def _origin_host(origin: str) -> str:
     """Extract host from ``https://host[:port]`` origin string."""
     if not origin or "://" not in origin:

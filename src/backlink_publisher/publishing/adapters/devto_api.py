@@ -45,7 +45,6 @@ import json
 import time
 from typing import Any
 
-import requests
 from backlink_publisher.http import post as http_post
 
 from backlink_publisher.config import Config, load_devto_token

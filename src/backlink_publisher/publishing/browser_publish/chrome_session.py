@@ -22,34 +22,7 @@ Design notes calibrated against Unit 0 spike
 
 from __future__ import annotations
 
-import json
-import os
 import re
-import shutil
-import socket
-import stat
-import subprocess
-import time
-from contextlib import AbstractContextManager
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
-
-from backlink_publisher._util.errors import DependencyError
-from backlink_publisher.config.loader import _config_dir
-
-if TYPE_CHECKING:
-    from playwright.sync_api import Page
-
-
-_DEFAULT_PORT = 9222
-_CONNECT_TIMEOUT_S = 10.0
-_POLL_INTERVAL_S = 0.25
-_TERMINATE_TIMEOUT_S = 5.0
-_CHANNEL_RE = re.compile(r"^[a-z0-9_-]+$")
-_PID_FILE_NAME = "real-chrome-publish.pid"
-_PROFILE_LOCK_NAME = "chrome-profile.lock"
-
 
 from ._chrome_session_impl import (
     BrowserPublishRecipe,
@@ -62,76 +35,21 @@ from ._chrome_session_impl import (
     _cdp_available,
     _verify_listener_is_chrome,
     _ensure_profile_perms,
-    reap_orphan_publish_chrome,
     _pid_file_path,
     _read_pid_file,
-    _write_pid_file,
     _unlink_pid_file,
-    _ps_command,
+    _write_pid_file,
+    reap_orphan_publish_chrome,
     signal_SIGTERM,
 )
 
-
-# ---------------------------------------------------------------------------
-# Path / binary discovery helpers (single source of truth for bind + publish)
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Listener identity verification (attach mode)
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Profile perms
-# ---------------------------------------------------------------------------
-
-
-
-
-# ---------------------------------------------------------------------------
-# PID file (orphan reap)
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# BrowserPublishRecipe
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# ChromeAttachSession
-# ---------------------------------------------------------------------------
+_DEFAULT_PORT = 9222
+_CONNECT_TIMEOUT_S = 10.0
+_POLL_INTERVAL_S = 0.25
+_TERMINATE_TIMEOUT_S = 5.0
+_CHANNEL_RE = re.compile(r"^[a-z0-9_-]+$")
+_PID_FILE_NAME = "real-chrome-publish.pid"
+_PROFILE_LOCK_NAME = "chrome-profile.lock"
 
 # re-exported from _chrome_session_impl
 __all__ = [
@@ -145,5 +63,10 @@ __all__ = [
     "_cdp_available",
     "_verify_listener_is_chrome",
     "_ensure_profile_perms",
+    "_pid_file_path",
+    "_read_pid_file",
+    "_unlink_pid_file",
+    "_write_pid_file",
     "reap_orphan_publish_chrome",
+    "signal_SIGTERM",
 ]

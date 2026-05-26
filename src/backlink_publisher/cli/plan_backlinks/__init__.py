@@ -1,6 +1,7 @@
-from backlink_publisher.anchor import profile as anchor_profile, resolver as anchor_resolver
-from backlink_publisher.content import scraper as work_scraper
-from backlink_publisher._util.logger import plan_logger
+from backlink_publisher.anchor import profile as anchor_profile  # noqa: F401  re-exported for tests
+from backlink_publisher.anchor import resolver as anchor_resolver  # noqa: F401  re-exported for tests
+from backlink_publisher.content import scraper as work_scraper  # noqa: F401  re-exported for tests
+from backlink_publisher._util.logger import plan_logger  # noqa: F401  re-exported for tests
 
 from .core import (
     _ContentGateRowFailure,

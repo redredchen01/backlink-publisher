@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from backlink_publisher.publishing.registry import registered_platforms
+from backlink_publisher.publishing.registry import active_platforms, registered_platforms
 from webui_app import create_app
 
 
@@ -55,8 +55,10 @@ class TestPerChannelCards:
     """
 
     def _visible_channels(self):
-        from webui_app.binding_status import HIDDEN_FROM_UI
-        return [c for c in registered_platforms() if c not in HIDDEN_FROM_UI]
+        # The dashboard template iterates ``active_platforms()`` which
+        # filters by manifest ``visibility`` (excludes experimental/hidden/retired).
+        # Sync the test with the template rather than duplicating the filter.
+        return list(active_platforms())
 
     def test_card_rendered_for_every_registered_channel(self, client):
         resp = client.get("/settings")
@@ -142,19 +144,17 @@ class TestDashboardDriftWithRegistry:
     """
 
     def test_dashboard_card_count_equals_registered_platform_count(self, client):
-        from webui_app.binding_status import HIDDEN_FROM_UI
-
+        # The dashboard template uses ``active_platforms()`` (visibility-filtered),
+        # not ``registered_platforms()``.  Sync the expected count with
+        # the actual rendering source.
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
         # Count of `dashboard-channel-card` outer divs.
         card_count = body.count('class="dashboard-channel-card"')
-        # Some adapters are intentionally hidden from the UI (e.g. retired
-        # channels whose source stays in repo for CLI use). The dashboard
-        # shows every registered platform EXCEPT those.
-        expected = len(registered_platforms()) - len(HIDDEN_FROM_UI)
+        expected = len(active_platforms())
         assert card_count == expected, (
-            f"Dashboard cards ({card_count}) != registered platforms "
-            f"minus hidden ({expected}). Drift detected — investigate "
+            f"Dashboard cards ({card_count}) != active platforms "
+            f"({expected}). Drift detected — investigate "
             f"_settings_context.dashboard_channels and the card macro."
         )
 

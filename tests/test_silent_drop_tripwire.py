@@ -124,13 +124,13 @@ def test_plan_reconciliation_validation_drops(tmp_path, capsys):
 
 
 def test_validate_reconciliation_unsupported_platform_drops(tmp_path, capsys):
-    """linkedin platform → drop counted under 'platform' bucket."""
+    """unknown platform → drop counted under 'platform' bucket."""
     from backlink_publisher.cli import validate_backlinks
 
     input_jsonl = tmp_path / "in.jsonl"
     payload = {
         "id": "id-1",
-        "platform": "linkedin",
+        "platform": "xyznonexistent",
         "main_domain": "https://a.com",
         "target_url": "https://a.com/page",
         "title": "x",

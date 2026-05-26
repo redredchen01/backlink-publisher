@@ -147,11 +147,19 @@ class TestMastodonChain:
 
         assert "mastodon" not in _REJECTED_PLATFORMS
 
-    def test_wordpresscom_still_rejected(self):
-        """Removing mastodon must not perturb the remaining rejection entry."""
-        from backlink_publisher.publishing.registry import _REJECTED_PLATFORMS
+    def test_wordpresscom_un_rejected_and_registered(self):
+        """wordpresscom was un-rejected in Phase 1 and re-registered; the
+        2026-05-26 dofollow audit kept it registered as dofollow="uncertain"
+        (not re-rejected). It must no longer be in the rejection map and must
+        appear in registered_platforms()."""
+        import backlink_publisher.publishing.adapters  # noqa: F401
+        from backlink_publisher.publishing.registry import (
+            _REJECTED_PLATFORMS,
+            registered_platforms,
+        )
 
-        assert "wordpresscom" in _REJECTED_PLATFORMS
+        assert "wordpresscom" not in _REJECTED_PLATFORMS
+        assert "wordpresscom" in registered_platforms()
 
     def test_mastodon_in_registered_platforms(self):
         import backlink_publisher.publishing.adapters  # noqa: F401

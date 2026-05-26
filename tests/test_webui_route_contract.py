@@ -86,11 +86,14 @@ def _no_real_subprocess():
 def _no_run_pipe():
     """Stub run_pipe in every consumer module so route handlers don't shell out.
 
-    After Plan Unit 3 split, ``run_pipe`` lives in ``webui_app.helpers`` and
-    each route blueprint does ``from ..helpers import run_pipe`` — that binds
-    the name into the blueprint module's namespace. Patching only
-    ``webui_app.helpers.run_pipe`` would miss the blueprint-local references.
-    Patch each consumer explicitly.
+    ``run_pipe`` is defined in ``webui_app.helpers.cli_runner`` and imported
+    into each module that calls it — so the name binds into that module's
+    namespace and must be patched there, not only at the definition site.
+    After the route→api extraction the live consumers are ``api.pipeline_api``
+    (the pipeline/batch routes delegate through PipelineAPI, which holds the
+    binding), ``routes.sites``, and ``scheduler``. ``routes.pipeline`` /
+    ``routes.batch`` no longer import run_pipe directly, so patching them
+    would raise AttributeError at fixture setup.
 
     The ``_no_real_subprocess`` fixture also stubs ``subprocess.run``
     underneath, so even if a patch is missed the call still won't hit the
@@ -101,8 +104,7 @@ def _no_run_pipe():
 
     targets = [
         "webui_app.helpers.cli_runner.run_pipe",
-        "webui_app.routes.pipeline.run_pipe",
-        "webui_app.routes.batch.run_pipe",
+        "webui_app.api.pipeline_api.run_pipe",
         "webui_app.routes.sites.run_pipe",
         "webui_app.scheduler.run_pipe",
     ]

@@ -53,6 +53,27 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "throwaway account; the secret cannot be revoked except by changing "
         "the password."
     ),
+    "tumblr": (
+        "Tumblr rewrites all outbound <a> href via t.umblr.com/redirect "
+        "which strips link equity — server-side and compulsory for all "
+        "accounts. The adapter is retained for referral traffic and "
+        "topical signal from a platform with high DA and strong "
+        "content-discovery reach. OAuth 1.0a credentials (consumer_key, "
+        "consumer_secret, oauth_token, oauth_token_secret) plus blog_name "
+        "are stored in a 0600 JSON file. Post body is HTML rendered from "
+        "content_markdown. Tags are comma-separated, capped at 20."
+    ),
+    "linkedin": (
+        "LinkedIn applies rel=\"nofollow ugc\" to outbound links in user posts "
+        "and articles server-side irrespective of account type — verified across "
+        "multiple accounts and post formats. The platform is retained for brand "
+        "exposure, B2B referral traffic, and topical relevance signalling rather "
+        "than direct PageRank transfer. DA ~95. LinkedIn's w_member_social OAuth "
+        "scope requires LinkedIn-app verification (operator responsibility; the "
+        "adapter raises DependencyError when the token file is absent or has "
+        "insufficient scope). Post body is HTML; max commentary length is 3000 "
+        "chars enforced server-side."
+    ),
     "txtfyi": (
         "Registered dofollow=\"uncertain\" pending the R4 canary loop "
         "(Plan 2026-05-25-001 Unit 7): Phase 0 probe confirmed txt.fyi serves "
@@ -66,5 +87,158 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "dofollow static pages still pass equity to any crawler that reaches "
         "them. No credentials needed; the form-POST adapter composes the "
         "Unit 4 http_form_post helpers for a zero-dependency publish path."
+    ),
+    # --- Phase 1 channel-expansion dofollow truth audit (2026-05-26) ---
+    # The 16 Phase-1 adapters shipped with bare ``dofollow=True`` and no
+    # evidence. This audit downgrades every one: hard server-side
+    # nofollow/redirect-interstitial evidence => dofollow=False; anything
+    # lacking an OUR-pipeline canary => dofollow="uncertain" (the
+    # livejournal/txtfyi precedent — third-party spot-checks do not
+    # discharge the canary burden). Zero stay dofollow=True.
+    "zhihu": (
+        "Zhihu (知乎) rewrites every outbound body link through a "
+        "https://link.zhihu.com/?target= 302 interstitial that carries "
+        "rel=\"nofollow noreferrer\" — server-side and compulsory for all "
+        "accounts, so no PageRank transfers. Retained for referral traffic "
+        "and topical signal from a very high-DA Chinese Q&A platform. "
+        "Confirmed against the documented link.zhihu.com redirect mechanism; "
+        "matches the feedback_grep_dofollow_map_before_shipping_adapter "
+        "warning that flagged zhihu specifically."
+    ),
+    "juejin": (
+        "Juejin (掘金) wraps all external body links in a "
+        "https://link.juejin.cn/?target= redirect/risk-warning interstitial "
+        "that strips link equity — server-side and unavoidable per account. "
+        "No PageRank transfer; kept for referral traffic and dev-topical "
+        "relevance on a high-DA Chinese developer community. Same "
+        "link.<domain>.cn interstitial family as zhihu/csdn/segmentfault."
+    ),
+    "jianshu": (
+        "Jianshu (简书) routes outbound body links through a "
+        "https://link.jianshu.com/go?to= redirect interstitial (the same "
+        "equity-stripping pattern as zhihu/juejin), so external <a> elements "
+        "pass no PageRank. Retained for referral traffic and topical signal "
+        "from an established high-DA Chinese blogging platform. Mechanism "
+        "corroborated by redirect-skipper userscripts targeting "
+        "link.jianshu.com rather than a single authoritative platform doc."
+    ),
+    "csdn": (
+        "CSDN (blog.csdn.net) rewrites outbound body links to a "
+        "https://link.csdn.net/?target= redirect interstitial that strips "
+        "link equity server-side for all accounts, so no PageRank transfers. "
+        "Retained for referral traffic and dev-topical relevance from a very "
+        "high-DA Chinese developer blog. Same link.<domain> interstitial "
+        "family as zhihu/juejin/segmentfault."
+    ),
+    "segmentfault": (
+        "SegmentFault (思否) wraps external body links via a "
+        "https://link.segmentfault.com/?enc= 302 interstitial that strips "
+        "equity — verified live against a published article. No PageRank "
+        "transfer; kept for referral traffic and dev-topical relevance from a "
+        "high-DA Chinese developer Q&A platform. Same link.<domain> "
+        "interstitial family as zhihu/juejin/csdn."
+    ),
+    "note": (
+        "note.com auto-applies rel=\"nofollow\" to ALL links — profile, post "
+        "body, and embedded references alike — server-side and not "
+        "disableable per-post or per-account, per multiple Japanese SEO "
+        "sources documenting the platform policy. No PageRank transfer; "
+        "retained for referral traffic and topical signal from a high-DA "
+        "Japanese publishing platform."
+    ),
+    "pikabu": (
+        "Pikabu (pikabu.ru) routes external body links through /go/ and "
+        "/link/ redirect/tracking interstitials that strip link equity — "
+        "verified live on the site. No PageRank transfer; retained for "
+        "referral traffic and topical signal from a top-25 Russian "
+        "entertainment/discussion platform with high domain authority."
+    ),
+    "beehiiv": (
+        "Beehiiv newsletter post links route through tracking redirect "
+        "domains (bhclick.com / link.mail.beehiiv.com) carrying UTM "
+        "parameters rather than raw equity-passing <a> hrefs, so outbound "
+        "links do not transfer PageRank. Referral value is modest: the web "
+        "archive of a newsletter issue has limited standalone DA versus the "
+        "email send itself. Retained for referral traffic only."
+    ),
+    "wordpresscom": (
+        "Registered dofollow=\"uncertain\": evidence conflicts. This "
+        "project's PR #108->#109 (the 9-minute revert) observed that free "
+        "*.wordpress.com tier adds rel=nofollow to outbound links, but a "
+        "2026-05 re-check found nofollow applied only opt-in per-link "
+        "(\"Mark as nofollow\" checkbox), not automatically — WordPress.com "
+        "may have changed policy. The definitive status is resolved only by "
+        "publishing a canary on a free-tier blog and reading "
+        "verify_link_attributes, then amending this register(). "
+        "referral_value=\"high\" reflects wordpress.com's DA ~94 and strong "
+        "referral reach regardless of the rel outcome."
+    ),
+    "cnblogs": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check found cnblogs (博客园) renders raw "
+        "external <a> in post bodies with no rel attribute and no redirect "
+        "wrapper (= dofollow) — notably the exception among major Chinese dev "
+        "platforms — but a third-party spot-check does not discharge the "
+        "canary burden (livejournal/txtfyi precedent). Confirm by publishing "
+        "a canary and reading verify_link_attributes, then amend to "
+        "dofollow=True. referral_value=\"high\": established high-DA Chinese "
+        "developer blog."
+    ),
+    "substack": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check of a published Substack post found "
+        "external body <a> carry no rel attribute (= dofollow), but a "
+        "third-party spot-check does not discharge the canary burden "
+        "(livejournal/txtfyi precedent). Confirm by publishing a canary and "
+        "reading verify_link_attributes on the live post, then amend to "
+        "dofollow=True. referral_value=\"high\": high-DA newsletter platform "
+        "with strong referral reach."
+    ),
+    "hashnode": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check found Hashnode post-body external <a> "
+        "carry no rel attribute (= dofollow), but a third-party spot-check "
+        "does not discharge the canary burden (livejournal/txtfyi "
+        "precedent). NOTE: Hashnode is concurrently slated for retirement "
+        "(PR #204) and its GraphQL publish path hits a paywall — coordinate "
+        "before investing further. referral_value=\"high\": high-DA dev "
+        "blogging platform."
+    ),
+    "writeas": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check found write.as post-body external <a> "
+        "(including embeds) carry no rel attribute (= dofollow), but a "
+        "third-party spot-check does not discharge the canary burden "
+        "(livejournal/txtfyi precedent). NOTE: write.as is concurrently "
+        "slated for retirement (PR #202) — coordinate before investing "
+        "further. referral_value=\"low\": minimalist low-DA blogging host."
+    ),
+    "rentry": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check found rentry.co paste links carry "
+        "only rel=\"noreferrer noopener\" with no nofollow (= dofollow), but "
+        "a third-party spot-check does not discharge the canary burden "
+        "(livejournal/txtfyi precedent). Confirm by publishing a canary and "
+        "reading verify_link_attributes, then amend to dofollow=True. "
+        "referral_value=\"low\": anonymous markdown paste with low DA and "
+        "frequent noindex, so equity is weak even if dofollow holds."
+    ),
+    "ghost": (
+        "Registered dofollow=\"uncertain\": Ghost's editor defaults to plain "
+        "follow links and applies nofollow/sponsored only when the author "
+        "manually inserts an HTML card with that rel — so the dofollow "
+        "outcome depends on the target instance's configuration and the "
+        "publish path, which an OUR-pipeline canary must confirm before any "
+        "dofollow=True claim. referral_value=\"high\": self-hosted Ghost "
+        "instances are typically high-DA owned properties."
+    ),
+    "habr": (
+        "Registered dofollow=\"uncertain\": habr.com could not be verified — "
+        "the site blocked every automated fetch (403/closed socket) and no "
+        "authoritative primary source on post-body link rel attributes was "
+        "found. Russian SEO sources hint at nofollow but are unconfirmed. "
+        "Do NOT claim dofollow until a manual view-source on a live Habr "
+        "article or an OUR-pipeline canary resolves it. referral_value="
+        "\"high\": high-DA Russian tech publication."
     ),
 }

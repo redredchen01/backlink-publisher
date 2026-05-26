@@ -413,7 +413,7 @@ def test_resume_full_throttle_no_prior_medium(mock_pub, mock_verify, mock_sleep,
 # ── item_to_publish_output has all required fields ───────────────────────────
 
 def test_item_to_publish_output_has_all_fields():
-    from backlink_publisher.cli.publish_backlinks import item_to_publish_output
+    from backlink_publisher.cli._resume import item_to_publish_output
     item = {
         "id": "r0",
         "platform": "blogger",
@@ -436,7 +436,7 @@ def test_item_to_publish_output_has_all_fields():
 
 def test_item_to_publish_output_omits_verdict_when_absent():
     """Checkpoint items lack _provider_meta today → no verification key emitted."""
-    from backlink_publisher.cli.publish_backlinks import item_to_publish_output
+    from backlink_publisher.cli._resume import item_to_publish_output
     item = {"id": "r1", "platform": "txtfyi", "status": "done",
             "published_url": "https://txt.fyi/a", "adapter": "txtfyi-form"}
     out = item_to_publish_output(item)
@@ -445,7 +445,7 @@ def test_item_to_publish_output_omits_verdict_when_absent():
 
 def test_item_to_publish_output_emits_verdict_when_checkpoint_carries_it():
     """Forward-compatible: emit the verdict if a checkpoint item ever carries it."""
-    from backlink_publisher.cli.publish_backlinks import item_to_publish_output
+    from backlink_publisher.cli._resume import item_to_publish_output
     verdict = {"verification": "ok", "nofollow_detected": False}
     item = {"id": "r2", "platform": "txtfyi", "status": "done",
             "published_url": "https://txt.fyi/b", "adapter": "txtfyi-form",

@@ -124,16 +124,23 @@ class TestDevtoChain:
 
         assert "devto" not in _REJECTED_PLATFORMS
 
-    def test_other_rejections_intact(self):
+    def test_rejection_map_drained_after_phase1(self):
         """Removing devto must not perturb the rest of the rejection map.
 
-        Mastodon was originally a sibling rejection but shipped as a
-        chrome-publish channel in Unit 4c (PR stacked on top of this
-        one); only wordpresscom remains as canonical-rejected.
+        Mastodon shipped as a chrome-publish channel (Unit 4c) and
+        wordpresscom was un-rejected + re-registered in Phase 1 (kept as
+        dofollow="uncertain" by the 2026-05-26 audit), so the rejection map
+        is now empty. devto must be absent and re-registered.
         """
-        from backlink_publisher.publishing.registry import _REJECTED_PLATFORMS
+        import backlink_publisher.publishing.adapters  # noqa: F401
+        from backlink_publisher.publishing.registry import (
+            _REJECTED_PLATFORMS,
+            registered_platforms,
+        )
 
-        assert "wordpresscom" in _REJECTED_PLATFORMS
+        assert "devto" not in _REJECTED_PLATFORMS
+        assert "wordpresscom" not in _REJECTED_PLATFORMS
+        assert "wordpresscom" in registered_platforms()
 
     def test_devto_in_registered_platforms(self):
         import backlink_publisher.publishing.adapters  # noqa: F401

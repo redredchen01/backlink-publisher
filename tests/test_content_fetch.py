@@ -754,7 +754,7 @@ class TestSSRFDefense:
         """Construct the redirect handler directly and assert it raises
         URLError on a 302 → metadata-IP redirect target. Uses https→https
         so the downgrade check doesn't preempt the IP check."""
-        from backlink_publisher.content.fetch import _SSRFSafeRedirectHandler
+        from backlink_publisher._util.net_safety import _SSRFSafeRedirectHandler
 
         handler = _SSRFSafeRedirectHandler()
         req = Request("https://good.example.com/")
@@ -765,7 +765,7 @@ class TestSSRFDefense:
         assert "ssrf_redirect" in str(excinfo.value)
 
     def test_redirect_handler_blocks_https_to_http_downgrade(self):
-        from backlink_publisher.content.fetch import _SSRFSafeRedirectHandler
+        from backlink_publisher._util.net_safety import _SSRFSafeRedirectHandler
 
         handler = _SSRFSafeRedirectHandler()
         req = Request("https://safe.example.com/")
@@ -776,13 +776,13 @@ class TestSSRFDefense:
         assert "ssrf_https_downgrade" in str(excinfo.value)
 
     def test_redirect_handler_allows_redirect_to_public_ip(self, monkeypatch):
-        from backlink_publisher.content.fetch import _SSRFSafeRedirectHandler
+        from backlink_publisher._util.net_safety import _SSRFSafeRedirectHandler
 
         def _fake_getaddrinfo(host, *args, **kwargs):
             return [(2, 1, 6, "", ("8.8.8.8", 0))]
 
         monkeypatch.setattr(
-            "backlink_publisher.content.fetch.socket.getaddrinfo",
+            "backlink_publisher._util.net_safety.socket.getaddrinfo",
             _fake_getaddrinfo,
         )
         handler = _SSRFSafeRedirectHandler()

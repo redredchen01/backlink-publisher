@@ -157,7 +157,7 @@ class TestDraftJobRemovalHonesty:
                                                    monkeypatch):
         _seed_drafts([{"id": "a", "status": "scheduled",
                        "scheduled_at": "2099-01-01T00:00:00"}])
-        import webui_app.routes.drafts as drafts_mod
+        import webui_app.api.drafts_api as drafts_mod
 
         def _boom(_job_id):
             raise RuntimeError("jobstore offline")
@@ -180,7 +180,7 @@ class TestDraftJobRemovalHonesty:
                                           monkeypatch):
         _seed_drafts([{"id": "a", "status": "scheduled",
                        "scheduled_at": "2099-01-01T00:00:00"}])
-        import webui_app.routes.drafts as drafts_mod
+        import webui_app.api.drafts_api as drafts_mod
         monkeypatch.setattr(drafts_mod._scheduler, "remove_job",
                             lambda _id: (_ for _ in ()).throw(RuntimeError("x")))
         resp = client.post("/ce:draft/delete", data={"id": "a"})
@@ -194,7 +194,7 @@ class TestDraftJobRemovalHonesty:
             {"id": "a", "status": "scheduled", "scheduled_at": "2099-01-01T00:00:00"},
             {"id": "b", "status": "scheduled", "scheduled_at": "2099-01-01T00:00:00"},
         ])
-        import webui_app.routes.drafts as drafts_mod
+        import webui_app.api.drafts_api as drafts_mod
         calls = {"n": 0}
 
         def _flaky(_job_id):
@@ -224,7 +224,7 @@ class TestDraftJobRemovalHonesty:
             {"id": "a", "status": "scheduled", "scheduled_at": "2099-01-01T00:00:00"},
             {"id": "b", "status": "scheduled", "scheduled_at": "2099-01-01T00:00:00"},
         ])
-        import webui_app.routes.drafts as drafts_mod
+        import webui_app.api.drafts_api as drafts_mod
         calls = {"n": 0}
 
         def _flaky(_job_id):

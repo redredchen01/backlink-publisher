@@ -318,11 +318,11 @@ class TestPublishPayloadWrapsOutput:
         errors = validate_publish_payload(row)
         assert errors == []
 
-    def test_publish_rejects_linkedin_platform(self) -> None:
+    def test_publish_rejects_unknown_platform(self) -> None:
         row = _valid_output_row(content_markdown="About https://example.com")
-        row["platform"] = "linkedin"
+        row["platform"] = "xyznonexistent"
         errors = validate_publish_payload(row)
-        assert any("linkedin" in e for e in errors)
+        assert any("xyznonexistent" in e for e in errors)
 
 
 # --------------------------------------------------------------------------- #

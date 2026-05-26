@@ -225,14 +225,19 @@ class TestSyntheticRedPaths:
         assert referral_value("redpath_uncertain_ok") == "low"
 
     def test_register_rejected_name_raises_with_deletion_instruction(
-        self,
+        self, _isolate_registry
     ) -> None:
-        # ``wordpresscom`` replaces ``devto`` as the canonical rejected
-        # example post Plan 2026-05-21-001 Unit 4b — devto was removed
-        # from the rejection map when it shipped as a chrome-publish
-        # channel. Mastodon will follow in Unit 4c.
+        # ``_REJECTED_PLATFORMS`` is empty after Phase 1 (devto/mastodon
+        # shipped as chrome-publish channels; wordpresscom was un-rejected
+        # and re-registered — kept dofollow="uncertain" by the 2026-05-26
+        # audit). Use a synthetic rejected key to exercise the gate rather
+        # than depending on any live rejection entry.
+        _REJECTED_PLATFORMS["_audit_reject"] = (
+            "synthetic rejection for the gate test — at least eighty chars of "
+            "rationale padding so this entry is shape-valid xxxxxxxxxxxxxxxxxxx"
+        )
         with pytest.raises(RegistryError) as exc:
-            register("wordpresscom", _FakeAdapter, dofollow=True)
+            register("_audit_reject", _FakeAdapter, dofollow=True)
         message = str(exc.value)
         assert "previously rejected" in message
         assert "delete this entry" in message
@@ -250,13 +255,17 @@ class TestSyntheticRedPaths:
     def test_register_succeeds_after_un_rejection_by_deletion(
         self, _isolate_registry
     ) -> None:
-        # Happy-path R12: delete entry, then register normally.
-        # ``wordpresscom`` is the canonical rejected example post Unit 4b
-        # — devto was removed from rejection map and shipped as a
-        # chrome-publish channel in that PR.
-        _REJECTED_PLATFORMS.pop("wordpresscom")
+        # Happy-path R12: delete entry, then register normally. Uses a
+        # synthetic rejected key — wordpresscom is no longer a live
+        # rejection entry after Phase 1 (un-rejected + re-registered as
+        # dofollow="uncertain" by the 2026-05-26 audit).
+        _REJECTED_PLATFORMS["_audit_reject"] = (
+            "synthetic rejection for the un-rejection-by-deletion gate test — "
+            "padded to satisfy the >=80-char rationale shape xxxxxxxxxxxxxxxxxx"
+        )
+        _REJECTED_PLATFORMS.pop("_audit_reject")
         register(
-            "wordpresscom",
+            "_audit_reject",
             _FakeAdapter,
             dofollow=False,
             rationale=(
@@ -266,5 +275,5 @@ class TestSyntheticRedPaths:
             ),
             referral_value="low",  # nofollow now also requires referral_value (Plan 2026-05-25-001)
         )
-        assert dofollow_status("wordpresscom") is False
-        assert "wordpresscom" not in _REJECTED_PLATFORMS
+        assert dofollow_status("_audit_reject") is False
+        assert "_audit_reject" not in _REJECTED_PLATFORMS

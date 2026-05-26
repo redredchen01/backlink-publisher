@@ -28,23 +28,41 @@ from backlink_publisher.config import Config
 from backlink_publisher._util.errors import DependencyError
 from ..registry import dispatch, register, registered_platforms
 from .._manifests import (
+    BEEHIIV_MANIFEST,
     BLOGGER_MANIFEST,
+    CNBLOGS_MANIFEST,
+    CSDN_MANIFEST,
     DEVTO_MANIFEST,
+    GHOST_MANIFEST,
     GHPAGES_MANIFEST,
+    HABR_MANIFEST,
+    HASHNODE_MANIFEST,
+    JIANSHU_MANIFEST,
+    JUEJIN_MANIFEST,
+    LINKEDIN_MANIFEST,
     LIVEJOURNAL_MANIFEST,
     MASTODON_MANIFEST,
     MEDIUM_MANIFEST,
+    NOTE_MANIFEST,
     NOTION_MANIFEST,
+    PIKABU_MANIFEST,
+    RENTRY_MANIFEST,
+    SEGMENTFAULT_MANIFEST,
+    SUBSTACK_MANIFEST,
     TELEGRAPH_MANIFEST,
+    TUMBLR_MANIFEST,
     TXTFYI_MANIFEST,
     VELOG_MANIFEST,
+    WORDPRESSCOM_MANIFEST,
+    WRITEAS_MANIFEST,
+    ZHIHU_MANIFEST,
 )
 from .._verify import DryRunInterceptError, VerifyResult, dry_run_intercept
 from .base import AdapterResult
 from .blogger_api import BloggerAPIAdapter
 from .ghpages import GitHubPagesAPIAdapter
 from .devto_api import DevtoAPIAdapter
-from .instant_web import TelegraphCdpAdapter
+from .instant_web import TelegraphCdpAdapter  # noqa: F401  kept for test import, not yet wired
 from .livejournal_api import LivejournalAPIAdapter
 from .txtfyi_api import TxtfyiFormPostAdapter
 from .medium_api import MediumAPIAdapter
@@ -53,6 +71,24 @@ from .medium_browser import MediumBrowserAdapter
 from .notion_api import NotionAPIAdapter
 from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
+from .wordpresscom_api import WordpresscomAPIAdapter
+from .cnblogs_api import CNBlogsAPIAdapter
+from .hashnode_graphql import HashnodeGraphQLAdapter
+from .writeas_api import WriteasAPIAdapter
+from .tumblr_api import TumblrAPIAdapter
+from .juejin_api import JuejinAPIAdapter
+from .csdn_api import CSDNAPIAdapter
+from .zhihu_api import ZhihuAPIAdapter
+from .linkedin_api import LinkedInAPIAdapter
+from .ghost_api import GhostAPIAdapter
+from .beehiiv_api import BeehiivAPIAdapter
+from .segmentfault_api import SegmentFaultAPIAdapter
+from .substack_api import SubstackAPIAdapter
+from .note_api import NoteAPIAdapter
+from .habr_api import HabrAPIAdapter
+from .jianshu_api import JianshuAPIAdapter
+from .rentry_api import RentryAPIAdapter
+from .pikabu_api import PikabuAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
 # RECIPES["velog"] before the registration line below references it.
@@ -82,6 +118,158 @@ from ._nofollow_rationales import NOFOLLOW_RATIONALES as _R
 # ``**<SLUG>_MANIFEST`` splat here. The dispatcher module stays focused
 # on register() wiring and adapter imports.
 register("blogger", BloggerAPIAdapter, dofollow=True, **BLOGGER_MANIFEST)
+# Phase 1 dofollow truth audit (2026-05-26): every adapter below shipped
+# with bare ``dofollow=True`` and no evidence. Hard server-side
+# nofollow/redirect-interstitial evidence => dofollow=False; no
+# OUR-pipeline canary => dofollow="uncertain". Rationales live in
+# ``_nofollow_rationales`` (_R). Operator flips "uncertain" -> True by
+# running a fresh canary and reading verify_link_attributes (the
+# livejournal/txtfyi workflow).
+register(
+    "wordpresscom",
+    WordpresscomAPIAdapter,
+    dofollow="uncertain",  # evidence conflict (#108->#109 vs 2026-05 recheck); canary pending
+    rationale=_R["wordpresscom"],
+    referral_value="high",
+    **WORDPRESSCOM_MANIFEST,
+)
+register(
+    "cnblogs",
+    CNBlogsAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
+    rationale=_R["cnblogs"],
+    referral_value="high",
+    **CNBLOGS_MANIFEST,
+)
+register(
+    "hashnode",
+    HashnodeGraphQLAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; canary pending; retiring (PR #204)
+    rationale=_R["hashnode"],
+    referral_value="high",
+    **HASHNODE_MANIFEST,
+)
+register(
+    "writeas",
+    WriteasAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; canary pending; retiring (PR #202)
+    rationale=_R["writeas"],
+    referral_value="low",
+    **WRITEAS_MANIFEST,
+)
+register(
+    "juejin",
+    JuejinAPIAdapter,
+    dofollow=False,  # link.juejin.cn redirect interstitial strips equity
+    rationale=_R["juejin"],
+    referral_value="high",
+    **JUEJIN_MANIFEST,
+)
+register(
+    "csdn",
+    CSDNAPIAdapter,
+    dofollow=False,  # link.csdn.net redirect interstitial strips equity
+    rationale=_R["csdn"],
+    referral_value="high",
+    **CSDN_MANIFEST,
+)
+register(
+    "zhihu",
+    ZhihuAPIAdapter,
+    dofollow=False,  # link.zhihu.com 302 interstitial + rel=nofollow noreferrer
+    rationale=_R["zhihu"],
+    referral_value="high",
+    **ZHIHU_MANIFEST,
+)
+register(
+    "ghost",
+    GhostAPIAdapter,
+    dofollow="uncertain",  # instance-dependent; editor default follow but unverified path
+    rationale=_R["ghost"],
+    referral_value="high",
+    **GHOST_MANIFEST,
+)
+register(
+    "beehiiv",
+    BeehiivAPIAdapter,
+    dofollow=False,  # links via bhclick.com / link.mail.beehiiv.com tracking redirects
+    rationale=_R["beehiiv"],
+    referral_value="low",
+    **BEEHIIV_MANIFEST,
+)
+register(
+    "segmentfault",
+    SegmentFaultAPIAdapter,
+    dofollow=False,  # link.segmentfault.com 302 interstitial (verified live)
+    rationale=_R["segmentfault"],
+    referral_value="high",
+    **SEGMENTFAULT_MANIFEST,
+)
+register(
+    "substack",
+    SubstackAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow; OUR canary pending
+    rationale=_R["substack"],
+    referral_value="high",
+    **SUBSTACK_MANIFEST,
+)
+register(
+    "note",
+    NoteAPIAdapter,
+    dofollow=False,  # note.com auto rel=nofollow on all links (JP SEO documented)
+    rationale=_R["note"],
+    referral_value="high",
+    **NOTE_MANIFEST,
+)
+register(
+    "habr",
+    HabrAPIAdapter,
+    dofollow="uncertain",  # unverifiable (fetch blocked, no primary source)
+    rationale=_R["habr"],
+    referral_value="high",
+    **HABR_MANIFEST,
+)
+register(
+    "jianshu",
+    JianshuAPIAdapter,
+    dofollow=False,  # link.jianshu.com/go redirect interstitial strips equity
+    rationale=_R["jianshu"],
+    referral_value="high",
+    **JIANSHU_MANIFEST,
+)
+register(
+    "rentry",
+    RentryAPIAdapter,
+    dofollow="uncertain",  # 3rd-party live check = dofollow (rel=noreferrer); canary pending
+    rationale=_R["rentry"],
+    referral_value="low",
+    **RENTRY_MANIFEST,
+)
+register(
+    "pikabu",
+    PikabuAPIAdapter,
+    dofollow=False,  # /go/ and /link/ redirect interstitials (verified live)
+    rationale=_R["pikabu"],
+    referral_value="high",
+    **PIKABU_MANIFEST,
+)
+register(
+    "linkedin",
+    LinkedInAPIAdapter,
+    dofollow=False,
+    rationale=_R["linkedin"],
+    referral_value="high",
+    **LINKEDIN_MANIFEST,
+    visibility="experimental",
+)
+register(
+    "tumblr",
+    TumblrAPIAdapter,
+    dofollow=False,
+    rationale=_R["tumblr"],
+    referral_value="high",
+    **TUMBLR_MANIFEST,
+)
 register(
     "medium",
     MediumAPIAdapter,
@@ -748,8 +936,6 @@ def _verify_velog_live(config: Config) -> VerifyResult:
         last_verify_result="ok",
         dofollow=True,
     )
-
-
 
 
 def _utc_now_iso() -> str:
