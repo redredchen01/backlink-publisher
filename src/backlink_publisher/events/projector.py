@@ -30,6 +30,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .._util.url import canonicalize_url
+from . import kinds
 from .scrubber import scrub_text
 from .store import EventStore
 
@@ -39,10 +40,8 @@ _RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-[0-9a-f]{8}$")
 _HISTORY_FILENAME = "publish-history.json"
 _DRAFTS_FILENAME = "draft-queue.json"
 
-# Checkpoint success statuses. Production writes "done"
-# (cli/publish_backlinks.py / cli/_resume.py); "succeeded" is the legacy/test
-# form. Both project to a success event. (Plan 005 / D1.)
-_SUCCESS_STATUSES = ("succeeded", "done")
+# Checkpoint success statuses ("done" in production, "succeeded" legacy/test)
+# now live in events/kinds.py STATUS_MAP, classified via kinds.classify().
 
 
 
@@ -314,7 +313,13 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
             if prior_state == next_items[item_id]:
                 continue
 
-            if status == "pending":
+            # Classify through the registry (Seam B). checkpoint is the
+            # authoritative publish-outcome source, so an unrecognized status
+            # is genuine drift -> quarantine (the P0 class), never a silent
+            # fall-through.
+            outcome = kinds.classify("checkpoint", status)
+
+            if outcome is kinds.PUBLISH_INTENT:  # status == "pending"
                 if prior_state is not None:
                     # An item already projected past pending should not
                     # regress; ignore unexpected rewinds.
@@ -339,7 +344,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            elif status in _SUCCESS_STATUSES:
+            elif outcome is kinds.CONFIRMED_FAMILY:  # status in done/succeeded
                 live_host = _host_of(published_url) or host
                 payload = item.get("payload") or {}
                 _body = payload.get("content_markdown") if isinstance(payload, dict) else None
@@ -399,7 +404,7 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            elif status == "failed":
+            elif outcome is kinds.PUBLISH_FAILED:  # status == "failed"
                 dedup_key = (run_id, target_url or "", "publish.failed")
                 if dedup_key in seen_intent_or_failed:
                     continue
@@ -423,6 +428,25 @@ def _project_checkpoint(path: Path, store: EventStore) -> ProjectionResult:
                     conn=conn,
                 )
                 events_inserted += 1
+
+            elif outcome is kinds.NO_EMIT:
+                # Declared intentional no-op for this source; skip silently.
+                pass
+
+            else:  # kinds.QUARANTINE — unrecognized checkpoint status (drift)
+                store.quarantine(
+                    reason=f"unmapped_status: checkpoint/{status}",
+                    failure_type="unmapped_status",
+                    source="checkpoint",
+                    run_id=run_id,
+                    source_status=status,
+                    record_identity=item_id,
+                    raw_payload={"target_url": target_url, "adapter": item.get("adapter")},
+                )
+                _log.warning(
+                    "RECON projector: quarantined unmapped checkpoint status "
+                    "%r (run=%s item=%s)", status, run_id, item_id
+                )
 
         _cursor_save(
             conn,
@@ -539,7 +563,11 @@ def _project_history(
             article_urls = row.get("article_urls") or []
             language = row.get("language") if isinstance(row.get("language"), str) else None
 
-            if status == "published":
+            # history emits only for published/failed; every other status is a
+            # transient state owned by another source -> NO_EMIT default (no
+            # quarantine).
+            outcome = kinds.classify("history", status)
+            if outcome is kinds.PUBLISH_CONFIRMED:  # status == "published"
                 if not isinstance(article_urls, list) or not article_urls:
                     # No live URL means cross-source dedup cannot fire;
                     # still emit a confirmed event so consumers see the
@@ -599,7 +627,7 @@ def _project_history(
                     next_seen.append(row_id)
                     seen_ids.add(row_id)
 
-            elif status == "failed":
+            elif outcome is kinds.PUBLISH_FAILED:  # status == "failed"
                 error = row.get("error") or ""
                 cleaned, hits = scrub_text(error)
                 store.append(
@@ -623,8 +651,9 @@ def _project_history(
                 next_seen.append(row_id)
                 seen_ids.add(row_id)
             else:
-                # "drafted" or other transient statuses: tracked in cursor
-                # so we don't reprocess, but no event emitted from history.
+                # NO_EMIT: "drafted"/other transient statuses are owned by the
+                # drafts queue — tracked in cursor so we don't reprocess, but no
+                # event emitted from history. Intentional, NOT quarantined.
                 next_seen.append(row_id)
                 seen_ids.add(row_id)
 
@@ -687,9 +716,11 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
             except ValueError:
                 ts_raw, ts_utc = published_at, None
 
-            transitioned_to_published = status == "published"
+            # drafts owns scheduled/drafted; "failed"/other are owned by
+            # history -> NO_EMIT default (no quarantine).
+            outcome = kinds.classify("drafts", status)
 
-            if transitioned_to_published:
+            if outcome is kinds.PUBLISH_CONFIRMED:  # status == "published"
                 article_urls = row.get("article_urls") or []
                 if not isinstance(article_urls, list) or not article_urls:
                     # Published without URL: emit event, skip article row.
@@ -734,7 +765,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                     )
                     events_inserted += 1
 
-            elif status == "scheduled":
+            elif outcome is kinds.DRAFT_SCHEDULED:  # status == "scheduled"
                 if prior_status == "scheduled":
                     continue
                 store.append(
@@ -746,7 +777,7 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            elif status == "drafted":
+            elif outcome is kinds.DRAFT_CREATED:  # status == "drafted"
                 if prior_status is not None:
                     # Already past first sight; only emit draft.created
                     # on the first encounter.
@@ -760,8 +791,12 @@ def _project_drafts(path: Path, store: EventStore) -> ProjectionResult:
                 )
                 events_inserted += 1
 
-            # "failed" or other states: tracked but not emitted (history
-            # is the system of record for failure events).
+            else:
+                # NO_EMIT: "failed"/other states are owned by history (the
+                # system of record for failure events) — tracked in cursor
+                # (next_items above) but no event emitted. Intentional, NOT
+                # quarantined.
+                pass
 
         _cursor_save(
             conn,
