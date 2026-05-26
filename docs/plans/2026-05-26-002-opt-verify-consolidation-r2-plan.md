@@ -3,11 +3,7 @@ title: "opt: adapters/__init__.py verify consolidation R2"
 type: refactor
 status: active
 date: 2026-05-26
-claims:
-  paths:
-    - src/backlink_publisher/publishing/adapters/__init__.py
-    - monolith_budget.toml
-  shas: []
+claims: {}
 ---
 
 # opt: adapters/`__init__.py` verify consolidation R2
