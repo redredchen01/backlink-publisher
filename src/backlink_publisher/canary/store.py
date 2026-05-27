@@ -150,19 +150,25 @@ def read_canary_config(
 ) -> dict[str, Any] | None:
     """Read the ``[canary.<platform>]`` post config for ``platform``.
 
-    Returns ``{"post_url": str, "expected_target": str, "hard_skip": bool}``
-    when the section exists, else ``None`` (platform not configured →
-    Unit 3 surfaces it as ``not-configured``).
+    Returns ``{"post_url", "expected_target", "marker", "hard_skip"}`` when
+    the section exists, else ``None`` (platform not configured → Unit 3
+    surfaces it as ``not-configured``).
 
+    ``marker`` is the private, per-seeded-post sentinel the canary asserts is
+    present before it will ever classify ``drift-confirmed`` (a missing marker
+    means the page is not proven to be the canary post, so a missing anchor
+    stays ``advisory`` rather than a false drift). ``None`` when unset.
     ``hard_skip`` defaults to ``False`` when absent. The opt-in hard-skip
     machinery that consumes it lands in Unit 4.
     """
     entry = _load_canary_section(config_path).get(platform)
     if not isinstance(entry, dict):
         return None
+    marker = entry.get("marker")
     return {
         "post_url": str(entry.get("post_url", "")),
         "expected_target": str(entry.get("expected_target", "")),
+        "marker": str(marker) if marker else None,
         "hard_skip": bool(entry.get("hard_skip", False)),
     }
 

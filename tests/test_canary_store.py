@@ -208,6 +208,7 @@ def test_read_canary_config_round_trips(tmp_path):
                 '[canary.blogger]',
                 'post_url = "https://canary.blogspot.com/p.html"',
                 'expected_target = "https://example.com/"',
+                'marker = "cnry-7f3a9c2e"',
                 'hard_skip = true',
             ]
         )
@@ -217,8 +218,26 @@ def test_read_canary_config_round_trips(tmp_path):
     assert entry == {
         "post_url": "https://canary.blogspot.com/p.html",
         "expected_target": "https://example.com/",
+        "marker": "cnry-7f3a9c2e",
         "hard_skip": True,
     }
+
+
+def test_read_canary_config_marker_defaults_none(tmp_path):
+    cfg = _write_config(
+        tmp_path,
+        "\n".join(
+            [
+                '[canary.blogger]',
+                'post_url = "https://canary.blogspot.com/p.html"',
+                'expected_target = "https://example.com/"',
+            ]
+        )
+        + "\n",
+    )
+    entry = store.read_canary_config("blogger", config_path=cfg)
+    assert entry is not None
+    assert entry["marker"] is None  # no marker → drift can never be confirmed
 
 
 def test_read_canary_config_hard_skip_defaults_false(tmp_path):
