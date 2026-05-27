@@ -36,11 +36,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request
 
 from backlink_publisher._util.logger import opencli_logger
-from backlink_publisher._util.url import normalize_url_for_fetch
+from backlink_publisher._util.url import normalize_url_for_fetch, safe_urlparse
 from backlink_publisher._util.net_safety import (
     _check_url_for_ssrf,
     _make_ssrf_opener,
@@ -309,9 +308,9 @@ def _is_valid_http_url(url: str) -> bool:
     Run before any network attempt so callers get a deterministic
     ``invalid_url`` rather than a flaky network error for malformed input.
     """
-    if not isinstance(url, str) or not url:
+    parsed = safe_urlparse(url)
+    if parsed is None:
         return False
-    parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         return False
     if not parsed.netloc:

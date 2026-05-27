@@ -118,3 +118,13 @@ def test_check_url_once_ascii_url_passthrough() -> None:
         linkcheck._check_url_once("https://example.com/api/v1?q=1")
 
     assert captured == ["https://example.com/api/v1?q=1"]
+
+
+@pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+def test_check_url_once_malformed_ipv6_returns_invalid_not_raises(bad) -> None:
+    """A malformed-IPv6 URL must yield the (False, 'invalid URL') verdict, not a
+    bare ValueError — _check_url_once parses before the scheme/netloc check, so
+    the raise would otherwise escape its never-raises contract (Plan 006 R2)."""
+    ok, err = linkcheck._check_url_once(bad)
+    assert ok is False
+    assert err is not None and "invalid URL" in err

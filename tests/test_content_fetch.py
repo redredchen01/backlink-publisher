@@ -267,6 +267,15 @@ def test_invalid_url_none_handled_gracefully():
     assert reason == "invalid_url"
 
 
+@pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+def test_is_valid_http_url_malformed_ipv6_returns_false_not_raises(bad):
+    """_is_valid_http_url must return False on malformed IPv6, never raise —
+    its contract is a deterministic invalid verdict before any network attempt
+    (Plan 2026-05-27-006 R4)."""
+    from backlink_publisher.content.fetch import _is_valid_http_url
+    assert _is_valid_http_url(bad) is False
+
+
 # ── cache behaviour (Unit 2 lives in same module — basic cache cases) ──
 
 
