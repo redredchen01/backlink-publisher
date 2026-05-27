@@ -205,13 +205,24 @@ def _emit_error_envelope(error_class: str, exit_code: int, message: str) -> None
         pass
 
 
-def emit_error(message: str, exit_code: int = 5) -> None:
-    """Print diagnostic to stderr and exit."""
+def emit_error(
+    message: str, exit_code: int = 5, *, error_class: str | None = None
+) -> None:
+    """Print diagnostic to stderr and exit.
+
+    ``error_class`` overrides the envelope's class name. Pass it when the caller
+    holds a specific exception whose type the operator must see (e.g.
+    ``AuthExpiredError``) — otherwise the class is derived from ``exit_code`` via
+    ``_EXIT_CODE_CLASS_NAME``, which would collapse it to the coarse family name
+    (``DependencyError`` for exit 3) and defeat the typed-error contract.
+    """
     import sys
 
     print(message, file=sys.stderr, flush=True)
     _emit_error_envelope(
-        _EXIT_CODE_CLASS_NAME.get(exit_code, "PipelineError"), exit_code, message
+        error_class or _EXIT_CODE_CLASS_NAME.get(exit_code, "PipelineError"),
+        exit_code,
+        message,
     )
     raise SystemExit(exit_code)
 

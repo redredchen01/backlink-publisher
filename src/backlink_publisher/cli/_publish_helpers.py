@@ -478,7 +478,9 @@ def _handle_auth_expired(
         f"auth expired: {exc}",
         extra={"id": row.get("id"), "platform": row.get("platform", "")},
     )
-    emit_error(str(exc), exit_code=3)
+    # error_class = the real exception type so the operator sees "AuthExpiredError"
+    # (re-bind credentials), not the coarse "DependencyError" the exit-3 map yields.
+    emit_error(str(exc), exit_code=3, error_class=type(exc).__name__)
 
 
 def _medium_throttle_sleep(

@@ -110,6 +110,22 @@ def test_emit_error_maps_exit_code_to_class_name(capsys):
     assert env.message == "dependency missing"
 
 
+def test_emit_error_class_override_beats_exit_code_map(capsys):
+    # AuthExpiredError exits 3, which the map would collapse to "DependencyError".
+    # The explicit override must win so the operator sees the real, actionable type.
+    with pytest.raises(SystemExit) as ei:
+        errors.emit_error(
+            "channel 'medium' credentials expired",
+            exit_code=3,
+            error_class="AuthExpiredError",
+        )
+    assert ei.value.code == 3
+    env = parse(capsys.readouterr().err)
+    assert env is not None
+    assert env.error_class == "AuthExpiredError"  # not "DependencyError"
+    assert env.exit_code == 3
+
+
 def test_emit_error_unknown_exit_code_falls_back(capsys):
     with pytest.raises(SystemExit):
         errors.emit_error("weird", exit_code=42)

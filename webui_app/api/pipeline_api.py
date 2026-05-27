@@ -16,6 +16,7 @@ from typing import Any
 from backlink_publisher._util.error_envelope import parse as _parse_envelope
 
 from ..helpers.cli_runner import (
+    _MAX_SURFACED_ERROR,
     run_pipe,
     strip_cli_diagnostic_banner,
     surface_cli_error,
@@ -86,10 +87,17 @@ def _typed_error_result(stderr: str, fallback_label: str) -> PipeResult:
     """
     env = _parse_envelope(stderr)
     if env is not None:
+        # Bound the message the same way surface_cli_error bounds QUARANTINE text:
+        # an envelope message can be large (validate aggregate) or carry untrusted
+        # content (a target URL / fetched snippet), and it flows verbatim into logs
+        # and the persisted history JSON. Cap it so it can't flood either.
+        message = env.message
+        if len(message) > _MAX_SURFACED_ERROR:
+            message = message[:_MAX_SURFACED_ERROR].rstrip() + " …(truncated)"
         return PipeResult(
             stderr=stderr,
             success=False,
-            error=env.message,
+            error=message,
             error_class=env.error_class,
             exit_code=env.exit_code,
         )

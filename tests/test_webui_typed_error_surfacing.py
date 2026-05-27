@@ -101,6 +101,40 @@ def test_describe_cli_error_falls_back_to_full_text():
     assert out == surface_cli_error(stderr)
 
 
+def test_pipeline_api_caps_oversized_envelope_message():
+    # A huge envelope message (validate aggregate / untrusted snippet) must be
+    # bounded the same as surface_cli_error — it flows into logs + history JSON.
+    huge = "x" * 50_000
+    stderr = _stderr_with_envelope("InputValidationError", 2, huge)
+    with mock.patch(
+        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+    ):
+        result = PipelineAPI().validate("{}")
+    assert len(result.error) < len(huge)
+    assert result.error.endswith("…(truncated)")
+    assert len(result.error) <= 4000 + len(" …(truncated)")
+
+
+def test_quarantine_does_not_leak_raw_sentinel():
+    # A malformed/truncated envelope (parse rejects it) must NOT surface the raw
+    # __BLP_ERR__ sentinel JSON to the operator — strip it on the human path.
+    stderr = _BANNER + "__BLP_ERR__ {not valid json\nKeyError: 'x'\n"
+    with mock.patch(
+        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+    ):
+        result = PipelineAPI().publish("{}", "medium", "draft")
+    assert result.error_class == "unrecognized"
+    assert "__BLP_ERR__" not in result.error
+    assert "KeyError: 'x'" in result.error  # the real error still surfaces
+
+
+def test_describe_cli_error_strips_malformed_sentinel():
+    stderr = _BANNER + "__BLP_ERR__ {broken\nboom: real error\n"
+    out = describe_cli_error(stderr)
+    assert "__BLP_ERR__" not in out
+    assert "boom: real error" in out
+
+
 def test_pipe_result_error_is_string_backward_compatible():
     # .error stays a plain str so existing slicing/format consumers don't break.
     r = PipeResult(success=False, error="boom", error_class="UsageError", exit_code=1)

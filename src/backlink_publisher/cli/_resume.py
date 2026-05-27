@@ -242,7 +242,8 @@ def _run_resume(args: Any) -> None:
                 f"auth expired: {exc}",
                 extra={"id": item["id"], "platform": platform},
             )
-            emit_error(str(exc), exit_code=3)
+            # Surface the real class (AuthExpiredError), not exit-3's "DependencyError".
+            emit_error(str(exc), exit_code=3, error_class=type(exc).__name__)
             return
         except BannerUploadError as exc:
             _record_resume_failure(

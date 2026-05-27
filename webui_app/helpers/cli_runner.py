@@ -48,6 +48,17 @@ def strip_cli_diagnostic_banner(stderr: str) -> str:
     """
     if not stderr:
         return stderr
+    # Drop the machine-readable typed-error envelope line(s) first. They are parsed
+    # separately into PipeResult.error_class / describe_cli_error and must never
+    # reach a human view — including the QUARANTINE fallback (a malformed envelope
+    # that parse() rejected) and the scheduler's failure path, both of which clean
+    # stderr through here. Removed in place (line + its newline) so the banner's
+    # own newline structure survives for _BANNER_RE below.
+    from backlink_publisher._util.error_envelope import SENTINEL
+
+    stderr = re.sub(
+        rf"^[ \t]*{re.escape(SENTINEL)}.*\n?", "", stderr, flags=re.MULTILINE
+    )
     cleaned, n = _BANNER_RE.subn("", stderr, count=1)
     cleaned = cleaned.lstrip("\n").rstrip()
     if n and not cleaned:
