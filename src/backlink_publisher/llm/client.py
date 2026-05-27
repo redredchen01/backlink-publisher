@@ -17,6 +17,7 @@ The import-isolation invariant is enforced by ``tests/test_llm_client.py``.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import requests
@@ -192,7 +193,7 @@ def _build_comment_prompt(
     return system_msg, user_msg
 
 
-_PROMPT_BUILDERS: dict[str, object] = {
+_PROMPT_BUILDERS: dict[str, Callable[[str, str, str], tuple[str, str]]] = {
     "article": _build_article_prompt,
     "comment": _build_comment_prompt,
 }
@@ -257,7 +258,7 @@ def generate_link_text(
     safe_anchor = _sanitize_input(anchor_text)
     safe_lang = _sanitize_input(language)
 
-    system_msg, user_msg = build_prompt(safe_url, safe_anchor, safe_lang)  # type: ignore[operator]
+    system_msg, user_msg = build_prompt(safe_url, safe_anchor, safe_lang)
     if correction_hint:
         user_msg = f"{user_msg}\n\nCorrection needed: {correction_hint}"
 
@@ -318,5 +319,9 @@ def generate_link_text(
         raise ExternalServiceError(
             f"LLM response choices[0].message.content is not a string: "
             f"{_redact_for_log(repr(content))}"
+        )
+    if not content.strip():
+        raise ExternalServiceError(
+            "LLM response choices[0].message.content is empty or whitespace-only"
         )
     return content

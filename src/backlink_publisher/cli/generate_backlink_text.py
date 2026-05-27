@@ -369,7 +369,7 @@ def _make_correction_hint(reason: str) -> str | None:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 
-def main(argv: list[str] | None = None) -> None:  # noqa: C901
+def main(argv: list[str] | None = None) -> None:  # noqa: C901 — argparse top-level dispatcher; real logic lives in helpers
     import argparse
     import os
 
@@ -784,6 +784,7 @@ def _run_generate(validated: list[dict], args) -> list[dict]:
                         generate_logger.warn(
                             "generate_corrective_transport_error",
                             detail=_redact_for_log(str(exc)),
+                            validation_reason=vresult["reason"],
                         )
                     output.append(_make_rejected(rec, vresult["reason"]))
                     continue

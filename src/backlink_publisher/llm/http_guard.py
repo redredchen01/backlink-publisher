@@ -119,7 +119,7 @@ def safe_post_json(
     body = b""
     for chunk in resp.iter_content(chunk_size=8192):
         body += chunk
-        if len(body) > LLM_MAX_RESPONSE_BYTES:
+        if len(body) >= LLM_MAX_RESPONSE_BYTES:
             raise ValueError(
                 f"response_too_large: exceeded {LLM_MAX_RESPONSE_BYTES} bytes"
             )

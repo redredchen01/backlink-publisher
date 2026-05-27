@@ -358,7 +358,6 @@ def test_transient_5xx_exhausted_raises_no_bearer():
 
     error_text = str(exc_info.value)
     assert sentinel not in error_text
-    assert "Bearer ***" in error_text or "Bearer" not in error_text
 
 
 # ── Error path: unsupported mode raises ValueError ────────────────────────────

@@ -1439,6 +1439,94 @@ def test_userinfo_endpoint_secret_not_in_stderr(monkeypatch, capsys):
     )
 
 
+def test_validate_generated_text_length_out_of_bounds_article_too_long():
+    """Article body > 400 words → length_out_of_bounds (TST-001)."""
+    from backlink_publisher.cli.generate_backlink_text import _validate_generated_text
+
+    # Build >400-word article with exactly one Markdown link.
+    filler_word = "word"
+    # 420 words of filler around the required link
+    filler = (" ".join([filler_word] * 210) + " ")
+    link = "[example anchor](https://example.com/)"
+    text = filler + link + " " + filler
+    result = _validate_generated_text(
+        text,
+        target_url="https://example.com/",
+        anchor_text="example anchor",
+        mode="article",
+    )
+    assert result == {"ok": False, "reason": "length_out_of_bounds"}
+
+
+def test_validate_generated_text_length_out_of_bounds_comment_too_long():
+    """Comment body > 80 words → length_out_of_bounds (TST-002)."""
+    from backlink_publisher.cli.generate_backlink_text import _validate_generated_text
+
+    # Build 90-word comment with exactly one Markdown link.
+    filler_word = "word"
+    filler = " ".join([filler_word] * 44)
+    link = "[example anchor](https://example.com/)"
+    # filler (44) + link (counted as ~3 words) + filler (44) ≈ 91 words
+    text = filler + " " + link + " " + filler
+    result = _validate_generated_text(
+        text,
+        target_url="https://example.com/",
+        anchor_text="example anchor",
+        mode="comment",
+    )
+    assert result == {"ok": False, "reason": "length_out_of_bounds"}
+
+
+def test_cli_dry_run_no_http_call(capsys, monkeypatch):
+    """--dry-run: HTTP must never be called regardless of valid input (TST-003)."""
+    import sys, io
+    import unittest.mock as mock
+    from backlink_publisher.cli.generate_backlink_text import main
+
+    record = json.dumps({
+        "target_url": "https://example.com/",
+        "anchor_text": "example anchor",
+        "mode": "comment",
+    })
+
+    old_stdin = sys.stdin
+    sys.stdin = io.StringIO(record)
+    try:
+        with mock.patch("backlink_publisher.llm.client.safe_post_json") as mock_post:
+            try:
+                main(["--dry-run"])
+            except SystemExit as exc:
+                assert exc.code in (None, 0)
+            assert mock_post.call_count == 0, (
+                f"HTTP was called {mock_post.call_count} time(s) during dry-run — must be zero"
+            )
+    finally:
+        sys.stdin = old_stdin
+
+
+def test_validate_generated_text_multiple_extra_links_stripped():
+    """Multiple extra links to different domains → all stripped; stripped_extra_links counts them (TST-004)."""
+    from backlink_publisher.cli.generate_backlink_text import _validate_generated_text
+
+    base_text = _make_comment_text("https://example.com/", "example anchor")
+    # Insert two extra links to different hosts
+    extra1 = "[spam1](https://spam1.com/a)"
+    extra2 = "[spam2](https://spam2.net/b)"
+    text = extra1 + " " + base_text + " " + extra2
+    result = _validate_generated_text(
+        text,
+        target_url="https://example.com/",
+        anchor_text="example anchor",
+        mode="comment",
+    )
+    assert result["ok"] is True
+    assert result["stripped_extra_links"] == 2
+    assert "spam1.com" not in result["text"]
+    assert "spam2.net" not in result["text"]
+    # The real link must survive
+    assert "example.com" in result["text"]
+
+
 def test_cli_help_banner_subprocess():
     """python -m backlink_publisher.cli.generate_backlink_text --help emits usage."""
     env = os.environ.copy()
