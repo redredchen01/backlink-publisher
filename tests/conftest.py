@@ -659,7 +659,13 @@ def _tw_events_db_fingerprint(db_path: Path) -> "str | None":
                 for tbl in tables:
                     try:
                         rows = conn.execute(f"SELECT * FROM {tbl}").fetchall()
-                        rows_repr.extend(sorted(str(tuple(r)) for r in rows))
+                        rows_repr.extend(sorted(
+                            "(" + ",".join(
+                                v.hex() if isinstance(v, bytes) else repr(v)
+                                for v in r
+                            ) + ")"
+                            for r in rows
+                        ))
                     except _sqlite3.Error:
                         pass
                 combined = "\n".join(rows_repr)
@@ -715,9 +721,9 @@ def snapshot_protected_files(
                 continue
             if _tw_is_excluded(p, root):
                 continue
-            if not _tw_is_protected(p.name):
-                continue
             rel = _tw_relpath(p, root)
+            if not _tw_is_protected(str(p.relative_to(root))):
+                continue
             if p.name == "events.db":
                 state[rel] = _tw_events_db_fingerprint(p)
             else:
