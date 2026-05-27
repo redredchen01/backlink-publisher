@@ -419,6 +419,26 @@ def auth_type(name: str) -> str | None:
     return _AUTH_TYPE_BY_PLATFORM.get(name)
 
 
+def platforms_by_auth_type(target: str) -> frozenset[str]:
+    """Return the set of active platforms whose binding ``auth_type`` equals
+    ``target`` (e.g. ``"paste_blob"`` -> ``{"csdn", "juejin", "note",
+    "substack"}``); empty for an unknown auth-type.
+
+    This is the single registry reverse-lookup the credential-save drift guard
+    (``tests/test_credential_save_dispatch_drift.py``, Plan 2026-05-27-008)
+    reads to assert each save-dispatch map's keys are a **subset** of their
+    declared auth_type bucket. Subset, not equality: some bucket members are
+    intentionally not WebUI-save-dispatched (config-file-only like ``hashnode``,
+    dedicated routes like ``ghpages``/``notion``, or pending like ``tumblr``).
+
+    Computed live from ``active_platforms()`` on every call (never cached), so a
+    newly-registered platform is reflected without a reload and the half-loaded
+    import-time-assert trap (``invert-drift-check-when-invariant-becomes-dynamic``)
+    cannot apply — callers must invoke it at runtime, never at import.
+    """
+    return frozenset(p for p in active_platforms() if auth_type(p) == target)
+
+
 def referral_value(name: str) -> _ReferralValue | None:
     """Return the declared referral-value sub-grade (``"high"`` /
     ``"low"``) for ``name``, or ``None`` if not declared.
