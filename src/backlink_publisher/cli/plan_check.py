@@ -78,7 +78,11 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     # Local import keeps the module import-cheap (UsageError isn't needed for
     # the schema/git tiers tested in Unit 1/2).
-    from backlink_publisher._util.errors import UsageError, handle_error
+    from backlink_publisher._util.errors import (
+        UsageError,
+        emit_envelope_and_exit,
+        handle_error,
+    )
 
     parser = argparse.ArgumentParser(
         prog="plan-check",
@@ -129,7 +133,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     shas_unreachable=[],
                 )
             )
-        raise SystemExit(exc.exit_code)
+        emit_envelope_and_exit(type(exc).__name__, exc.exit_code, str(exc))
 
     # Pull the typed date for downstream JSON payload before any other branch
     # can throw — we want the date in the output even when later layers fail.
@@ -156,7 +160,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     shas_unreachable=[],
                 )
             )
-        raise SystemExit(exc.exit_code)
+        emit_envelope_and_exit(type(exc).__name__, exc.exit_code, str(exc))
 
     # --- Phase 4: grandfather skip ----------------------------------------
     try:
@@ -175,7 +179,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     shas_unreachable=[],
                 )
             )
-        raise SystemExit(exc.exit_code)
+        emit_envelope_and_exit(type(exc).__name__, exc.exit_code, str(exc))
     if is_old:
         # Pre-cutoff: silent exit 0. No stdout, no stderr, no JSON either —
         # the gate is a no-op for grandfathered plans per plan §step 8.
@@ -202,7 +206,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     shas_unreachable=[],
                 )
             )
-        raise SystemExit(exc.exit_code)
+        emit_envelope_and_exit(type(exc).__name__, exc.exit_code, str(exc))
     except (
         PlanClaimsFrontmatterSchemaError,
         PlanClaimsGlobUnsupported,
@@ -220,7 +224,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                     shas_unreachable=[],
                 )
             )
-        raise SystemExit(exc.exit_code)
+        emit_envelope_and_exit(type(exc).__name__, exc.exit_code, str(exc))
 
     # --- Phase 6: empty claims (escape hatch) → silent exit 0 -------------
     if not claims.paths and not claims.shas:
@@ -275,7 +279,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             )
         else:
             print(summary, flush=True)
-        raise SystemExit(7)
+        emit_envelope_and_exit("PlanCheckDriftError", 7, summary)
 
     # Pass — stdout one-liner.
     age = fetch_outcome.fetch_head_age_seconds

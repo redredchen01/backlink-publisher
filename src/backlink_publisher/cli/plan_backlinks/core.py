@@ -22,6 +22,7 @@ from backlink_publisher.config import (
     load_config,
 )
 from backlink_publisher._util.errors import (
+    emit_envelope_and_exit,
     emit_error,
 )
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
@@ -429,7 +430,9 @@ def main(argv: list[str] | None = None) -> None:
         for err in all_errors:
             print(err, file=sys.stderr)
         plan_logger.error(f"generation failed: {len(all_errors)} errors")
-        raise SystemExit(2)
+        emit_envelope_and_exit(
+            "InputValidationError", 2, f"generation failed: {len(all_errors)} errors"
+        )
 
     plan_logger.info(f"generated {len(outputs)} payloads")
     write_jsonl(outputs)

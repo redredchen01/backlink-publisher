@@ -6,6 +6,7 @@ import sys
 
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before config load
 from .. import config_echo
+from backlink_publisher._util.errors import emit_envelope_and_exit
 from backlink_publisher._util.jsonl import read_jsonl
 from backlink_publisher.anchor.profile import load_profile
 from backlink_publisher.config import load_config
@@ -99,7 +100,15 @@ def main(argv: list[str] | None = None) -> None:
         for line in breach_lines:
             print(line, file=sys.stderr)
         if alarm_block.get("any_breach"):
-            raise SystemExit(_EXIT_CODE_ALARM)
+            # Exit 6 is an *advisory* anchor-distribution alarm, not a crash: the
+            # report (incl. the structured `alarm` block) was emitted to stdout
+            # successfully. The envelope carries a domain-specific class name so a
+            # WebUI consumer renders it as a breach signal, not a pipeline failure.
+            emit_envelope_and_exit(
+                "AnchorDistributionAlarm",
+                _EXIT_CODE_ALARM,
+                f"anchor distribution alarm: {len(breach_lines)} target(s) breached",
+            )
         return
 
     # ── JSONL-stdin aggregate path ─────────────────────────────────────────

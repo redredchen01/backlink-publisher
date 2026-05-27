@@ -14,6 +14,7 @@ import sys
 
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before config load
 from .. import config_echo
+from backlink_publisher._util.errors import emit_error
 from backlink_publisher._util.jsonl import write_jsonl
 from backlink_publisher.config import load_config
 from backlink_publisher.ledger import build_ledger
@@ -47,7 +48,9 @@ def main(argv: list[str] | None = None) -> None:
     # Closed-set/range validation post-parse (repo convention: UsageError-style
     # exit 1, not argparse's exit 2). See [[argparse-choices-vs-usage-error]].
     if args.stale_days <= 0:
-        raise SystemExit("equity-ledger: --stale-days must be a positive integer")
+        # CPython maps SystemExit(<str>) to exit 1; emit_error matches that
+        # (exit 1 = UsageError) and additionally attaches the typed envelope.
+        emit_error("equity-ledger: --stale-days must be a positive integer", exit_code=1)
 
     # Config Echo Chamber: banner to stderr so the operator sees which config /
     # env / SHA was resolved. Missing config is fine (read-only, Safe defaults).
