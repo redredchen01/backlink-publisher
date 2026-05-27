@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from backlink_publisher.config import Config, resolve_blog_id, load_blogger_token, save_blogger_token
+from backlink_publisher.config.types import BLOGGER_LOCK_TIMEOUT_S
 from backlink_publisher._util.errors import (
     AuthExpiredError,
     BannerUploadError,
@@ -28,7 +29,7 @@ from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
 _SCOPES = ["https://www.googleapis.com/auth/blogger"]
 
-_LOCK_TIMEOUT_S = 30
+_LOCK_TIMEOUT_S = BLOGGER_LOCK_TIMEOUT_S
 
 
 @contextmanager

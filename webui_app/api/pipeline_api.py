@@ -403,7 +403,7 @@ class PipelineAPI:
     ) -> PipeResult:
         """Run ``publish-backlinks --platform <p> --mode <m>``."""
         cmd = ["publish-backlinks", "--platform", platform, "--mode", mode]
-        return self._invoke(cmd, plans_jsonl, "publish-backlinks failed")
+        return self._invoke_capture(cmd, plans_jsonl, "publish-backlinks failed")
 
     def publish_seed(self, seed_jsonl: str) -> PipeResult:
         """Run bare ``publish-backlinks`` (platform/mode carried in the seed row).
