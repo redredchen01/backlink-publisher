@@ -680,7 +680,6 @@ class TestMergeSiteUrlCategories:
 
     def test_creates_new_section_when_absent(self, tmp_path):
         from backlink_publisher.config import (
-            load_config,
             merge_site_url_categories,
         )
 

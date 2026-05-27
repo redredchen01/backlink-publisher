@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .readers import ArticleRow, StoreSnapshot, _canon
+from .readers import StoreSnapshot, _canon
 
 #: R8 static source→tier map. The draft-queue ("drafts") source lands with R4
 #: as "informational"; v1 sources are all high-signal.

@@ -55,7 +55,7 @@ def _write_storage_state(payload: dict | None = None) -> Path:
 def _mark_bound_with_last_verified(seconds_ago: float | None) -> None:
     """Helper: stamp a bound record with ``last_verified_at`` set N seconds
     ago (or ``None`` for never-verified)."""
-    from webui_store.channel_status import mark_bound, mark_verified
+    from webui_store.channel_status import mark_bound
     target = _write_storage_state()
     mark_bound("medium", target)
     if seconds_ago is not None:

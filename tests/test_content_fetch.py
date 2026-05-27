@@ -28,7 +28,6 @@ import pytest
 
 from backlink_publisher.content.fetch import (
     HEAD_SCAN_BYTES,
-    MAX_BODY_BYTES,
     reset_cache,
     verify_url_has_content,
     verify_urls_batch,

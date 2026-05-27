@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import stat
-from unittest.mock import patch
 
 import pytest
 

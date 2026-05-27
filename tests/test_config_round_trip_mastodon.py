@@ -7,7 +7,6 @@ Verifies that ``save_config(load_config(toml))`` preserves the
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 

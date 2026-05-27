@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from backlink_publisher.publishing.registry import active_platforms, registered_platforms
+from backlink_publisher.publishing.registry import active_platforms
 from webui_app import create_app
 
 
@@ -94,7 +94,6 @@ class TestPerChannelCards:
 
     def test_non_bindable_channels_have_no_bind_button(self, client):
         from backlink_publisher.cli._bind.channels import CHANNELS
-        from webui_app.binding_status import HIDDEN_FROM_UI
         resp = client.get("/settings")
         body = resp.get_data(as_text=True)
         for channel in self._visible_channels():

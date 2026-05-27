@@ -15,13 +15,11 @@ import uuid
 from pathlib import Path
 
 from backlink_publisher.config import (
-    Config,
     MediumOAuthConfig,
     load_config,
     save_config,
 )
 from backlink_publisher.config._toml_utils import (
-    _canon_subsection_key,
     _toml_heading_path,
     _toml_str,
 )

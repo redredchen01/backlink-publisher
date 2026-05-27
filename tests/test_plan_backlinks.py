@@ -11,7 +11,6 @@ from unittest.mock import patch
 import pytest
 
 from backlink_publisher.cli.plan_backlinks import main
-from backlink_publisher._util.errors import InputValidationError
 
 
 def _stderr_without_warnings(stderr: str) -> str:
@@ -525,8 +524,8 @@ def test_plan_all_languages():
     """All supported languages must produce valid output."""
     for lang in ("en", "zh-CN", "ru", "ko"):
         seed = {
-            "target_url": f"https://example.com/article",
-            "main_domain": f"https://example.com",
+            "target_url": "https://example.com/article",
+            "main_domain": "https://example.com",
             "language": lang,
             "platform": "medium",
             "url_mode": "A",
@@ -905,7 +904,6 @@ def test_from_csv_empty_file_exits_2(tmp_path):
 
 def test_from_csv_mutual_exclusion_with_input():
     """--from-csv combined with --input → exit 2."""
-    import io
     stdout, stderr, code = _run_plan(
         '{"target_url": "https://a.com"}',
         argv=["--from-csv=somefile.csv", "--input=/dev/stdin"],
@@ -932,7 +930,7 @@ def test_from_sitemap_generates_payloads():
   <url><loc>https://site.com/page1</loc></url>
   <url><loc>https://site.com/page2</loc></url>
 </urlset>"""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock
     mock_resp = MagicMock()
     mock_resp.content = sitemap_xml
     mock_resp.raise_for_status = MagicMock()
@@ -952,7 +950,6 @@ def test_from_sitemap_generates_payloads():
 
 def test_from_sitemap_network_error_exits_2():
     """--from-sitemap with network error → exit 2."""
-    from unittest.mock import patch
     with patch("backlink_publisher.http.get", side_effect=ConnectionError("offline")):
         stdout, stderr, code = _run_plan(
             "", argv=["--from-sitemap=https://example.com/sitemap.xml"]

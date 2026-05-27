@@ -7,10 +7,8 @@ surfaces — CI never launches a real browser.
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 import pytest
 

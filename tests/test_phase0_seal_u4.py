@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from backlink_publisher.cli import phase0_seal as CLI
-from backlink_publisher.phase0 import validation as V
 
 _ALLOWLIST_YAML = textwrap.dedent("""\
     schema_version: 1

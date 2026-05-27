@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import stat
 import threading
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest

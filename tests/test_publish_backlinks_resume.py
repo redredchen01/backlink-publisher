@@ -7,7 +7,7 @@ import os
 import sys
 from datetime import datetime, timezone, timedelta
 from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

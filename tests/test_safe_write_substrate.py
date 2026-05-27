@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from backlink_publisher.persistence.safe_write import atomic_write, rotate_snapshots
 

@@ -159,7 +159,7 @@ async def main() -> None:
         print(f"  token 位置: {token_locations}")
         print(f"  推荐持久化策略: {dump['_analysis']['recommended_persistence']}")
         if dropped_origins:
-            print(f"  ⚠ 已过滤的非 velog.io origin（IdP storage 防泄漏）:")
+            print("  ⚠ 已过滤的非 velog.io origin（IdP storage 防泄漏）:")
             for o in dropped_origins:
                 print(f"      - {o}")
         print()

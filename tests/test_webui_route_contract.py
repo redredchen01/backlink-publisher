@@ -1432,7 +1432,6 @@ class TestPreviewRoutes:
 class TestVelogApiRoutes:
     def test_velog_login_spawns_ok(self, client, monkeypatch, tmp_path):
         """POST /api/velog/login returns 200 + ok:true when helper reports survival."""
-        from pathlib import Path
 
         from webui_app.services import browser_login as bl
 

@@ -12,14 +12,12 @@ the publish loop must:
 from __future__ import annotations
 
 import json
-import os
 import sys
 from io import StringIO
 from unittest.mock import patch
 
 import pytest
 
-from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.cli.publish_backlinks import main
 from backlink_publisher._util.errors import AuthExpiredError
 from backlink_publisher.linkcheck.verify import VerificationResult

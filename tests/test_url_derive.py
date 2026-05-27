@@ -7,7 +7,6 @@ Pure-function tests — no network, no fixtures beyond stdlib.
 
 from __future__ import annotations
 
-import pytest
 
 from backlink_publisher._util.url_derive import derive_path_tiers, _CATEGORY_TOKEN
 

@@ -98,7 +98,7 @@ def _fetch_csrf(client) -> str:
     assert resp.status_code == 200, resp.data[:200]
     html = resp.data.decode()
     match = _re.search(r'name="csrf_token"\s+value="([^"]+)"', html)
-    assert match, f"csrf_token hidden input not found in /sites HTML"
+    assert match, "csrf_token hidden input not found in /sites HTML"
     return match.group(1)
 
 

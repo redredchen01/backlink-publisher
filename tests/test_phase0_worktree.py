@@ -5,9 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import pytest
 
-from backlink_publisher.phase0.worktree import discover_worktree_heads, WorktreeEntry
+from backlink_publisher.phase0.worktree import discover_worktree_heads
 
 
 def _run(cwd: Path, *args: str) -> str:

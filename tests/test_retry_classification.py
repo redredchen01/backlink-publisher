@@ -1,4 +1,3 @@
-import pytest
 from backlink_publisher.publishing.adapters.retry import (
     ErrorClass,
     classify_exception,

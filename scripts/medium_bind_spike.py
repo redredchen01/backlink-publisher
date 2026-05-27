@@ -95,7 +95,7 @@ def spike_3a(profile_dir: Path) -> int:
                 candidates.append(name)
 
         print()
-        print(f"Candidate auth cookies (HttpOnly + expires>7d + not in tracker list):")
+        print("Candidate auth cookies (HttpOnly + expires>7d + not in tracker list):")
         for name in candidates:
             print(f"  -> {name}")
         if not candidates:
@@ -138,7 +138,7 @@ def spike_2(profile_dir: Path) -> int:
             finally:
                 ctx.close()
             if i < 9:
-                print(f"        ... sleeping 5 min ...")
+                print("        ... sleeping 5 min ...")
                 time.sleep(300)
     return 0
 
@@ -191,10 +191,10 @@ def spike_7(profile_dir: Path) -> int:
             print(f"  -> {url}")
         print()
         print("Heuristic for Unit 1:")
-        print(f"  - if events > 5 between signin and /me: framenavigated reliable;")
-        print(f"    idle-detection (90s no nav) is viable")
-        print(f"  - if events < 3: framenavigated unreliable on SPA challenges;")
-        print(f"    fall back to wall-clock 20-min timeout in Unit 1")
+        print("  - if events > 5 between signin and /me: framenavigated reliable;")
+        print("    idle-detection (90s no nav) is viable")
+        print("  - if events < 3: framenavigated unreliable on SPA challenges;")
+        print("    fall back to wall-clock 20-min timeout in Unit 1")
         ctx.close()
     return 0
 

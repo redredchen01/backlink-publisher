@@ -106,7 +106,7 @@ def test_cli_exit_code_literals_are_documented(path: Path) -> None:
     ]
     assert not violations, (
         "undocumented exit-code literal(s) in CLI source -- pick a code from the "
-        f"0-8 contract or extend ALLOWED_EXIT_CODES with a rationale:\n  "
+        "0-8 contract or extend ALLOWED_EXIT_CODES with a rationale:\n  "
         + "\n  ".join(violations)
     )
 

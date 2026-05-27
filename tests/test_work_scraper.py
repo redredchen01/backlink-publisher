@@ -17,7 +17,6 @@ import pytest
 import requests
 
 from backlink_publisher.content import _http as scraper_http
-from backlink_publisher.content import scraper as work_scraper
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
 from backlink_publisher.content.scraper import (
     WorkMetadata,

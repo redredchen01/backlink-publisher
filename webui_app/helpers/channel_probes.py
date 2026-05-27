@@ -8,18 +8,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from flask import session
 from google.oauth2.credentials import Credentials
 
 from backlink_publisher.config import load_blogger_token, load_config
 from ._request_cache import _g_cache
-from backlink_publisher.publishing.adapters.medium_browser import (
-    sync_playwright as _spw,
-)
-from backlink_publisher.publishing.adapters.velog_graphql import (
-    _effective_cap,
-    _read_count,
-)
 
 
 def _image_gen_status(cfg) -> dict:

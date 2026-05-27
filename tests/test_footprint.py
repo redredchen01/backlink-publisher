@@ -5,13 +5,9 @@ from __future__ import annotations
 import io
 import json
 import sys
-from contextlib import redirect_stdout
-from unittest.mock import patch
 
-import pytest
 
 from backlink_publisher.footprint import (
-    LinkSignature,
     analyze_corpus,
     extract_link_signatures,
     format_report_markdown,

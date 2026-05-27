@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-import pytest
 
-from backlink_publisher.linkcheck.verify import VerificationResult, verify_published
+from backlink_publisher.linkcheck.verify import verify_published
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────

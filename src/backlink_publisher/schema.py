@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -191,291 +190,27 @@ def _check_main_domain_presence(row: dict[str, Any]) -> str | None:
     return None
 
 
-# --------------------------------------------------------------------------- #
-# Input-payload validation blocks.                                             #
-#                                                                              #
-# Mirror of the output-payload blocks below: each ``_check_input_*`` helper    #
-# validates one independent aspect and returns its own error list, embedding   #
-# the ``line {line_num}:`` prefix. ``validate_input_payload`` concatenates them #
-# in declaration order — the append ordering is a characterized contract (see  #
-# ``tests/test_schema_input_payload_characterization.py``).                    #
-# --------------------------------------------------------------------------- #
-
-
-def _check_input_required_fields(row: dict[str, Any], line_num: int) -> list[str]:
-    errors: list[str] = []
-    for field, ftype in INPUT_SCHEMA_FIELDS.items():
-        if field not in row:
-            errors.append(f"line {line_num}: missing required field '{field}'")
-        elif not isinstance(row[field], ftype):
-            errors.append(f"line {line_num}: field '{field}' must be {ftype.__name__}")
-    return errors
-
-
-def _check_input_optional_field_types(row: dict[str, Any], line_num: int) -> list[str]:
-    # Check optional fields types
-    errors: list[str] = []
-    for field, ftype in INPUT_OPTIONAL_FIELDS.items():
-        if field in row and not isinstance(row[field], ftype):
-            errors.append(f"line {line_num}: field '{field}' must be {ftype.__name__}")
-    return errors
-
-
-def _check_input_enumerated_values(row: dict[str, Any], line_num: int) -> list[str]:
-    # Validate enumerated values
-    errors: list[str] = []
-    if "language" in row and row["language"] not in SUPPORTED_LANGUAGES:
-        errors.append(
-            f"line {line_num}: unsupported language '{row['language']}'. "
-            f"Supported: {', '.join(sorted(SUPPORTED_LANGUAGES))}"
-        )
-
-    if "platform" in row and row["platform"] not in supported_platforms():
-        errors.append(
-            f"line {line_num}: unsupported platform '{row['platform']}'. "
-            f"Supported: {', '.join(sorted(supported_platforms()))}"
-        )
-
-    if "url_mode" in row and row["url_mode"] not in URL_MODES:
-        errors.append(
-            f"line {line_num}: invalid url_mode '{row['url_mode']}'. "
-            f"Supported: {', '.join(sorted(URL_MODES))}"
-        )
-
-    if "publish_mode" in row and row["publish_mode"] not in PUBLISH_MODES:
-        errors.append(
-            f"line {line_num}: invalid publish_mode '{row['publish_mode']}'. "
-            f"Supported: {', '.join(sorted(PUBLISH_MODES))}"
-        )
-    return errors
-
-
-def _check_input_urls_and_normalize(row: dict[str, Any], line_num: int) -> list[str]:
-    """Validate URL scheme prefixes and normalize ``main_domain``.
-
-    **Side effect (load-bearing):** when ``main_domain`` is a valid URL, the
-    normalized punycode form is stored as ``row["main_domain_normalized"]`` for
-    downstream Unit-6 host-parse. ``target_url`` is not normalized — it flows to
-    adapters which need the operator's exact URL. Normalization failures become
-    per-row errors, not batch-aborting ``SystemExit`` (plan-review security P2).
-    """
-    errors: list[str] = []
-    for url_field in ("target_url", "main_domain"):
-        if url_field in row:
-            url_val = str(row[url_field])
-            if not re.match(r"^https?://", url_val):
-                errors.append(f"line {line_num}: field '{url_field}' is not a valid URL: {url_val}")
-                continue
-            if url_field == "main_domain":
-                try:
-                    row["main_domain_normalized"] = _normalize_main_domain(url_val)
-                except ValueError as exc:
-                    errors.append(
-                        f"line {line_num}: field 'main_domain' could not be normalized: {exc}"
-                    )
-    return errors
-
-
-def _check_input_seed_keywords(row: dict[str, Any], line_num: int) -> list[str]:
-    # Validate seed_keywords item types (list type already checked above)
-    errors: list[str] = []
-    if "seed_keywords" in row and isinstance(row["seed_keywords"], list):
-        for kw in row["seed_keywords"]:
-            if not isinstance(kw, str):
-                errors.append(f"line {line_num}: 'seed_keywords' items must be strings")
-    return errors
-
-
-def validate_input_payload(row: dict[str, Any], line_num: int) -> list[str]:
-    """Validate an input seed row. Returns list of error messages.
-
-    Concatenates the per-block ``_check_input_*`` helpers in a fixed order; the
-    resulting error ordering is a characterized contract.
-
-    Side effect (plan 2026-05-18-006 Unit 1): ``_check_input_urls_and_normalize``
-    stores ``row["main_domain_normalized"]`` when ``main_domain`` is a valid URL,
-    preserving the original ``row["main_domain"]`` verbatim.
-    """
-    errors: list[str] = []
-    errors.extend(_check_input_required_fields(row, line_num))
-    errors.extend(_check_input_optional_field_types(row, line_num))
-    errors.extend(_check_input_enumerated_values(row, line_num))
-    errors.extend(_check_input_urls_and_normalize(row, line_num))
-    errors.extend(_check_input_seed_keywords(row, line_num))
-    return errors
-
-
-# --------------------------------------------------------------------------- #
-# Output-payload validation blocks.                                            #
-#                                                                              #
-# Each ``_check_output_*`` helper validates one independent aspect of a        #
-# planned output row and returns its own list of error messages.              #
-# ``validate_output_payload`` concatenates them in declaration order — the     #
-# append ordering is a characterized contract (see                             #
-# ``tests/test_schema_output_payload_characterization.py``). Splitting the     #
-# blocks keeps each rule independently testable and drops the radon            #
-# cyclomatic complexity of the aggregate well below the C threshold.           #
-# --------------------------------------------------------------------------- #
-
-
-def _check_output_required_fields(row: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    for field, ftype in OUTPUT_REQUIRED_FIELDS.items():
-        if field not in row:
-            errors.append(f"missing required output field '{field}'")
-        elif not isinstance(row[field], ftype):
-            errors.append(f"field '{field}' must be {ftype.__name__}, got {type(row[field]).__name__}")
-    return errors
-
-
-def _check_output_optional_field_types(row: dict[str, Any]) -> list[str]:
-    # Validate optional output fields' types when present (e.g., content_html
-    # peer of content_markdown). Plan 2026-05-18-006 Unit 1.
-    errors: list[str] = []
-    for field, ftype in OUTPUT_OPTIONAL_FIELDS.items():
-        if field in row and not isinstance(row[field], ftype):
-            errors.append(f"field '{field}' must be {ftype.__name__}, got {type(row[field]).__name__}")
-    return errors
-
-
-def _check_output_one_of_groups(row: dict[str, Any]) -> list[str]:
-    # At-least-one cross-field predicate per OUTPUT_ONE_OF_GROUPS. Uses
-    # _is_field_present (treats whitespace-only as absent — symmetric with
-    # validate-time dispatch in Unit 6).
-    errors: list[str] = []
-    for group in OUTPUT_ONE_OF_GROUPS:
-        if not any(_is_field_present(row.get(field)) for field in group):
-            errors.append(
-                f"at least one of {list(group)} must be present and non-empty"
-            )
-    return errors
-
-
-def _check_content_html_size(row: dict[str, Any]) -> list[str]:
-    # content_html size cap — defends downstream regex + html.parser from
-    # regex-bomb / memory-pressure attacks. Plan Threat Model DoS row.
-    if "content_html" in row and isinstance(row["content_html"], str):
-        size = len(row["content_html"].encode("utf-8"))
-        if size > MAX_CONTENT_HTML_BYTES:
-            return [
-                f"content_html size {size} bytes exceeds {MAX_CONTENT_HTML_BYTES} byte cap"
-            ]
-    return []
-
-
-def _check_links_structure(row: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    if "links" in row and isinstance(row["links"], list):
-        for i, link in enumerate(row["links"]):
-            if not isinstance(link, dict):
-                errors.append(f"links[{i}] must be a dict")
-            else:
-                for req in ("url", "anchor", "kind", "required"):
-                    if req not in link:
-                        errors.append(f"links[{i}]: missing field '{req}'")
-                if "url" in link and not re.match(r"^https?://", link["url"]):
-                    errors.append(f"links[{i}]: invalid URL format: {link['url']}")
-                if "kind" in link and link["kind"] not in LINK_KINDS:
-                    errors.append(f"links[{i}]: invalid kind '{link['kind']}'")
-    return errors
-
-
-def _check_seo_structure(row: dict[str, Any]) -> list[str]:
-    # Validate SEO structure
-    #
-    # ``seo`` is an OUTPUT_REQUIRED_FIELDS member; when present it must carry
-    # ``title`` / ``description`` / ``canonical_url`` as strings. ``canonical_url``
-    # additionally goes through a URL-format validator (Plan 2026-05-21-003
-    # Unit 1): this is the SOLE defense layer for forwarder adapters that
-    # inject the value into HTML / YAML / GraphQL contexts without their own
-    # escaping (per ``tests/test_adapter_blogger_api_xss_contract.py``).
-    #
-    # The regex rejects control chars, whitespace, quotes, angle-brackets,
-    # and backticks — the union of HTML attribute / HTML element / YAML newline
-    # / GraphQL string-escape / template-literal injection vectors. It accepts
-    # both ``http://`` and ``https://`` but no other schemes (no ``javascript:``,
-    # ``data:``, ``file:``, ``vbscript:``).
-    #
-    # Empty string is intentionally accepted (Mixed canonical strategy: rows
-    # opt into syndication mode by populating canonical_url, or stay in
-    # pure-backlink mode by leaving it empty; adapters short-circuit ``""``
-    # via ``... or None`` at read time).
-    errors: list[str] = []
-    if "seo" in row and isinstance(row["seo"], dict):
-        for req in ("title", "description", "canonical_url"):
-            if req not in row["seo"]:
-                errors.append(f"seo: missing field '{req}'")
-            elif not isinstance(row["seo"][req], str):
-                errors.append(f"seo.{req} must be a string")
-
-        canonical = row["seo"].get("canonical_url")
-        if isinstance(canonical, str) and canonical != "":
-            if not re.match(r"^https?://[^\s\"'<>`\x00-\x1f\x7f]+$", canonical, re.IGNORECASE):
-                errors.append(
-                    f"seo.canonical_url is not a valid http(s) URL "
-                    f"(must match ^https?:// and contain no whitespace, "
-                    f"quotes, angle brackets, backticks, or control chars): "
-                    f"{canonical!r}"
-                )
-    return errors
-
-
-def _check_link_count(row: dict[str, Any]) -> list[str]:
-    # Validate link count (6-8 for backlink articles)
-    link_count = len(row.get("links", []))
-    if link_count < 6 or link_count > 8:
-        return [f"link count {link_count} is not between 6 and 8"]
-    return []
-
-
-def _check_nonempty_text_fields(row: dict[str, Any]) -> list[str]:
-    # title / excerpt / slug must not be whitespace-only when present as strings.
-    errors: list[str] = []
-    for field in ("title", "excerpt", "slug"):
-        if field in row and isinstance(row[field], str) and not row[field].strip():
-            errors.append(f"{field} must not be empty")
-    return errors
-
-
-def validate_output_payload(row: dict[str, Any]) -> list[str]:
-    """Validate a planned output payload. Returns list of error messages.
-
-    Concatenates the per-block ``_check_output_*`` helpers in a fixed order;
-    the resulting error ordering is a characterized contract.
-    """
-    errors: list[str] = []
-    errors.extend(_check_output_required_fields(row))
-    errors.extend(_check_output_optional_field_types(row))
-    errors.extend(_check_output_one_of_groups(row))
-    errors.extend(_check_content_html_size(row))
-    errors.extend(_check_links_structure(row))
-    errors.extend(_check_seo_structure(row))
-    errors.extend(_check_link_count(row))
-    errors.extend(_check_nonempty_text_fields(row))
-
-    # Validate main_domain appears in content (markdown substring; HTML host-parse
-    # lives in cli.validate_backlinks per Unit 6).
-    main_domain_error = _check_main_domain_presence(row)
-    if main_domain_error is not None:
-        errors.append(main_domain_error)
-
-    return errors
-
-
-def validate_input_payload_strict(row: dict[str, Any]) -> list[str]:
-    """Validate an input seed row strictly with exit code 2 semantics."""
-    errors = validate_input_payload(row, 0)
-    return errors
-
-
-def validate_publish_payload(row: dict[str, Any]) -> list[str]:
-    """Validate a payload ready for publishing. Returns list of error messages."""
-    errors = validate_output_payload(row)
-
-    # Additional publish-specific checks
-    if "platform" in row:
-        msg = reject_unsupported_platform(row["platform"])
-        if msg is not None:
-            errors.append(msg)
-
-    return errors
+# Re-export from extracted sub-modules. All existing callers import from
+# ``backlink_publisher.schema`` — the re-exports keep those import paths
+# working without changes.
+from ._schema_input import (  # noqa: F401, E402
+    _check_input_enumerated_values,
+    _check_input_optional_field_types,
+    _check_input_required_fields,
+    _check_input_seed_keywords,
+    _check_input_urls_and_normalize,
+    validate_input_payload,
+    validate_input_payload_strict,
+)
+from ._schema_output import (  # noqa: F401, E402
+    _check_content_html_size,
+    _check_link_count,
+    _check_links_structure,
+    _check_nonempty_text_fields,
+    _check_output_one_of_groups,
+    _check_output_optional_field_types,
+    _check_output_required_fields,
+    _check_seo_structure,
+    validate_output_payload,
+    validate_publish_payload,
+)

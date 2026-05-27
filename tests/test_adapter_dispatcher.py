@@ -1,6 +1,6 @@
 """Tests for the adapter dispatcher in adapters/__init__.py."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

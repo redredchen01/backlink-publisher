@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import copy
 from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
 from backlink_publisher.cli.plan_backlinks import main as plan_main
 from backlink_publisher.cli.validate_backlinks import main as validate_main
-from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher.linkcheck.verify import VerificationResult
 
 

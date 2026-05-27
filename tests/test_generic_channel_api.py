@@ -13,7 +13,6 @@ Companion: ``test_verify_adapter_setup_modes.py`` (Unit 2 — the verify contrac
 
 from __future__ import annotations
 
-from unittest.mock import patch
 
 import pytest
 

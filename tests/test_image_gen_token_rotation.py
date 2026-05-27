@@ -17,8 +17,6 @@ import json
 import os
 import stat
 import threading
-from itertools import count
-from pathlib import Path
 
 import pytest
 

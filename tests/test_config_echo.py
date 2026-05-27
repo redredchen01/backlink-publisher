@@ -14,13 +14,10 @@ Plan ref: docs/ideation/2026-05-14-round3-fresh-pass-ideation.md (#7)
 from __future__ import annotations
 
 import io
-import os
 import re
 
-import pytest
 
 from backlink_publisher.config import (
-    BloggerOAuthConfig,
     Config,
     LLMProviderConfig,
     MediumOAuthConfig,

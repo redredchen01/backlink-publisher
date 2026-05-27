@@ -388,7 +388,7 @@ def main() -> int:
 
     print(f"\nresults written to {results_path}")
     print(f"report rows  to    {table_path}")
-    print(f"\n--- paste below into report §3 (filter by idx if partial run) ---\n")
+    print("\n--- paste below into report §3 (filter by idx if partial run) ---\n")
     print("\n".join(rows))
     return 0
 
