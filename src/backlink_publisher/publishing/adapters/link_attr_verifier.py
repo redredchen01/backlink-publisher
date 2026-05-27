@@ -11,6 +11,10 @@ failures are logged but never surface as publish failures.
 from __future__ import annotations
 
 import re
+from typing import Optional
+from urllib.parse import parse_qsl, unquote, urlparse
+from urllib.request import Request
+
 from backlink_publisher import http as _http
 
 _A_TAG_RE = re.compile(r"<a\s[^>]*>", re.IGNORECASE)
@@ -20,6 +24,14 @@ _BLANK_RE = re.compile(r'\btarget\s*=\s*["\']?_blank["\']?', re.IGNORECASE)
 _REL_VALUE_RE = re.compile(
     r'\brel\s*=\s*["\']([^"\']*)["\']', re.IGNORECASE
 )
+# Capture the href value on a single <a> tag (single/double quoted or bare).
+_HREF_VALUE_RE = re.compile(
+    r'\bhref\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.IGNORECASE
+)
+# rel tokens that strip dofollow weight.
+_NOFOLLOW_TOKENS = frozenset({"nofollow", "ugc", "sponsored"})
+# Common redirect-shim query keys whose value is the effective destination.
+_INTERSTITIAL_QUERY_KEYS = ("target", "url", "u", "to", "dest", "redirect")
 
 
 def verify_link_attributes(
@@ -104,3 +116,229 @@ def _tag_has_nofollow(tag_html: str) -> bool:
         return False
     tokens = match.group(1).lower().split()
     return "nofollow" in tokens
+
+
+def _tag_href(tag_html: str) -> Optional[str]:
+    """Return the ``href`` value on a single ``<a>`` tag, or ``None``."""
+    m = _HREF_VALUE_RE.search(tag_html)
+    if not m:
+        return None
+    return m.group(1) or m.group(2) or m.group(3)
+
+
+def _tag_rel(tag_html: str) -> Optional[str]:
+    """Return the raw ``rel`` attribute value on ``tag_html``, or ``None``."""
+    m = _REL_VALUE_RE.search(tag_html)
+    return m.group(1) if m else None
+
+
+def _rel_is_nofollow(rel_value: Optional[str]) -> bool:
+    """True iff ``rel_value`` carries a weight-stripping token (nofollow / ugc /
+    sponsored), whitespace-tokenised (so ``nofollowed`` does NOT trigger)."""
+    if not rel_value:
+        return False
+    return bool(_NOFOLLOW_TOKENS.intersection(rel_value.lower().split()))
+
+
+def _unwrap_interstitial(href: str) -> str:
+    """Decode a redirect-shim href to its effective destination.
+
+    Platforms wrap outbound links through interstitials such as
+    ``https://link.juejin.cn/?target=https%3A%2F%2Fexample.com``. We extract the
+    first query param (``target``/``url``/...) whose decoded value parses as an
+    absolute http(s) URL and treat that as the effective href. If nothing looks
+    like a wrapped URL, the original href is returned unchanged.
+
+    Never raises — a malformed href (e.g. malformed IPv6) returns the input.
+    """
+    if not href:
+        return href
+    try:
+        parsed = urlparse(href)
+    except ValueError:
+        return href
+    if not parsed.query:
+        return href
+    try:
+        pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    except ValueError:
+        return href
+    lowered = {k.lower(): v for k, v in pairs}
+    for key in _INTERSTITIAL_QUERY_KEYS:
+        raw = lowered.get(key)
+        if not raw:
+            continue
+        candidate = unquote(raw)
+        try:
+            cand_parsed = urlparse(candidate)
+        except ValueError:
+            continue
+        if cand_parsed.scheme in {"http", "https"} and cand_parsed.netloc:
+            return candidate
+    return href
+
+
+def inspect_target_anchor(
+    url: str,
+    target_url: str,
+    *,
+    expected_marker: Optional[str] = None,
+    timeout: Optional[float] = None,
+) -> dict:
+    """Fetch ``url`` (SSRF-guarded) and inspect the anchor pointing at
+    ``target_url``.
+
+    A canary-oriented sibling of :func:`verify_link_attributes`. Unlike that
+    function — which is called positionally by 6 post-publish callers and must
+    keep its existing ``backlink_publisher.http.get`` fetch / timeout / redirect
+    semantics — this routine fetches through the preflight SSRF-guarded opener
+    (``content._preflight_fetch._PREFLIGHT_OPENER``), inheriting per-hop and
+    post-redirect SSRF re-checks. It does NOT use a page-wide ``nofollow``
+    aggregate as a drift signal; it reads the *target anchor's own* ``rel``.
+
+    Never raises. Return shape::
+
+        {
+            "page_readable": bool,        # 200 + non-empty parseable body
+            "marker_present": bool|None,  # None unless expected_marker given
+            "target_anchor_found": bool,
+            "target_rel": str|None,       # raw rel of the matched anchor
+            "target_is_nofollow": bool,   # matched anchor strips dofollow weight
+            "reason": str|None,           # taxonomy string on any non-OK path
+        }
+
+    Honest limitation (R13): the preflight UA is distinct so the target can rate
+    limit it separately, but a platform could UA-cloak (serve dofollow to the
+    canary, nofollow to real traffic). The verdict is a *contract-drift signal*,
+    not a guarantee of what a real visitor/crawler sees.
+    """
+    # Import lazily so the 6 post-publish callers of verify_link_attributes do
+    # not pay the preflight import cost, and to reuse its opener/SSRF helpers.
+    from backlink_publisher.content import _preflight_fetch as _pf
+
+    result: dict = {
+        "page_readable": False,
+        "marker_present": None,
+        "target_anchor_found": False,
+        "target_rel": None,
+        "target_is_nofollow": False,
+        "reason": None,
+    }
+
+    body, reason = _fetch_body_via_preflight(url, _pf, timeout)
+    if reason is not None:
+        result["reason"] = reason
+        return result
+    if not body:
+        result["reason"] = "empty_body"
+        return result
+
+    result["page_readable"] = True
+    text = body.decode("utf-8", "ignore")
+
+    if expected_marker is not None:
+        result["marker_present"] = expected_marker in text
+
+    try:
+        canonical_target = _canonicalize_for_match(target_url)
+    except Exception:  # noqa: BLE001 — never-raise contract
+        canonical_target = None
+
+    if canonical_target:
+        for tag in _A_TAG_RE.findall(text):
+            href = _tag_href(tag)
+            if not href:
+                continue
+            effective = _unwrap_interstitial(href)
+            try:
+                if _canonicalize_for_match(effective) != canonical_target:
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+            rel = _tag_rel(tag)
+            result["target_anchor_found"] = True
+            result["target_rel"] = rel
+            result["target_is_nofollow"] = _rel_is_nofollow(rel)
+            # First match wins — deterministic and "at least one dofollow exists"
+            # when the matched anchor is dofollow.
+            break
+
+    return result
+
+
+def _canonicalize_for_match(href: str) -> Optional[str]:
+    """Canonicalize ``href`` for target comparison, never raising."""
+    from backlink_publisher._util.url import canonicalize_url
+
+    if not href:
+        return None
+    try:
+        return canonicalize_url(href)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _fetch_body_via_preflight(url, _pf, timeout) -> tuple[bytes, Optional[str]]:
+    """Fetch ``url`` through the preflight SSRF-guarded opener.
+
+    Reuses ``_preflight_fetch``'s scheme gate (``_is_http_url``), never-raising
+    SSRF check (``_safe_ssrf_check``), the module-level ``_PREFLIGHT_OPENER``
+    (per-hop + post-redirect SSRF re-check), body-prefix streaming cap, and UA —
+    so building a fresh opener (which would only check the initial URL) is
+    avoided. Returns ``(body, None)`` on a clean 200 or ``(b"", reason)``.
+    """
+    # Scheme gate — also guards urlparse(malformed IPv6) → ValueError.
+    if not _pf._is_http_url(url):
+        return b"", "invalid_url"
+
+    blocked = _pf._safe_ssrf_check(url)
+    if blocked is not None:
+        return b"", _pf._ssrf_reason_to_taxonomy(blocked)
+
+    from backlink_publisher._util.url import normalize_url_for_fetch
+
+    normalized = normalize_url_for_fetch(url)
+    req = Request(normalized, method="GET")
+    req.add_header("User-Agent", _pf.USER_AGENT)
+    effective_timeout = timeout if timeout is not None else _pf.FETCH_TIMEOUT
+
+    try:
+        resp = _pf._PREFLIGHT_OPENER.open(req, timeout=effective_timeout)
+    except Exception as exc:  # noqa: BLE001 — never-raise; classify generically
+        return b"", _classify_fetch_error(exc)
+
+    try:
+        status = resp.getcode()
+        final_url = resp.geturl() or normalized
+        try:
+            body = _pf._read_body_prefix(resp, _pf.PREFLIGHT_BODY_BYTES)
+        finally:
+            try:
+                resp.close()
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        return b"", "network_error"
+
+    # Post-redirect SSRF re-check of the final URL (narrows DNS-rebinding window).
+    if final_url and final_url != normalized:
+        final_blocked = _pf._safe_ssrf_check(final_url)
+        if final_blocked is not None and final_blocked.startswith("blocked_ip"):
+            return b"", "ssrf_blocked"
+
+    if status != 200:
+        return b"", f"http_{status}"
+    return body, None
+
+
+def _classify_fetch_error(exc: Exception) -> str:
+    """Map an opener exception to a stable reason string. Never raises."""
+    from urllib.error import URLError
+
+    reason_obj = getattr(exc, "reason", None)
+    if isinstance(reason_obj, str) and reason_obj.startswith("ssrf_"):
+        return "ssrf_blocked"
+    if isinstance(exc, URLError) and isinstance(getattr(exc, "reason", None), str) \
+            and "ssrf" in exc.reason:
+        return "ssrf_blocked"
+    return "network_error"
