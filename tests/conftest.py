@@ -13,7 +13,6 @@ import atexit
 import os
 import pwd
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -796,7 +795,9 @@ def _credential_tripwire():
     try:
         from backlink_publisher.config.loader import _config_dir as _get_sandbox
         _sandbox_cfg = _get_sandbox()
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError):
+        # ImportError: loader not importable; AttributeError: _config_dir renamed;
+        # RuntimeError: fail-closed resolver fired (means sandbox is active — safe).
         _sandbox_cfg = None
 
     if _sandbox_cfg is not None and REAL_CONFIG_ROOT == _sandbox_cfg:
