@@ -34,10 +34,9 @@ import ssl
 from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request
 
-from backlink_publisher._util.url import normalize_url_for_fetch
+from backlink_publisher._util.url import normalize_url_for_fetch, safe_hostname, safe_urlparse
 from backlink_publisher._util.net_safety import _check_url_for_ssrf, _make_ssrf_opener
 from ._html_utils import extract_title
 from ._soft404 import is_soft_404_title
@@ -102,26 +101,12 @@ def _is_http_url(url: str) -> bool:
     ``_check_once`` skips this, so a reused prelude would have NO scheme gate
     and could hand ``file://`` / ``ftp://`` to ``urlopen``.
 
-    ``urlparse`` itself raises ``ValueError`` on a malformed IPv6 literal
-    (e.g. ``http://[invalid``), so this is also the first guard against a URL
-    that would otherwise crash the never-raises contract — treat any parse
-    failure as "not a valid http url".
+    Built on the shared :func:`safe_urlparse` (Plan 2026-05-27-006), which folds
+    a malformed-IPv6 ``ValueError`` and non-``str`` input into a ``None`` parse —
+    treat any parse failure as "not a valid http url".
     """
-    if not isinstance(url, str) or not url:
-        return False
-    try:
-        parsed = urlparse(url)
-    except ValueError:
-        return False
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def _safe_hostname(url: str) -> Optional[str]:
-    """``urlparse(url).hostname`` that never raises (malformed IPv6 → None)."""
-    try:
-        return urlparse(url).hostname
-    except ValueError:
-        return None
+    parsed = safe_urlparse(url)
+    return parsed is not None and parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def _read_body_prefix(resp: Any, max_bytes: int) -> bytes:
@@ -283,7 +268,7 @@ def fetch_target(url: str, *, timeout: Optional[float] = None) -> PreflightFacts
             return PreflightFacts(status=status, final_url=final_url, reason="ssrf_blocked")
 
     redirected = bool(final_url) and final_url != normalized
-    host_diff = redirected and _safe_hostname(final_url) != _safe_hostname(normalized)
+    host_diff = redirected and safe_hostname(final_url) != safe_hostname(normalized)
 
     if status != 200:
         if 500 <= status < 600:
