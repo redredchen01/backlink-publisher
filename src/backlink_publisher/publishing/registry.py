@@ -113,7 +113,21 @@ class Publisher(ABC):
 # instance (the new pattern used by ``BrowserPublishDispatcher.for_channel(...)``
 # — see Plan 2026-05-21-001 Unit 2 §D6). Populated by ``adapters/__init__.py``
 # at import time (see ``_install``).
-_REGISTRY: dict[str, list[type[Publisher] | Publisher]] = {}
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class RegistryEntry:
+    """Aggregated metadata for a registered platform."""
+    publishers: list[type[Publisher] | Publisher]
+    dofollow: _DofollowStatus
+    rationale: str | None = None
+    referral_value: _ReferralValue | None = None
+    ui: UiMeta | None = None
+    bind: tuple[BindDescriptor, ...] = ()
+    policy: Policy | None = None
+    visibility: Visibility = "active"
+
+_REGISTRY: dict[str, RegistryEntry] = {}
 
 
 # Negative-knowledge registry: platforms empirically verified as nofollow
@@ -174,9 +188,6 @@ _ReferralValue = Literal["high", "low"]
 # (``tests/conftest.py`` ``fake_platform_registered``,
 # ``tests/test_adapter_dofollow_gate.py`` ``_isolate_registry``,
 # ``tests/test_registry_dofollow_kwargs.py``) or state leaks across tests.
-_DOFOLLOW_BY_PLATFORM: dict[str, _DofollowStatus] = {}
-_RATIONALE_BY_PLATFORM: dict[str, str] = {}
-_REFERRAL_VALUE_BY_PLATFORM: dict[str, _ReferralValue] = {}
 
 # Plan 2026-05-26-002 Unit 2 — auth-type classification for the WebUI binding
 # surface. Drives per-channel binding-UI template selection (Unit 3).
@@ -369,42 +380,21 @@ def register(
             f"`register({platform!r}, ..., policy=...)` — expected Policy, "
             f"got {type(policy).__name__}."
         )
-    _REGISTRY[platform] = list(publishers)
-    _DOFOLLOW_BY_PLATFORM[platform] = dofollow
-    if referral_value is not None:
-        _REFERRAL_VALUE_BY_PLATFORM[platform] = referral_value
-    else:
-        _REFERRAL_VALUE_BY_PLATFORM.pop(platform, None)
-    if rationale is not None:
-        _RATIONALE_BY_PLATFORM[platform] = rationale
-    else:
-        _RATIONALE_BY_PLATFORM.pop(platform, None)
-    # Manifest dicts: store only when explicit; pop-on-None mirrors the
-    # rationale/referral_value pattern so re-register() without kwargs
-    # clears prior values rather than carrying stale state.
-    if ui is not None:
-        _UI_META_BY_PLATFORM[platform] = ui
-    else:
-        _UI_META_BY_PLATFORM.pop(platform, None)
-    if bind_tuple:
-        _BIND_BY_PLATFORM[platform] = bind_tuple
-    else:
-        _BIND_BY_PLATFORM.pop(platform, None)
-    if policy is not None:
-        _POLICY_BY_PLATFORM[platform] = policy
-    else:
-        _POLICY_BY_PLATFORM.pop(platform, None)
-    # ``"active"`` is the implicit default; don't store it so the dict
-    # only carries non-default overrides (smaller snapshots, clearer diffs).
-    if visibility != "active":
-        _VISIBILITY_BY_PLATFORM[platform] = visibility
-    else:
-        _VISIBILITY_BY_PLATFORM.pop(platform, None)
+    _REGISTRY[platform] = RegistryEntry(
+        publishers=list(publishers),
+        dofollow=dofollow,
+        rationale=rationale,
+        referral_value=referral_value,
+        ui=ui,
+        bind=bind_tuple,
+        policy=policy,
+        visibility=visibility,
+    )
 
 
 def registered_platforms() -> list[str]:
     """Return the list of platforms with at least one adapter registered."""
-    return sorted(_REGISTRY)
+    return sorted(_REGISTRY.keys())
 
 
 def dofollow_status(name: str) -> _DofollowStatus | None:
@@ -413,7 +403,8 @@ def dofollow_status(name: str) -> _DofollowStatus | None:
 
     Plan 2026-05-20-009 R5.
     """
-    return _DOFOLLOW_BY_PLATFORM.get(name)
+    entry = _REGISTRY.get(name)
+    return entry.dofollow if entry else None
 
 
 def auth_type(name: str) -> str | None:
@@ -436,7 +427,8 @@ def referral_value(name: str) -> _ReferralValue | None:
     unregistered platforms. Always non-``None`` for nofollow platforms
     (enforced by the ``register()`` gate). Plan 2026-05-25-001 R1.
     """
-    return _REFERRAL_VALUE_BY_PLATFORM.get(name)
+    entry = _REGISTRY.get(name)
+    return entry.referral_value if entry else None
 
 
 def dofollow_rationale(name: str) -> str | None:
@@ -446,7 +438,8 @@ def dofollow_rationale(name: str) -> str | None:
 
     Plan 2026-05-20-009 R5.
     """
-    return _RATIONALE_BY_PLATFORM.get(name)
+    entry = _REGISTRY.get(name)
+    return entry.rationale if entry else None
 
 
 # Re-export from extracted sub-module. All existing callers import from

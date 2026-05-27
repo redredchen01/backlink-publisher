@@ -418,11 +418,6 @@ def _save_screenshot(page: Any, config: Config, article_id: str) -> None:
     try:
         shot_path = _screenshot_path(config, article_id)
         page.screenshot(path=str(shot_path))
-        import sys
-        import json
-        print(
-            json.dumps({"level": "ERROR", "screenshot": str(shot_path)}),
-            file=sys.stderr,
-        )
+        log.error({"level": "ERROR", "screenshot": str(shot_path)})
     except Exception as exc:
         log.debug("Failed to capture diagnostic screenshot: %s", exc)

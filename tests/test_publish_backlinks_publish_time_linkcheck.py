@@ -142,6 +142,35 @@ def test_check_row_reachability_empty_urls_passes() -> None:
     mocked.assert_not_called()
 
 
+def test_check_row_reachability_single_url_no_threadpool() -> None:
+    """Single URL checked synchronously without ThreadPoolExecutor."""
+    row = {"target_url": "https://example.com/article", "links": []}
+    with patch(
+        "backlink_publisher.cli._publish_helpers.check_url",
+        return_value=(True, None),
+    ) as mocked:
+        with patch(
+            "backlink_publisher.cli._publish_helpers.ThreadPoolExecutor",
+        ) as tp_mock:
+            ok, failing = publish_backlinks._check_row_reachability(row)
+    assert ok is True
+    assert failing is None
+    mocked.assert_called_once_with("https://example.com/article")
+    tp_mock.assert_not_called()
+
+
+def test_check_row_reachability_single_url_unreachable() -> None:
+    """Single unreachable URL returns (False, that URL)."""
+    row = {"target_url": "https://example.com/article", "links": []}
+    with patch(
+        "backlink_publisher.cli._publish_helpers.check_url",
+        return_value=(False, "HTTP 404"),
+    ) as mocked:
+        ok, failing = publish_backlinks._check_row_reachability(row)
+    assert ok is False
+    assert failing == "https://example.com/article"
+
+
 # --- skip_publish_time_check flag bypasses the gate ---
 
 

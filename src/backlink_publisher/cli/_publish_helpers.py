@@ -102,6 +102,10 @@ def _check_row_reachability(row: dict[str, Any]) -> tuple[bool, str | None]:
     if not urls:
         return True, None
 
+    if len(urls) == 1:
+        ok, _err = check_url(urls[0])
+        return (True, None) if ok else (False, urls[0])
+
     workers = min(_LINKCHECK_MAX_CONCURRENT, len(urls))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(check_url, u): u for u in urls}

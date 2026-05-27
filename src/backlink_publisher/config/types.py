@@ -21,6 +21,11 @@ _SAFE_SEO_PROPORTIONS: dict[str, float] = {
 _LLM_API_KEY_ENV_VAR = "BACKLINK_LLM_API_KEY"
 _PROPORTIONS_SUM_TOLERANCE = 1e-3
 
+# Publisher adapter constants
+MEDIUM_API_BASE = "https://api.medium.com/v1"
+MEDIUM_API_TIMEOUT = 30  # seconds
+BLOGGER_LOCK_TIMEOUT_S = 30
+
 DEFAULT_WORK_TEMPLATES: tuple[str, ...] = (
     "{title}",
     "{title} 详情",

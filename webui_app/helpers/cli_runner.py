@@ -169,14 +169,22 @@ def run_pipe_capture(cmd, stdin) -> dict[str, str | int]:
     non-zero exit.
     """
     new_cmd, env = _rewrite_cli_cmd(cmd)
-    result = subprocess.run(
-        new_cmd,
-        input=stdin,
-        capture_output=True,
-        text=True,
-        cwd=_REPO_ROOT or os.getcwd(),
-        env=env,
-    )
+    try:
+        result = subprocess.run(
+            new_cmd,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT or os.getcwd(),
+            env=env,
+            timeout=300,  # 5-minute timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            'stdout': exc.stdout or '',
+            'stderr': exc.stderr or f'CLI timeout after 300 seconds',
+            'returncode': -1,  # Indicate timeout
+        }
     return {
         'stdout': result.stdout,
         'stderr': result.stderr,
@@ -186,7 +194,24 @@ def run_pipe_capture(cmd, stdin) -> dict[str, str | int]:
 
 def run_pipe(cmd, stdin):
     """Run a pipeline command, raising on non-zero exit or silent failure."""
-    captured = run_pipe_capture(cmd, stdin)
+    new_cmd, env = _rewrite_cli_cmd(cmd)
+    try:
+        result = subprocess.run(
+            new_cmd,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT or os.getcwd(),
+            env=env,
+            timeout=300,  # 5-minute timeout
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise Exception(f'CLI timeout after 300 seconds: {exc.stderr or ""}')
+    captured = {
+        'stdout': result.stdout,
+        'stderr': result.stderr,
+        'returncode': result.returncode,
+    }
     if captured['returncode'] != 0:
         raise Exception(captured['stderr'] or f"Exit code: {captured['returncode']}")
     # Detect silent-failure: exit 0 with empty stdout AND empty stderr is

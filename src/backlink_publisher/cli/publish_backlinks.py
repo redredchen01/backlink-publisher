@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
         errs = validate_publish_payload(row)
         if errs:
             for e in errs:
-                print(f"row {idx}: {e}", file=sys.stderr)
+                publish_logger.warning(f"row {idx}: {e}")
             emit_envelope_and_exit(
                 "InputValidationError", 2, f"row {idx}: payload validation failed"
             )
@@ -147,11 +147,10 @@ def main(argv: list[str] | None = None) -> None:
                     "skip_publish_time_check": args.skip_publish_time_check,
                 },
             )
-            print(f"publish-backlinks: run_id={run_id}", file=sys.stderr, flush=True)
+            publish_logger.info(f"publish-backlinks: run_id={run_id}")
         except Exception as exc:
-            print(
-                f"[WARN] checkpoint not created — this run cannot be resumed: {exc}",
-                file=sys.stderr,
+            publish_logger.warning(
+                f"[WARN] checkpoint not created — this run cannot be resumed: {exc}"
             )
 
     outputs: list[dict[str, Any]] = []
@@ -384,7 +383,7 @@ def main(argv: list[str] | None = None) -> None:
                         verified=verify_ok,
                     )
                 except Exception as ckpt_exc:
-                    print(f"[WARN] checkpoint update failed: {ckpt_exc}", file=sys.stderr)
+                    publish_logger.warning(f"[WARN] checkpoint update failed: {ckpt_exc}")
                     run_id = None
             publish_logger.info(
                 f"published: id={row.get('id', '')} status={result.status}",
