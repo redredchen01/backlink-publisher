@@ -348,6 +348,25 @@ class Config:
     separate 0600 file at ``~/.config/backlink-publisher/frw-token.json``
     (per SEC-3); use ``frw-login`` to write it."""
 
+    cell_assignments: dict[str, list[str]] = field(default_factory=dict)
+    """Money-site → allowed channel subset for blast-radius containment (R7).
+
+    Populated from ``[cells."<main_domain>"]`` blocks in config.toml::
+
+        [cells."example.com"]
+        channels = ["telegraph", "rentry"]
+
+    Keyed by ``main_domain`` (trailing slash stripped, consistent with
+    other per-domain config keys). Empty dict means "no cells configured;
+    all sites are unrestricted" (opt-in semantics).
+
+    Operator-edit-only; not managed by ``save_config`` (unmanaged root —
+    preserved verbatim by ``_preserve_unknown_sections``).
+
+    Validated at load time: unknown channel names and cross-cell overlap
+    both raise ``InputValidationError`` (fail-loud, not skip-with-warning).
+    See ``config/parsers/cells.py`` and Blast-radius Phase 1 R7-minimal."""
+
     @property
     def frw_token_path(self) -> Path:
         from backlink_publisher import config as _cfg

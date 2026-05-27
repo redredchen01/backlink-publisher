@@ -25,6 +25,7 @@ else:
 
 from .parsers.alarm import _parse_anchor_alarm
 from .parsers.anchor import _parse_anchor_proportions
+from .parsers.cells import _parse_cell_assignments
 from .parsers.image_gen import _parse_image_gen
 from .parsers.llm import _parse_llm_anchor_provider
 from .parsers.target import (
@@ -187,6 +188,8 @@ def load_config(path: Path | None = None) -> Config:
 
     image_gen = _parse_image_gen(data.get("image_gen"))
 
+    cell_assignments = _parse_cell_assignments(data.get("cells"))
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -204,6 +207,7 @@ def load_config(path: Path | None = None) -> Config:
         ghpages=ghpages,
         mastodon=mastodon,
         image_gen=image_gen,
+        cell_assignments=cell_assignments,
     )
 
 
