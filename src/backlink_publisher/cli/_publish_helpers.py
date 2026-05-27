@@ -408,6 +408,16 @@ def _build_parser() -> Any:
         help="Delete all complete checkpoints and exit",
     )
     parser.add_argument(
+        "--preview-manifest",
+        action="store_true",
+        default=False,
+        help=(
+            "Read-only dedup preview: emit per-row NEW/SKIP-DUPLICATE/HOLD-UNCERTAIN "
+            "verdicts (JSONL on stdout, HMAC-digest summary on stderr) and exit 0. "
+            "No publish, no lease, no checkpoint."
+        ),
+    )
+    parser.add_argument(
         "--no-verify",
         action="store_true",
         default=False,
@@ -431,10 +441,14 @@ def _handle_checkpoint_ops(args: Any) -> None:
     from .. import checkpoint
     from backlink_publisher._util.errors import emit_error
 
-    exclusive = [args.resume, args.list_runs, args.cleanup, args.cleanup_all]
+    exclusive = [
+        args.resume, args.list_runs, args.cleanup, args.cleanup_all,
+        getattr(args, "preview_manifest", False),
+    ]
     if sum(bool(x) for x in exclusive) > 1:
         emit_error(
-            "error: --resume, --list-runs, --cleanup, and --cleanup-all are mutually exclusive",
+            "error: --resume, --list-runs, --cleanup, --cleanup-all, and "
+            "--preview-manifest are mutually exclusive",
             exit_code=2,
         )
 

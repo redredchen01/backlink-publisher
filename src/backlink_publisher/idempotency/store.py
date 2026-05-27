@@ -32,7 +32,10 @@ Plan: ``docs/plans/2026-05-27-005-feat-cross-run-publish-idempotency-plan.md``
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import secrets as _secrets
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -52,6 +55,15 @@ from ..events._store_sqlite import (
 #: Filename of the dedup store inside ``_config_dir()``. Separate from
 #: ``events.db`` on purpose (see module docstring).
 _DB_FILENAME: str = "dedup.db"
+
+#: Per-store HMAC secret (suffix appended to the db path). Created 0o600 on first
+#: use. Keyed HMAC — not a bare hash — is required for the manifest key digest:
+#: the operator's URL space is small and enumerable, so an unsalted hash is
+#: trivially reversible and would defeat the manifest's stderr leak boundary.
+_SECRET_SUFFIX: str = ".hmac-secret"
+
+#: Hex length of the key digest surfaced in the manifest stderr summary.
+_DIGEST_LEN: int = 16
 
 State = Literal["attempting", "done", "failed", "uncertain"]
 
@@ -211,6 +223,46 @@ class DedupStore:
             raise
         finally:
             conn.close()
+
+    # ------------------------------------------------------------------ #
+    # Key digest (keyed HMAC — manifest leak boundary)
+    # ------------------------------------------------------------------ #
+    def _secret_path(self) -> Path:
+        return self.path.with_name(self.path.name + _SECRET_SUFFIX)
+
+    def _load_or_create_secret(self) -> bytes:
+        """Per-store HMAC secret. Created once (``O_CREAT|O_EXCL``, 0o600); a
+        concurrent loser of the create race reads the winner's bytes."""
+        sp = self._secret_path()
+        existing = self._read_secret(sp)
+        if existing:
+            return existing
+        sp.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        token = _secrets.token_bytes(32)
+        try:
+            fd = os.open(str(sp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return self._read_secret(sp) or token  # raced; read the winner
+        try:
+            os.write(fd, token)
+        finally:
+            os.close(fd)
+        return token
+
+    @staticmethod
+    def _read_secret(sp: Path) -> bytes:
+        try:
+            return sp.read_bytes()
+        except FileNotFoundError:
+            return b""
+
+    def key_digest(self, key: DedupKey) -> str:
+        """Keyed HMAC over the key tuple, truncated to :data:`_DIGEST_LEN` hex
+        chars. Two stores (distinct secrets) digest the same key differently, so
+        the manifest's stderr digest cannot be reversed back to a campaign URL."""
+        secret = self._load_or_create_secret()
+        msg = "\x1f".join(key.as_tuple()).encode("utf-8")
+        return hmac.new(secret, msg, hashlib.sha256).hexdigest()[:_DIGEST_LEN]
 
     # ------------------------------------------------------------------ #
     # Reads

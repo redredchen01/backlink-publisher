@@ -91,6 +91,13 @@ def main(argv: list[str] | None = None) -> None:
                 "InputValidationError", 2, f"row {idx}: payload validation failed"
             )
 
+    if args.preview_manifest:
+        # Read-only dedup preview over the validated planned rows. Emits verdicts
+        # and exits 0 before any lease/checkpoint/dispatch side effect (U3).
+        from .preview_manifest import emit_manifest
+        emit_manifest(rows, args.platform)
+        raise SystemExit(0)
+
     if not args.dry_run:
         platforms_in_use = {
             args.platform or row.get("platform", "") for row in rows
