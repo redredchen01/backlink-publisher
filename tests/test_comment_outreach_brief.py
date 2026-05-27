@@ -82,6 +82,32 @@ def test_count_links_counts_bare_and_markdown():
     assert cb.count_links("x https://a.example [y](https://b.example) z") == 2
 
 
+# --- Regression: URL-as-anchor in over-budget markdown link must not leak a link --
+def test_no_link_policy_strips_url_anchored_markdown_link():
+    # The dropped markdown link's anchor is itself a URL — it must not re-enter as bare.
+    text = "[https://seo-spam.example](https://other.example) and plain words"
+    out = cb.guardrail_comment(text, "no-link")
+    assert cb.count_links(out) == 0
+
+
+def test_single_link_policy_caps_url_anchored_markdown_links():
+    text = "[anchor](https://keep.example) [https://extra.example](https://x.example)"
+    out = cb.guardrail_comment(text, "single-link-ok")
+    assert cb.count_links(out) == 1
+
+
+def test_two_url_anchored_markdown_links_no_link_policy():
+    text = "[http://a.example](http://b.example) [http://c.example](http://d.example)"
+    out = cb.guardrail_comment(text, "no-link")
+    assert cb.count_links(out) == 0
+
+
+# --- Regression: U+2028 / U+2029 stripped (parity with provider) ------------
+def test_line_paragraph_separators_stripped():
+    for cp in (0x2028, 0x2029):
+        assert cb._strip_unsafe(f"a{chr(cp)}b") == "ab", hex(cp)
+
+
 # --- Security: prompt-injection in thread_summary can't inflate links ------
 def test_injection_in_summary_still_capped_to_one_link():
     # A hostile LLM (driven by an injected summary) emits five links + an instruction.
@@ -126,7 +152,7 @@ def test_prompt_escapes_input_boundary_chars():
 def test_brief_strips_at_least_what_provider_strips():
     from backlink_publisher.publishing.adapters.llm_anchor_provider import _sanitize_input
 
-    candidates = ["\x00", "\x1f", "\x7f", "​", "‎", "‮", "⁦", "﻿", "⁠"]
+    candidates = ["\x00", "\x1f", "\x7f", "​", "‎", "‮", "⁦", "﻿", "⁠", " ", " "]
     provider_stripped = []
     for ch in candidates:
         sample = f"a{ch}b"

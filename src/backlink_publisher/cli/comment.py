@@ -39,7 +39,7 @@ EXIT_NOT_IMPLEMENTED = 5  # scaffold marker; each unit replaces its stub
 def _handle_discover(args: argparse.Namespace) -> int:
     from backlink_publisher.comment_outreach.discover import discover_targets
 
-    discover_targets(args.input, None)
+    discover_targets(args.input, args.output)
     return EXIT_OK
 
 
@@ -55,7 +55,7 @@ def _handle_import(args: argparse.Namespace) -> int:
 def _handle_qualify(args: argparse.Namespace) -> int:
     from backlink_publisher.comment_outreach.score import qualify_targets
 
-    qualify_targets(args.input, None)
+    qualify_targets(args.input, args.output)
     return EXIT_OK
 
 
@@ -64,7 +64,7 @@ def _handle_brief(args: argparse.Namespace) -> int:
     # importing this CLI module and running the other verbs never loads the registry.
     from backlink_publisher.comment_outreach.brief import brief_targets
 
-    brief_targets(args.input, None)
+    brief_targets(args.input, args.output)
     return EXIT_OK
 
 
@@ -120,6 +120,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--input", "-i", type=argparse.FileType("r"), default=None,
         help="Seed JSONL (default: stdin)",
     )
+    discover_p.add_argument(
+        "--output", "-o", type=argparse.FileType("w"), default=None,
+        help="CommentTarget JSONL (default: stdout)",
+    )
     discover_p.set_defaults(handler=_handle_discover)
 
     import_p = sub.add_parser(
@@ -144,6 +148,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--input", "-i", type=argparse.FileType("r"), default=None,
         help="CommentTarget JSONL (default: stdin)",
     )
+    qualify_p.add_argument(
+        "--output", "-o", type=argparse.FileType("w"), default=None,
+        help="QualificationResult JSONL (default: stdout)",
+    )
     qualify_p.set_defaults(handler=_handle_qualify)
 
     brief_p = sub.add_parser(
@@ -153,6 +161,10 @@ def _build_parser() -> argparse.ArgumentParser:
     brief_p.add_argument(
         "--input", "-i", type=argparse.FileType("r"), default=None,
         help="QualificationResult JSONL (default: stdin)",
+    )
+    brief_p.add_argument(
+        "--output", "-o", type=argparse.FileType("w"), default=None,
+        help="CommentBrief JSONL (default: stdout)",
     )
     brief_p.set_defaults(handler=_handle_brief)
 

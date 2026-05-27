@@ -162,15 +162,12 @@ def fetch_comment_page(url: str, *, timeout: Optional[float] = None) -> FetchRes
         return FetchResult(html=None, reason="network_error")
 
     try:
-        status = resp.getcode()
-        final_url = resp.geturl() or normalized
-        try:
+        # `with resp` guarantees the socket is closed even if getcode()/geturl() raise —
+        # a plain inner finally around only the body read would leak the fd in that case.
+        with resp:
+            status = resp.getcode()
+            final_url = resp.geturl() or normalized
             body, oversized = _read_body_capped(resp, MAX_BODY_BYTES)
-        finally:
-            try:
-                resp.close()
-            except Exception:  # noqa: BLE001
-                pass
     except Exception:  # noqa: BLE001
         return FetchResult(html=None, reason="network_error")
 

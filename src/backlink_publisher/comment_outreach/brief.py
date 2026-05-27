@@ -27,18 +27,24 @@ from backlink_publisher.comment_outreach import schema
 
 brief_logger = PipelineLogger("comment-brief")
 
-#: Control (C0) + DEL + zero-width + bidi marks/embeddings/overrides/isolates. Stripped
-#: from the persisted comment so a copied draft can't carry an invisible payload. Mirrors
-#: the *intent* of the provider's ``_PROMPT_UNSAFE_CHARS`` (a parity test pins the overlap).
+#: Control (C0) + DEL + zero-width + bidi marks/embeddings/overrides/isolates, plus the
+#: LINE/PARAGRAPH separators (U+2028/U+2029 via the U+2028-U+202E range). Stripped from the
+#: persisted comment so a copied draft can't carry an invisible payload. Kept a true
+#: superset of the provider's ``_PROMPT_UNSAFE_CHARS`` — a parity test pins the overlap.
 _UNSAFE_CHARS_RE = re.compile(
     "[\x00-\x1f\x7f"          # C0 controls + DEL
-    "​-‏"            # zero-width space..RTL mark
-    "‪-‮"            # bidi embeddings / overrides
-    "⁠-⁤"            # word joiner / invisible operators
-    "⁦-⁩"            # bidi isolates
-    "﻿"                   # zero-width no-break space / BOM
+    "​-‏"           # zero-width space .. RTL mark
+    " -‮"           # line/para separators + bidi embeddings / overrides
+    "⁠-⁤"           # word joiner / invisible operators
+    "⁦-⁩"           # bidi isolates
+    "﻿"                  # zero-width no-break space / BOM
     "]"
 )
+
+#: A bare ``http(s)://…`` URL (no surrounding markdown). Used to scrub URLs out of a
+#: markdown anchor when that link is dropped over the link budget, so a URL-as-anchor
+#: cannot re-enter the text as a fresh bare link.
+_BARE_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 #: Matches a markdown link ``[anchor](http…)`` OR a bare ``http(s)://…`` URL. Markdown is
 #: listed first so a URL inside ``](…)`` is consumed there, not double-counted as bare.
@@ -80,7 +86,10 @@ def _enforce_link_policy(text: str, link_policy: str) -> str:
             if kept < max_links:
                 kept += 1
                 return f"[{anchor}]({url})"
-            return anchor
+            # Over budget: keep the anchor words but scrub any URL *inside* the anchor —
+            # a URL-as-anchor would otherwise re-enter the text as a fresh bare link that
+            # this single left-to-right pass never revisits, leaking past the cap.
+            return _BARE_URL_RE.sub("", anchor)
         url = m.group(3)  # bare url
         if kept < max_links:
             kept += 1
@@ -155,6 +164,7 @@ def build_brief(record: dict[str, Any], provider: Optional[Any] = None) -> dict[
     suggested = guardrail_comment(raw, link_policy)
     if not suggested.strip():  # guardrail removed everything → safe template
         suggested = guardrail_comment(_template_comment(topic, page_title), link_policy)
+        source = "template"  # the persisted text is the template, not the LLM draft
 
     return {
         "target_id": target_id,

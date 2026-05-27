@@ -129,6 +129,16 @@ def test_oversized_body_is_oversized_by_wire_bytes(monkeypatch):
     assert result == cf.FetchResult(html=None, reason="oversized")
 
 
+def test_response_closed_even_if_getcode_raises():
+    # Regression: getcode()/geturl() raising must not leak the socket; `with resp` closes it.
+    resp = MagicMock()  # MagicMock auto-supports the context-manager protocol
+    resp.getcode.side_effect = RuntimeError("boom")
+    with _ssrf_ok(), patch.object(cf._COMMENT_OPENER, "open", return_value=resp):
+        result = cf.fetch_comment_page("https://example.com/")
+    assert result.reason == "network_error"
+    resp.__exit__.assert_called()  # the context manager ran teardown despite the raise
+
+
 def test_body_exactly_at_cap_is_ok(monkeypatch):
     monkeypatch.setattr(cf, "MAX_BODY_BYTES", 100)
     resp = _mock_resp(body=b"y" * 100)

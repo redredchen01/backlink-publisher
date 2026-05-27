@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from backlink_publisher._util.errors import InputValidationError
+from backlink_publisher._util.errors import InputValidationError, PipelineError
 from backlink_publisher._util.jsonl import atomic_write_jsonl
 from backlink_publisher._util.logger import PipelineLogger
 from backlink_publisher.comment_outreach import schema
@@ -99,7 +99,13 @@ def upsert_status(record: dict[str, Any]) -> dict[str, Any]:
     store_path = cfg_dir / STORE_FILENAME
     lock_path = cfg_dir / LOCK_FILENAME
 
-    lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        # Read-only / unwritable CONFIG_DIR, or a race that removed the dir. Surface as a
+        # clean PipelineError (documented exit code) instead of an uncaught traceback —
+        # the status verb's exit-0/handled-error contract must hold.
+        raise PipelineError(f"cannot open status store lock at {lock_path}: {exc}") from exc
     try:
         _repair_perms(lock_path)
         fcntl.flock(lock_fd, fcntl.LOCK_EX)

@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from backlink_publisher._util.errors import UsageError
+from backlink_publisher._util.errors import PipelineError, UsageError
 from backlink_publisher.cli import comment
 from backlink_publisher.comment_outreach import schema
 from backlink_publisher.comment_outreach import store
@@ -140,6 +140,16 @@ def test_cli_invalid_status_is_usage_error(config_dir):
 def test_cli_missing_target_id_is_usage_error(config_dir):
     with pytest.raises(UsageError):
         comment._handle_status(comment._build_parser().parse_args(["status", "--set", "pending"]))
+
+
+# --- Regression: lock-file open failure surfaces as a clean PipelineError --
+def test_lock_open_failure_raises_pipeline_error(config_dir, monkeypatch):
+    def _boom(*a, **k):
+        raise PermissionError("read-only filesystem")
+
+    monkeypatch.setattr(store.os, "open", _boom)
+    with pytest.raises(PipelineError):  # not a raw OSError traceback
+        store.set_status("t1", "pending")
 
 
 # --- CLI end-to-end: status echoes the record, persists, exit 0 ------------

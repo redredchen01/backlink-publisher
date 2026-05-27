@@ -113,6 +113,15 @@ def test_qualify_driver_emits_valid_results():
     assert schema.validate_qualification_result(out[0]) == []
 
 
+# --- indexed=None is deliberately neutral: it does NOT gate accept ---------
+def test_indexed_unknown_can_still_accept():
+    # Pinned behavior (see score.py docstring): the objective is referral/brand mention,
+    # not PageRank, so unknown indexability does not block a strong comment-open target.
+    # Only an explicit indexed=False gates. This guards against accidentally tightening it.
+    r = score_target(_target(indexed=None))
+    assert r["decision"] == "accept"
+
+
 # --- No conservative-bias case yields accept (the verification gate) -------
 def test_no_conservative_case_accepts():
     bias_cases = [

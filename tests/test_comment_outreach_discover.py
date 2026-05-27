@@ -39,6 +39,20 @@ def _run(seeds_text: str):
 
 
 _WITH_REGION = b"<html><head><title>Post</title></head><body><h1>Post</h1><div id='disqus_thread'></div></body></html>"
+
+
+def test_cli_discover_writes_to_output_file(monkeypatch, tmp_path, capsys):
+    # Regression / parity: discover honors --output like import does (agent-native parity).
+    from backlink_publisher.cli import comment
+
+    monkeypatch.setattr(disc, "fetch_comment_page", lambda url, **k: FetchResult(_WITH_REGION, "ok"))
+    monkeypatch.setattr("sys.stdin", io.StringIO(_jsonl(_seed("https://a.example/p1"))))
+    out_path = tmp_path / "targets.jsonl"
+    rc = comment.main(["discover", "--output", str(out_path)])
+    assert rc == 0
+    assert capsys.readouterr().out == ""  # data went to the file, not stdout
+    lines = [json.loads(l) for l in out_path.read_text().splitlines() if l]
+    assert len(lines) == 1 and lines[0]["comment_open"] is True
 _NO_REGION = b"<html><body><h1>Press release</h1><p>Comments are closed.</p></body></html>"
 
 

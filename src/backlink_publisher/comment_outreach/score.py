@@ -1,10 +1,18 @@
 """``comment qualify`` — score CommentTargets and emit conservative QualificationResults.
 
 The decision ladder is **conservative by construction** (R5): a social-platform target, an
-unknown/absent comment region (``comment_open`` in ``{null, false}``), or a not-indexed page
-can never reach ``accept`` — they fall to ``review`` or ``reject``. Every branch is explicit
-and appends a reason; there is **no silent ``else``** (a silent fall-through is how the
-events projector once dropped successes — see the projector-drift learning).
+unknown/absent comment region (``comment_open`` in ``{null, false}``), or an explicitly
+not-indexed page (``indexed=False``) can never reach ``accept`` — they fall to ``review`` or
+``reject``. Every branch is explicit and appends a reason; there is **no silent ``else``** (a
+silent fall-through is how the events projector once dropped successes — see the
+projector-drift learning).
+
+**Deliberate:** ``indexed=None`` (indexability *unknown* — discovery does not probe SERP
+indexability, which is out of scope) is treated as a neutral compliance signal and does NOT
+gate ``accept``. This is intentional: the module's objective is referral traffic / brand
+mention / co-citation, **not** PageRank transfer, so a comment-open, on-topic page is worth a
+manual brief even when its indexability was never confirmed. Only an explicit ``indexed=False``
+(a page that reported itself non-indexable) is gated. ``test_qualify`` pins this behavior.
 
 Signals and weights here are a **documented starter**. Where the real signal originates
 (SERP indexability, ToS-derived ``link_allowed``, an authority feed) is deferred; weight /
