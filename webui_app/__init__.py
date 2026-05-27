@@ -203,6 +203,14 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
             reconcile_on_load()
         except Exception as exc:  # noqa: BLE001 — startup must not crash
             _log.warning("channel_status.reconcile_on_load failed: %s", exc)
+        # Plan 2026-05-27-001 Unit 3: one-shot purge of orphaned credential
+        # files for hard-removed channels (jianshu/zhihu/cnblogs). Self-disables
+        # via a sentinel after first run.
+        try:
+            from webui_store.channel_status import purge_removed_channel_credentials
+            purge_removed_channel_credentials()
+        except Exception as exc:  # noqa: BLE001 — startup must not crash
+            _log.warning("channel_status.purge_removed_channel_credentials failed: %s", exc)
         try:
             from .services.bind_job import reap_orphans
             reap_orphans()

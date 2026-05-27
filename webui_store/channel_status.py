@@ -8,6 +8,7 @@ on first access.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,8 @@ from backlink_publisher._util.errors import UsageError
 from backlink_publisher.cli._bind.channels import CHANNELS
 from backlink_publisher.config.loader import _config_dir
 from webui_store.base import JsonStore, _LazyStore
+
+_log = logging.getLogger(__name__)
 
 
 _UNBOUND_DEFAULT: dict[str, Any] = {
@@ -215,6 +218,55 @@ def reconcile_on_load() -> None:
     channel_status_store.update(_apply)
 
 
+# Channels hard-removed 2026-05-27 (Plan 2026-05-27-001). Their bind-save UI
+# clear path is gone, so any orphaned <slug>-credentials.json 0600 secret left
+# on disk can no longer be cleared from the UI. The purge below removes them
+# once. A closed literal set (NOT registry-derived) keeps the blast radius
+# bounded; the sentinel makes it one-shot so a future re-registration of any of
+# these slugs can never have its fresh credentials silently deleted.
+_REMOVED_CREDENTIAL_SLUGS: tuple[str, ...] = ("jianshu", "zhihu", "cnblogs")
+_PURGE_SENTINEL_NAME = ".removed-channel-purge-v1.done"
+
+
+def purge_removed_channel_credentials() -> None:
+    """One-shot, self-disabling cleanup of orphaned credential files for
+    removed channels. Best-effort: missing files are normal; unlink failures
+    are logged (not silently swallowed) so a stranded 0600 secret is
+    discoverable. Symlinks are refused, not followed. Idempotent via a sentinel
+    stamp — after the first run it no-ops on every subsequent boot.
+
+    Called by ``webui_app.create_app`` at startup (single-threaded path).
+    """
+    config_dir = _config_dir()
+    sentinel = config_dir / _PURGE_SENTINEL_NAME
+    if sentinel.exists():
+        return
+
+    for slug in _REMOVED_CREDENTIAL_SLUGS:
+        path = config_dir / f"{slug}-credentials.json"
+        if path.is_symlink():
+            _log.warning(
+                "purge_removed_channel_credentials: refusing to follow symlink "
+                "%s (not unlinked)", path,
+            )
+            continue
+        if not path.exists():
+            continue
+        try:
+            _validate_storage_state_path(path)  # containment guard
+            path.unlink()
+        except (OSError, UsageError) as exc:
+            _log.warning(
+                "purge_removed_channel_credentials: could not remove %s (%s) — "
+                "stranded 0600 secret; remove manually", path, exc,
+            )
+
+    try:
+        sentinel.write_text(_now_iso())
+    except OSError as exc:  # pragma: no cover — startup must not crash
+        _log.warning("purge_removed_channel_credentials: sentinel write failed: %s", exc)
+
+
 __all__ = [
     "channel_status_store",
     "mark_bound",
@@ -224,4 +276,5 @@ __all__ = [
     "get_status",
     "list_all",
     "reconcile_on_load",
+    "purge_removed_channel_credentials",
 ]
