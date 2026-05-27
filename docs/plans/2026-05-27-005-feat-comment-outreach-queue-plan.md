@@ -511,7 +511,7 @@ post-redirect re-check), `content/_html_utils.py`, `_util/net_safety.py`.
 **Verification:** Fetch never raises and returns a reason; detector maps fixtures to the
 expected tri-state with documented JS-lazy-load caveat.
 
-- [ ] **Unit 5: `comment discover`**
+- [x] **Unit 5: `comment discover`**
 
 **Goal:** Wire the `discover` subcommand: for each operator-supplied exact URL, fetch +
 detect, emit `CommentTarget` with tri-state signals; fetch failures → `comment_open=null`.

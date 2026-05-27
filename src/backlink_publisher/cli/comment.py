@@ -36,8 +36,11 @@ EXIT_NOT_IMPLEMENTED = 5  # scaffold marker; each unit replaces its stub
 # Handlers — thin shims. Bodies are filled in by later plan units; until then
 # they raise NotImplementedError (caught in main, mirroring cli/phase0_seal.py).
 # ---------------------------------------------------------------------------
-def _handle_discover(args: argparse.Namespace) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("comment discover not yet implemented (Unit 5)")
+def _handle_discover(args: argparse.Namespace) -> int:
+    from backlink_publisher.comment_outreach.discover import discover_targets
+
+    discover_targets(args.input, None)
+    return EXIT_OK
 
 
 def _handle_import(args: argparse.Namespace) -> int:
