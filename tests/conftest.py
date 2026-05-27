@@ -13,6 +13,42 @@ import os
 
 import pytest
 
+# ── Test global-state pollution guardrail (Plan 2026-05-27-003) ─────────────
+# Single source of truth for the security-relevant keys, shared by the
+# containment net (below) and the AST gate
+# (tests/test_security_toggle_mutation_gate.py imports SECURITY_CONFIG_KEYS).
+#
+# SECURITY_CONFIG_KEYS: webui.app.config keys the AST gate bans from raw
+#   subscript mutation AND the net restores. SESSION_COOKIE_SECURE / SECRET_KEY
+#   are cookie-integrity toggles that can neuter effective CSRF even with
+#   CSRF_ENABLED=True (a leaked SESSION_COOKIE_SECURE=True strips the cookie
+#   over HTTP -> no session -> token can't round-trip).
+SECURITY_CONFIG_KEYS = frozenset(
+    {"CSRF_ENABLED", "WTF_CSRF_ENABLED", "SESSION_COOKIE_SECURE", "SECRET_KEY"}
+)
+# The net ALSO restores TESTING for cleanliness, but the gate does NOT ban it:
+# ``config["TESTING"] = True`` is standard Flask test-client setup (~31 files),
+# not a security downgrade, and the CSRF guard never reads it.
+NET_CONFIG_RESTORE_KEYS = SECURITY_CONFIG_KEYS | {"TESTING"}
+# os.environ keys the net restores (defense-in-depth; all current env mutations
+# already go through monkeypatch, which auto-reverts).
+SECURITY_ENV_KEYS = frozenset(
+    {
+        "BACKLINK_PUBLISHER_ALLOW_NETWORK",
+        "OAUTHLIB_INSECURE_TRANSPORT",
+        "BACKLINK_PUBLISHER_SESSION_COOKIE_SECURE",
+    }
+)
+
+# Sentinel marking "key was absent" so restore can distinguish absent-vs-None.
+_ABSENT = object()
+
+# Lazily-built clean baseline of NET_CONFIG_RESTORE_KEYS, captured from a fresh
+# create_app() (never the possibly-mutated module-level webui.app singleton).
+# ``None`` until built — an explicit "not built" marker rather than dict
+# truthiness (a populated baseline could in principle be falsy-shaped).
+_CSRF_CONFIG_BASELINE: dict[str, object] | None = None
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
@@ -167,6 +203,104 @@ def _disable_real_network() -> None:
             enable_socket()
     else:
         yield
+
+
+def _ensure_csrf_config_baseline() -> dict[str, object]:
+    """Return the clean baseline for ``NET_CONFIG_RESTORE_KEYS``.
+
+    Built once, lazily, from a *fresh* ``create_app(start_scheduler=False)`` —
+    never a read of the already-imported (possibly-mutated) module-level
+    ``webui.app`` singleton, which could enshrine a leaked ``False`` as the
+    restore target. Lazy + cached so pure-CLI tests that never touch webui
+    don't pay for a webui import. Always runs after the session-scope
+    ``_isolate_user_dirs`` fixture (any function fixture does), so
+    ``create_app()`` reads the isolated tmp config dir, not the operator's
+    real ``~/.config``.
+    """
+    global _CSRF_CONFIG_BASELINE
+    if _CSRF_CONFIG_BASELINE is None:
+        from webui_app import create_app
+
+        fresh = create_app(start_scheduler=False)
+        baseline = {key: fresh.config.get(key, _ABSENT) for key in NET_CONFIG_RESTORE_KEYS}
+        # Fail loud if the baseline itself is not CSRF-enabled — otherwise the
+        # net would faithfully restore the guard to a disabled state.
+        assert baseline.get("CSRF_ENABLED") is True, (
+            "create_app() baseline does not have CSRF_ENABLED=True; the "
+            "containment net cannot trust it as a restore target."
+        )
+        _CSRF_CONFIG_BASELINE = baseline
+    return _CSRF_CONFIG_BASELINE
+
+
+def _apply_csrf_config_baseline() -> None:
+    """Reset ``webui.app.config`` security keys to baseline, if webui is loaded.
+
+    No-op for tests that never imported ``webui`` (pure-CLI), honoring the
+    "don't force a webui import on unrelated tests" requirement.
+    """
+    import sys
+
+    webui = sys.modules.get("webui")
+    if webui is None:
+        return
+    baseline = _ensure_csrf_config_baseline()
+    for key, value in baseline.items():
+        if value is _ABSENT:
+            webui.app.config.pop(key, None)
+        else:
+            webui.app.config[key] = value
+
+
+@pytest.fixture(autouse=True)
+def _restore_global_state_net():
+    """Containment net: restore security-relevant config + env around each test.
+
+    Plan 2026-05-27-003 Unit 1. Defined *after* the three monkeypatch-based
+    autouse fixtures above so its setup runs last among autouse fixtures (a
+    clean baseline is established right before the test body). On teardown it
+    restores the singleton config after the test's own non-autouse fixtures
+    (e.g. a ``client`` fixture that left CSRF disabled) have already finished,
+    so no disabled-guard state survives into the next test.
+
+    Setup resets ``webui.app.config`` security keys to a clean baseline so a
+    leak from a prior test cannot create an in-test guard-dead window. Teardown
+    restores both config and the enumerated env keys (pop-or-reassign — never
+    ``del os.environ``, per feedback_del_os_environ_poisons_later_tests).
+    """
+    # Setup: reset config to baseline (no in-test dead window) + snapshot env.
+    _apply_csrf_config_baseline()
+    env_prev = {key: os.environ.get(key, _ABSENT) for key in SECURITY_ENV_KEYS}
+    try:
+        yield
+    finally:
+        _apply_csrf_config_baseline()
+        for key, prev in env_prev.items():
+            if prev is _ABSENT:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prev
+
+
+@pytest.fixture
+def disable_csrf():
+    """Sanctioned, restoring way to disable the global CSRF guard for a test.
+
+    Plan 2026-05-27-003 Unit 2. The AST gate exempts ``conftest.py``, so this
+    is the single blessed mutation site — tests should use this instead of raw
+    ``webui.app.config["CSRF_ENABLED"] = False``. Yields the app for convenience.
+    """
+    import webui
+
+    prev = webui.app.config.get("CSRF_ENABLED", _ABSENT)
+    webui.app.config["CSRF_ENABLED"] = False
+    try:
+        yield webui.app
+    finally:
+        if prev is _ABSENT:
+            webui.app.config.pop("CSRF_ENABLED", None)
+        else:
+            webui.app.config["CSRF_ENABLED"] = prev
 
 
 # ── Shared registry fixture (Plan 2026-05-19-002 U2: promoted from

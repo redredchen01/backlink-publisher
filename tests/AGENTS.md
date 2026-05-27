@@ -45,10 +45,11 @@ pytest tests/scripts/                                  # worktree script tests
 | `test_save_config_section_taxonomy_canary.py` | `save_config` section taxonomy |
 | `test_r9_extension_readiness.py` | Cross-layer wiring for adapter extensions |
 | `test_bind_error_messages.py` | Chinese error-code→message mapping for channel binding |
+| `test_security_toggle_mutation_gate.py` | No raw `*.config["CSRF_ENABLED"/...]=` in tests outside `disable_csrf` (grandfather `(file,key)` pairs, ratchets down) |
 
 ## Known quirks
 
 - **YAML SHA quoting**: PyYAML int-coerces unquoted all-digit scalars. Always quote SHA values in YAML test fixtures: `f"    - '{sha[:7]}'\n"` (PR #98).
 - **Slowest test**: `test_webui_route_contract.py` (~1423 lines, most expensive).
-- **CSRF in tests**: Tests opt out via `app.config['CSRF_ENABLED'] = False` or legacy `WTF_CSRF_ENABLED = False`.
+- **CSRF in tests**: Use the sanctioned `disable_csrf` fixture (conftest) to turn the global CSRF guard off for a test — it restores on teardown. Do **not** raw-mutate `app.config['CSRF_ENABLED'] = False` / `WTF_CSRF_ENABLED` / `SESSION_COOKIE_SECURE` / `SECRET_KEY`; `test_security_toggle_mutation_gate.py` fails CI on new occurrences. An autouse containment net (conftest `_restore_global_state_net`) restores these keys + enumerated security env vars to a clean baseline around every test, so leaks can't cross tests.
 - **Test collection order**: Python 3.11 and 3.12 may differ on dict ordering in fixtures — use `sorted()` when asserting lists.
