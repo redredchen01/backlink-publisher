@@ -163,6 +163,7 @@ This worked but would silently re-engage the default-pass mock if `test_content_
 
 ## Related learnings
 
+- `docs/solutions/test-failures/del-os-environ-poisons-session-scoped-config-dir-fixture-2026-05-27.md` — the inverse failure: a test that *breaks* the session-scoped isolation fixture introduced here by `del os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"]`, unsetting it for every later test and re-exposing this exact fallback-to-`~/.config` bug class (PR #259).
 - `docs/solutions/test-failures/ci-test-isolation-failures-medium-brave-sleep-timeout-2026-05-13.md` — sibling test-isolation pattern (macOS Brave running silently makes `MediumBraveAdapter.publish()` execute for real). Same family: tests implicitly coupled to operator/machine state.
 - `docs/solutions/test-failures/inverted-negative-assertion-enshrined-config-save-data-loss-2026-05-14.md` — when fixing a test surfaces another red, default to fixing the source, not deleting the test. This bug's fix briefly tripped that question for the test-mod gate; classified as `contract-evolution` (4th category added to the gate in the bug-sweep plan).
 - `feedback_verify_repo_state_before_planning` (private memory) — surfaced during this sweep's planning: I claimed several SHAs/PR statuses from stale memory; document-review caught them. Lesson: even read-only repo state must be re-verified at plan time.
