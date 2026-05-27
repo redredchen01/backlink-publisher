@@ -274,6 +274,26 @@ def _build_failure_row(
     return out
 
 
+def _build_skip_row(
+    row: dict[str, Any], platform: str, live_url: str | None, ts: str
+) -> dict[str, Any]:
+    """A SKIP-DUPLICATE output row (enforce gate, U7): the backlink is already
+    live, so it carries the recorded ``live_url`` and ``error=None`` — it counts
+    as a present backlink for downstream, distinguished by its status."""
+    return {
+        "id": row.get("id", ""),
+        "platform": platform,
+        "status": "skipped_duplicate",
+        "title": row.get("title", ""),
+        "draft_url": "",
+        "published_url": live_url or "",
+        "created_at": ts,
+        "adapter": platform,
+        "error": None,
+        "_dedup_verdict": "skip",
+    }
+
+
 def _try_update_ckpt_failed(
     run_id: str | None,
     row_id: str,
@@ -323,6 +343,10 @@ def _record_publish_failure(
 ) -> str | None:
     outputs.append(_build_failure_row("failed", row, platform, err_msg, ts, adapter=platform))
     new_run_id = _try_update_ckpt_failed(run_id, row.get("id", ""), err_msg, err_class)
+    # Observe-only dedup record (U2): map this failure to failed/uncertain. Never
+    # gates publish; a store error is swallowed inside the gate helper.
+    from backlink_publisher.cli._dedup_gate import record_failure
+    record_failure(row, platform, error_class=err_class, run_id=run_id)
     publish_logger.error(
         f"publish failed: {exc}",
         extra={"id": row.get("id"), "platform": platform},
@@ -404,6 +428,18 @@ def _build_parser() -> Any:
         help="Delete all complete checkpoints and exit",
     )
     parser.add_argument(
+        "--preview-manifest",
+        action="store_true",
+        default=False,
+        help=(
+            "Read-only dedup preview: emit per-row NEW/SKIP-DUPLICATE/HOLD-UNCERTAIN "
+            "verdicts (JSONL on stdout, HMAC-digest summary on stderr) and exit 0. "
+            "No publish, no lease, no checkpoint."
+        ),
+    )
+    from ._dedup_ops import add_dedup_arguments
+    add_dedup_arguments(parser)
+    parser.add_argument(
         "--no-verify",
         action="store_true",
         default=False,
@@ -427,10 +463,25 @@ def _handle_checkpoint_ops(args: Any) -> None:
     from .. import checkpoint
     from backlink_publisher._util.errors import emit_error
 
-    exclusive = [args.resume, args.list_runs, args.cleanup, args.cleanup_all]
+    exclusive = [
+        args.resume, args.list_runs, args.cleanup, args.cleanup_all,
+        getattr(args, "preview_manifest", False),
+        getattr(args, "forget", None), getattr(args, "list_uncertain", False),
+        getattr(args, "adjudicate_uncertain", None),
+        getattr(args, "adjudicate_bulk", False),
+        getattr(args, "backfill_dedup", False),
+        getattr(args, "check_enforce_readiness", False),
+        # --force-manifest modifies a fresh publish run; it is NOT honored on the
+        # resume seam (which calls the plain gate), so reject the combination here
+        # rather than silently dropping the operator's force-flags.
+        getattr(args, "force_manifest", None),
+    ]
     if sum(bool(x) for x in exclusive) > 1:
         emit_error(
-            "error: --resume, --list-runs, --cleanup, and --cleanup-all are mutually exclusive",
+            "error: --resume, --list-runs, --cleanup, --cleanup-all, "
+            "--preview-manifest, --forget, --list-uncertain, "
+            "--adjudicate-uncertain, --adjudicate-bulk, --backfill-dedup, "
+            "--check-enforce-readiness, and --force-manifest are mutually exclusive",
             exit_code=2,
         )
 
@@ -575,10 +626,25 @@ def _publish_epilogue(
     skipped_unreachable_count: int,
     skipped_quarantined_count: int = 0,
     publish_path_drift_count: int = 0,
+    dedup_skip_count: int = 0,
+    dedup_hold_count: int = 0,
 ) -> None:
     if run_id is not None:
         from ..events import project_run_safe as _project_run_safe
         _project_run_safe(run_id)
+
+    # R18/U7 dedup reconciliation line — counts only, no campaign URLs. Always
+    # emitted (zeros in observe) so the signal is uniform; RECON level per
+    # [[recon-log-level-for-always-on-signals]].
+    dispatched = sum(
+        1 for r in outputs if r.get("_dedup_verdict") != "skip"
+    )
+    publish_logger.recon(
+        "dedup_reconciliation",
+        skipped_already_published=dedup_skip_count,
+        held_uncertain=dedup_hold_count,
+        dispatched=dispatched,
+    )
 
     successful = [r for r in outputs if r.get("error") is None]
     failed = [r for r in outputs if r.get("error") is not None]
@@ -613,6 +679,16 @@ def _publish_epilogue(
         )
 
     if not args.dry_run and not successful:
+        if dedup_hold_count > 0:
+            # Enforce held every row (uncertain/in-flight) — this is operator-action
+            # required (adjudicate the holds), not an internal error. Exit 3
+            # (DependencyError), not 5.
+            emit_error(
+                f"all {dedup_hold_count} row(s) held by the dedup gate "
+                "(uncertain/in-flight); adjudicate with --list-uncertain / "
+                "--adjudicate-uncertain, then re-run",
+                exit_code=3,
+            )
         emit_error("no payloads were published", exit_code=5)
 
     if unverified:

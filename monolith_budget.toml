@@ -18,8 +18,8 @@ ceiling = 400
 rationale = "Blast-radius Phase 1 (2026-05-27) added _cell_gate_drop + cell_gate_summary helpers for the opt-in cell admission gate (R7-minimal), growing core.py from 347 to 392 SLOC. Ceiling 400 = round_up_to_10(392+5)."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 290
-rationale = "Post-loop epilogue (reconciliation stats, JSONL dump, exit-code dispatch) extracted to _publish_epilogue in _publish_helpers.py (2026-05-26). publish_backlinks.py dropped from 280 to 258 SLOC — holds main() and the per-row publish loop only. Ceiling 290 = round_up_to_10(258+30)."
+ceiling = 370
+rationale = "Two independent per-row loop gates now coexist here: the canary health gate (Plan 2026-05-27-001 U4 — advisory WARN + opt-in hard-skip) and the cross-run idempotency enforce gate (Plan 2026-05-27-005 U7 — skip-duplicate row, held-uncertain branch, counters, reconciliation precondition + force-manifest load). Both are intrinsic per-row publish-loop wiring; the gate decisions and audit live in cli/_dedup_gate.py (gate_with_force) + idempotency/store.py.gate_and_claim + canary/store.py. At 335 SLOC; ceiling 370 = round_up_to_10(335+30), 35 headroom."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 250

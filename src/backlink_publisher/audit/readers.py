@@ -26,7 +26,7 @@ import json
 import shutil
 import sqlite3
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,13 @@ from backlink_publisher.config import _config_dir
 _DB_FILENAME = "events.db"
 _WAL_SUFFIX = "-wal"
 _HISTORY_FILENAME = "publish-history.json"
+#: The authoritative idempotency store (U1). Read here via the same snapshot-copy
+#: discipline as events.db so the live store is left byte-identical (U4).
+_DEDUP_DB_FILENAME = "dedup.db"
+_DEDUP_COLUMNS = (
+    "platform, account, target_url, state, verify_ok, live_url, "
+    "owner_pid, owner_started_at, updated_at"
+)
 
 #: Stable ``articles`` columns the auditor depends on (R6/Dependencies). These
 #: predate and are unaffected by the in-flight #235/#237 projector rewrite.
@@ -68,6 +75,10 @@ def _history_path() -> Path:
     return _config_dir() / _HISTORY_FILENAME
 
 
+def _dedup_db_path() -> Path:
+    return _config_dir() / _DEDUP_DB_FILENAME
+
+
 @dataclass(frozen=True)
 class ArticleRow:
     """One ``articles`` row, stable columns only."""
@@ -80,18 +91,34 @@ class ArticleRow:
     run_id: str | None
 
 
+@dataclass(frozen=True)
+class DedupAuditRow:
+    """One ``dedup_keys`` row from the authoritative idempotency store (U4)."""
+
+    platform: str
+    account: str
+    target_url: str
+    state: str
+    verify_ok: int | None
+    live_url: str | None
+    owner_pid: int | None
+    owner_started_at: float | None
+    updated_at: float
+
+
 @dataclass
 class StoreSnapshot:
-    """Point-in-time view of both stores.
+    """Point-in-time view of all audited stores.
 
     ``transient`` is set when a source file changed during the copy window or
     the copied db failed ``PRAGMA quick_check`` — callers down-classify any
     finding drawn from it as ``possibly-transient`` (R10). ``nothing_to_audit``
-    is set when neither store exists yet (fresh operator → exit 0).
+    is set when no audited store exists yet (fresh operator → exit 0).
     """
 
     articles: list[ArticleRow]
     history: list[dict[str, Any]]
+    dedup: list[DedupAuditRow] = field(default_factory=list)
     transient: bool = False
     nothing_to_audit: bool = False
 
@@ -159,6 +186,54 @@ def _read_articles_from_snapshot(db_path: Path) -> tuple[list[ArticleRow], bool]
     return rows, transient
 
 
+def _read_dedup_from_snapshot(db_path: Path) -> tuple[list[DedupAuditRow], bool]:
+    """Snapshot-copy ``dedup.db`` (+ its ``-wal``) and read ``dedup_keys`` from the
+    copy, leaving the live store byte-identical (same discipline as
+    :func:`_read_articles_from_snapshot`). Returns ``(rows, transient)``.
+    """
+    wal_path = db_path.with_name(db_path.name + _WAL_SUFFIX)
+    before = (_fingerprint(db_path), _fingerprint(wal_path))
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="bp-audit-dedup-"))
+    try:
+        copy_db = tmp_dir / _DEDUP_DB_FILENAME
+        try:
+            shutil.copy2(db_path, copy_db)
+            if wal_path.exists():
+                shutil.copy2(wal_path, tmp_dir / (_DEDUP_DB_FILENAME + _WAL_SUFFIX))
+            conn = sqlite3.connect(f"file:{copy_db}?mode=ro", uri=True)
+            try:
+                conn.row_factory = sqlite3.Row
+                quick = conn.execute("PRAGMA quick_check").fetchone()
+                rows = [
+                    DedupAuditRow(
+                        platform=r["platform"],
+                        account=r["account"],
+                        target_url=r["target_url"],
+                        state=r["state"],
+                        verify_ok=r["verify_ok"],
+                        live_url=r["live_url"],
+                        owner_pid=r["owner_pid"],
+                        owner_started_at=r["owner_started_at"],
+                        updated_at=r["updated_at"],
+                    )
+                    for r in conn.execute(
+                        f"SELECT {_DEDUP_COLUMNS} FROM dedup_keys"
+                    )
+                ]
+            finally:
+                conn.close()
+        except (OSError, sqlite3.Error) as exc:
+            raise AuditReadError(f"cannot read dedup.db: {exc}") from exc
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    after = (_fingerprint(db_path), _fingerprint(wal_path))
+    quick_ok = quick is not None and quick[0] == "ok"
+    transient = (before != after) or not quick_ok
+    return rows, transient
+
+
 def _read_history(history_path: Path) -> list[dict[str, Any]]:
     """Read ``publish-history.json`` directly (NOT via the import-frozen
     ``webui_store`` singleton). Tolerates an absent or malformed file.
@@ -176,8 +251,13 @@ def read_snapshot() -> StoreSnapshot:
     """Load both stores point-in-time. See ``StoreSnapshot``."""
     db_path = _events_db_path()
     history_path = _history_path()
+    dedup_path = _dedup_db_path()
 
-    if not db_path.exists() and not history_path.exists():
+    if (
+        not db_path.exists()
+        and not history_path.exists()
+        and not dedup_path.exists()
+    ):
         return StoreSnapshot(articles=[], history=[], nothing_to_audit=True)
 
     hist_before = _fingerprint(history_path)
@@ -187,9 +267,17 @@ def read_snapshot() -> StoreSnapshot:
     else:
         articles, transient = [], False
 
+    if dedup_path.exists():
+        dedup, dedup_transient = _read_dedup_from_snapshot(dedup_path)
+        transient = transient or dedup_transient
+    else:
+        dedup = []
+
     # R10: the history file changing across the read window is also a transient
     # condition (the two stores would be read at inconsistent points in time).
     if _fingerprint(history_path) != hist_before:
         transient = True
 
-    return StoreSnapshot(articles=articles, history=history, transient=transient)
+    return StoreSnapshot(
+        articles=articles, history=history, dedup=dedup, transient=transient
+    )
