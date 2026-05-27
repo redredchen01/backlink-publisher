@@ -554,7 +554,7 @@ seed count is capped; process exits 0.
 
 ### Phase 3 — Qualify, Brief, Track
 
-- [ ] **Unit 6: `comment qualify` + conservative scoring ladder**
+- [x] **Unit 6: `comment qualify` + conservative scoring ladder**
 
 **Goal:** Score targets and emit `QualificationResult` with a conservative decision ladder.
 

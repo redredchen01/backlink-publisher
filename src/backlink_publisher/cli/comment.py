@@ -52,8 +52,11 @@ def _handle_import(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _handle_qualify(args: argparse.Namespace) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("comment qualify not yet implemented (Unit 6)")
+def _handle_qualify(args: argparse.Namespace) -> int:
+    from backlink_publisher.comment_outreach.score import qualify_targets
+
+    qualify_targets(args.input, None)
+    return EXIT_OK
 
 
 def _handle_brief(args: argparse.Namespace) -> int:  # pragma: no cover - stub
