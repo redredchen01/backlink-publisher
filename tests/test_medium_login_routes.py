@@ -47,6 +47,13 @@ def client(monkeypatch, tmp_path):
     import webui
     webui.app.config["TESTING"] = True
     webui.app.config["SESSION_COOKIE_SECURE"] = False
+    # Force CSRF enforcement ON regardless of sibling tests that disable it on
+    # the shared module-level ``webui.app`` (e.g. test_history_bulk_routes sets
+    # WTF_CSRF_ENABLED=False and never restores). monkeypatch.setitem restores
+    # the prior value on teardown, keeping the 403 negative tests deterministic
+    # under pytest-randomly ordering.
+    monkeypatch.setitem(webui.app.config, "CSRF_ENABLED", True)
+    monkeypatch.setitem(webui.app.config, "WTF_CSRF_ENABLED", True)
     return webui.app.test_client()
 
 
@@ -71,6 +78,14 @@ def _make_mock_pw(page_url: str = "https://medium.com/@testuser"):
     return mock_spw, page, ctx, pw_instance
 
 
+# ── Origin headers (medium POSTs carry bind-style origin guard) ──────────────
+
+def _origin_headers() -> dict:
+    """Allowlisted loopback Origin so ``_check_bind_origin_or_abort`` passes."""
+    from webui_app.helpers.security import _FLASK_PORT
+    return {"Origin": f"http://127.0.0.1:{_FLASK_PORT}"}
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
@@ -84,9 +99,13 @@ def isolated_cfg(monkeypatch, tmp_path):
 
 @pytest.fixture()
 def csrf_client(client):
-    """client with a pre-seeded CSRF token in flask session."""
+    """client with a pre-seeded canonical CSRF token in flask session.
+
+    Seeds the canonical ``csrf_token`` key the app-level ``_global_csrf_guard``
+    validates (medium's old bespoke ``medium_csrf`` layer was retired).
+    """
     with client.session_transaction() as sess:
-        sess["medium_csrf"] = "test-csrf-abc"
+        sess["csrf_token"] = "test-csrf-abc"
     return client, "test-csrf-abc"
 
 
@@ -95,20 +114,48 @@ def csrf_client(client):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestCSRFProtection:
-    def test_launch_without_token_redirects_danger(self, client):
-        resp = client.post("/settings/medium/launch-browser-login", data={})
-        assert resp.status_code == 302
-        assert "flash_type=danger" in resp.headers["Location"]
+    """The app-level ``_global_csrf_guard`` rejects any POST lacking a valid
+    canonical ``csrf_token`` with a 403, before the route runs. medium's old
+    bespoke 302-danger CSRF layer was retired, so 403 is the rejection contract.
+    (Origin header supplied so the rejection is attributable to CSRF, not the
+    origin guard.)
+    """
 
-    def test_probe_without_token_redirects_danger(self, client):
-        resp = client.post("/settings/medium/probe-browser-login", data={})
-        assert resp.status_code == 302
-        assert "flash_type=danger" in resp.headers["Location"]
+    def test_launch_without_token_forbidden(self, client):
+        resp = client.post("/settings/medium/launch-browser-login",
+                           data={}, headers=_origin_headers())
+        assert resp.status_code == 403
 
-    def test_clear_without_token_redirects_danger(self, client):
-        resp = client.post("/settings/medium/clear-browser-login", data={})
-        assert resp.status_code == 302
-        assert "flash_type=danger" in resp.headers["Location"]
+    def test_probe_without_token_forbidden(self, client):
+        resp = client.post("/settings/medium/probe-browser-login",
+                           data={}, headers=_origin_headers())
+        assert resp.status_code == 403
+
+    def test_clear_without_token_forbidden(self, client):
+        resp = client.post("/settings/medium/clear-browser-login",
+                           data={}, headers=_origin_headers())
+        assert resp.status_code == 403
+
+
+class TestOriginGuard:
+    """R5 — medium POSTs carry the same origin guard as the bind routes
+    (``_check_bind_origin_or_abort``). A valid CSRF token alone is not enough;
+    missing or cross-origin requests are rejected with 403.
+    """
+
+    def test_valid_csrf_but_no_origin_forbidden(self, csrf_client):
+        client, token = csrf_client
+        # Valid CSRF token, but no Origin/Referer → origin guard 403s.
+        resp = client.post("/settings/medium/clear-browser-login",
+                           data={"csrf_token": token})
+        assert resp.status_code == 403
+
+    def test_valid_csrf_cross_origin_forbidden(self, csrf_client):
+        client, token = csrf_client
+        resp = client.post("/settings/medium/clear-browser-login",
+                           data={"csrf_token": token},
+                           headers={"Origin": "http://evil.example.com"})
+        assert resp.status_code == 403
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -226,29 +273,41 @@ class TestMediumLoginRoutes:
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302
         loc = resp.headers["Location"]
         assert "flash_type=info" in loc
+        # Side-effect: logged-in probe persists session state for publish gating.
+        with client.session_transaction() as sess:
+            assert sess.get("medium_probe_logged_in") is True
 
     def test_probe_not_logged_in_flashes_info(self, csrf_client):
         client, token = csrf_client
+        # Seed a stale logged-in flag so we can assert the route pops it.
+        with client.session_transaction() as sess:
+            sess["medium_probe_logged_in"] = True
         mock_spw, *_ = _make_mock_pw("https://medium.com/m/signin?x=1")
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302
         assert "flash_type=info" in resp.headers["Location"]
+        # Side-effect: a not-logged-in probe clears any stale logged-in flag.
+        with client.session_transaction() as sess:
+            assert "medium_probe_logged_in" not in sess
 
     def test_probe_no_playwright_flashes_warning(self, csrf_client):
         client, token = csrf_client
         with patch("webui_app.medium_login.sync_playwright", None):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302
         assert "flash_type=warning" in resp.headers["Location"]
@@ -258,20 +317,47 @@ class TestMediumLoginRoutes:
         with patch("webui_app.medium_login.sync_playwright", None):
             resp = client.post(
                 "/settings/medium/launch-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302
         assert "flash_type=warning" in resp.headers["Location"]
 
-    def test_clear_redirects_success(self, csrf_client):
+    def test_clear_redirects_success_and_deletes_profile(self, csrf_client):
         client, token = csrf_client
+        # R3 side-effect: seed a profile dir, assert clear actually removes it.
+        from backlink_publisher.config import load_config
+        cfg = load_config()
+        profile = cfg.config_dir / "chrome-profile-default"
+        (profile / "Default").mkdir(parents=True)
+        (profile / "Default" / "Cookies").write_bytes(b"fake")
         resp = client.post(
             "/settings/medium/clear-browser-login",
-            data={"_csrf_token": token},
+            data={"csrf_token": token},
+            headers=_origin_headers(),
         )
         assert resp.status_code == 302
         loc = resp.headers["Location"]
         assert loc.startswith("/settings?")
+        assert "flash_type=success" in loc
+        assert not profile.exists()
+
+    def test_settings_render_seeds_usable_csrf_token(self, client):
+        """R4 positive proof: after the bespoke medium_csrf_token() jinja global
+        was retired, the app-level inject_csrf_token processor must still seed a
+        non-empty session csrf_token that the medium forms submit and the global
+        guard accepts (no silent empty-token → 403 in production).
+        """
+        assert client.get("/settings").status_code == 200
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        assert token  # non-empty token was seeded during render
+        resp = client.post(
+            "/settings/medium/clear-browser-login",
+            data={"csrf_token": token},
+            headers=_origin_headers(),
+        )
+        assert resp.status_code != 403  # the rendered token passes the guard
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -406,7 +492,8 @@ class TestPWErrorRouteIntegration:
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/launch-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302  # NOT 500
         loc = urllib.parse.unquote(resp.headers["Location"])
@@ -424,7 +511,8 @@ class TestPWErrorRouteIntegration:
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
-                data={"_csrf_token": token},
+                data={"csrf_token": token},
+                headers=_origin_headers(),
             )
         assert resp.status_code == 302  # NOT 500
         loc = urllib.parse.unquote(resp.headers["Location"])

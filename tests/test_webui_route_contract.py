@@ -894,23 +894,21 @@ class TestSettingsRoutes:
         assert resp.headers["Location"].startswith("/settings?")
 
     # ── Plan 013 Phase B: browser-login routes ────────────────────────────────
-    # CSRF check: without a token, the before_request hook redirects back to
-    # /settings with a danger flash — that's still a 302.
+    # CSRF: the bespoke before_request 302-danger layer was retired (it was dead
+    # code behind the app-level _global_csrf_guard). A POST without a valid
+    # canonical csrf_token is now rejected with 403 by the global guard.
 
-    def test_medium_launch_browser_login_no_csrf_redirects(self, client):
+    def test_medium_launch_browser_login_no_csrf_forbidden(self, client):
         resp = client.post("/settings/medium/launch-browser-login", data={})
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
+        assert resp.status_code == 403
 
-    def test_medium_probe_browser_login_no_csrf_redirects(self, client):
+    def test_medium_probe_browser_login_no_csrf_forbidden(self, client):
         resp = client.post("/settings/medium/probe-browser-login", data={})
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
+        assert resp.status_code == 403
 
-    def test_medium_clear_browser_login_no_csrf_redirects(self, client):
+    def test_medium_clear_browser_login_no_csrf_forbidden(self, client):
         resp = client.post("/settings/medium/clear-browser-login", data={})
-        assert resp.status_code == 302
-        assert resp.headers["Location"].startswith("/settings?")
+        assert resp.status_code == 403
 
     def test_revoke_blogger_redirects(self, client):
         resp = client.post("/settings/revoke-blogger")
