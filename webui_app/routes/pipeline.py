@@ -82,10 +82,12 @@ def ce_plan():
             target_url=main_url, category_url=category_url, work_url=work_url,
         )
 
+    warning_msg = None
     if category_url or work_url:
         try:
             _persist_three_tier_config(main_url, category_url, work_url)
         except Exception as exc:
+            warning_msg = f"漫画/分类页配置保存失败 ({type(exc).__name__})，但生成任务仍可继续。"
             plan_logger.warn(
                 "homepage_form_persist_failed",
                 main=main_url, reason=type(exc).__name__, detail=str(exc)[:120],
@@ -131,7 +133,7 @@ def ce_plan():
     return _render('index.html',
         target_url=target_url, config=config,
         urls_json=urls_json, extra_urls=extra_urls,
-        meta_info=meta_info[:3])
+        meta_info=meta_info[:3], warning=warning_msg)
 
 
 @bp.route('/ce:generate', methods=['POST'])

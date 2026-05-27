@@ -32,7 +32,7 @@ def ce_draft_save():
         target_url=target_url,
         language=language,
     )
-    flash_type = "success" if result["ok"] else "danger"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "danger")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -42,7 +42,7 @@ def ce_draft_schedule():
     item_id = request.form.get('id', '')
     scheduled_at_str = request.form.get('scheduled_at', '')
     result = _draft.schedule(item_id, scheduled_at_str)
-    flash_type = "success" if result["ok"] else "danger"
+    flash_type = result.get("flash_type") or ("success" if result["ok"] else "danger")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -51,7 +51,7 @@ def ce_draft_publish_now():
     """Immediately schedule a draft item to publish in ~5 seconds."""
     item_id = request.form.get('id', '')
     result = _draft.publish_now(item_id)
-    flash_type = "info" if result["ok"] else "danger"
+    flash_type = result.get("flash_type") or ("info" if result["ok"] else "danger")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 
@@ -90,7 +90,7 @@ def ce_draft_bulk_publish_now():
     """Schedule multiple drafts for near-immediate publish, staggered by 5s."""
     ids = request.form.getlist('ids')
     result = _draft.bulk_publish_now(ids)
-    flash_type = "info" if result["ok"] else "warning"
+    flash_type = result.get("flash_type") or ("info" if result["ok"] else "warning")
     return redirect(f'/?tab=draft&flash_type={flash_type}&flash_msg={result["flash_msg"]}')
 
 

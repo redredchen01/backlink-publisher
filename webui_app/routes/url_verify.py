@@ -187,9 +187,19 @@ def url_verify():
         # Distinguish a retryable timeout from a generic network error, and
         # capture the exception class for diagnosis (still host-hashed +
         # throttled — never a raw-host, ungated log).
-        reason = ("timeout" if isinstance(exc, (TimeoutError, socket.timeout))
-                  else "network_error")
-        _emit_recon(reason, host=host_ascii, exc_class=type(exc).__name__)
+        exc_name = type(exc).__name__
+        if "SSLError" in exc_name or "Certificate" in str(exc):
+            reason = "ssl_verification_failed"
+        elif "ConnectionRefused" in exc_name:
+            reason = "connection_refused"
+        elif "DNS" in exc_name or "Gaierror" in exc_name:
+            reason = "dns_lookup_failed"
+        elif isinstance(exc, (TimeoutError, socket.timeout)):
+            reason = "timeout"
+        else:
+            reason = "network_error"
+
+        _emit_recon(reason, host=host_ascii, exc_class=exc_name)
         ok, title = False, None
     finally:
         throttle.release(host_ascii)
