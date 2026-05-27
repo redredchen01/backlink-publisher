@@ -63,6 +63,12 @@ class TestValidateMainDomainUrl:
     def test_port_is_preserved(self):
         assert validate_main_domain_url("https://site.com:8443") == "https://site.com:8443/"
 
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_malformed_authority_returns_none_not_raises(self, url):
+        # Unterminated IPv6 makes stdlib urlparse raise ValueError; the validator
+        # must reject (None), never crash. See [[feedback_urlparse_raises_on_malformed_ipv6]].
+        assert validate_main_domain_url(url) is None
+
 
 # ── validate_https_url ──────────────────────────────────────────────────────
 
@@ -95,6 +101,12 @@ class TestValidateHttpsUrl:
 
     def test_bare_root_gets_trailing_slash(self):
         assert validate_https_url("https://site.com") == "https://site.com/"
+
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_malformed_authority_returns_none_not_raises(self, url):
+        # Unterminated IPv6 makes stdlib urlparse raise ValueError; the validator
+        # must reject (None), never crash. See [[feedback_urlparse_raises_on_malformed_ipv6]].
+        assert validate_https_url(url) is None
 
 
 # ── is_same_host ────────────────────────────────────────────────────────────

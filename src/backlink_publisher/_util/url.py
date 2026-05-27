@@ -64,7 +64,9 @@ def validate_main_domain_url(url: str | None) -> str | None:
     """
     if not url:
         return None
-    parsed = urlparse(url.strip())
+    parsed = safe_urlparse(url.strip())
+    if parsed is None:
+        return None
     if parsed.scheme != "https":
         return None
     if not parsed.netloc:
@@ -87,7 +89,9 @@ def validate_https_url(url: str | None) -> str | None:
     """
     if not url:
         return None
-    parsed = urlparse(url.strip())
+    parsed = safe_urlparse(url.strip())
+    if parsed is None:
+        return None
     if parsed.scheme != "https":
         return None
     if not parsed.netloc:
