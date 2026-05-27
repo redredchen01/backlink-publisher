@@ -144,6 +144,14 @@ _REJECTED_PLATFORMS: dict[str, str] = {
     #   PR #108->#109 observed free-tier rel=nofollow, but a 2026-05 recheck
     #   found nofollow opt-in only — the conflict is resolved by an
     #   operator canary, not by re-rejecting. See _R["wordpresscom"].
+    "jianshu": (
+        "Jianshu (简书) routes outbound body links through a "
+        "https://link.jianshu.com/go?to= redirect interstitial that strips "
+        "link equity server-side (same pattern as juejin/csdn), so external "
+        "<a> elements pass no PageRank. Removed 2026-05-27 — operator has no "
+        "account and the nofollow verdict makes it dead weight; re-register "
+        "only with a fresh dofollow canary disproving the interstitial."
+    ),
 }
 
 
@@ -201,7 +209,7 @@ _AUTH_TYPE_BY_PLATFORM: dict[str, str] = {
     "wordpresscom": "token_fields", "hashnode": "token_fields",
     "tumblr": "token_fields",
     # PASTE-BLOB — pasted {"cookies":[...]} JSON (cookie-export)
-    "csdn": "paste_blob", "jianshu": "paste_blob", "juejin": "paste_blob",
+    "csdn": "paste_blob", "juejin": "paste_blob",
     "note": "paste_blob", "substack": "paste_blob",
     # USERPASS — username + password (stored server-side)
     "livejournal": "userpass",
