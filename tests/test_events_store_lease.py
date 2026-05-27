@@ -13,7 +13,8 @@ import os
 import pytest
 
 from backlink_publisher.events import store as store_module
-from backlink_publisher.events.store import EventStore, _pid_alive
+from backlink_publisher.events._store_sqlite import _pid_alive
+from backlink_publisher.events.store import EventStore
 
 
 @pytest.fixture(autouse=True)

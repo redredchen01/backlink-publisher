@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 
-import pytest
 
 from backlink_publisher.anchor.metrics import (
     TargetThresholds,

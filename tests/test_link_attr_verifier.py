@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from backlink_publisher.publishing.adapters.link_attr_verifier import verify_link_attributes
 

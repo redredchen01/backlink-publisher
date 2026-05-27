@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import stat
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,10 +27,8 @@ from backlink_publisher._util.errors import (
     AuthExpiredError,
     ContentRejectedError,
     DependencyError,
-    ExternalServiceError,
 )
 from backlink_publisher.publishing.adapters.velog_graphql import (
-    UNLOCK_DATE_UTC,
     VelogGraphQLAdapter,
     _effective_cap,
     _load_cookies,

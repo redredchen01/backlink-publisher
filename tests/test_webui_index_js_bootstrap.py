@@ -8,7 +8,6 @@ import re
 import pytest
 
 from webui_app import create_app
-from webui_store import history_store
 
 
 @pytest.fixture
@@ -58,7 +57,6 @@ def test_no_jinja_interpolation_in_page_js(client):
 
 def test_bootstrap_null_plans_list_no_error(app):
     """GET / with plans_list=None in context renders without error (JS falls back to [])."""
-    from unittest.mock import patch
     with app.test_client() as c:
         # Default render with no active pipeline should have plans_list=None or []
         resp = c.get("/")

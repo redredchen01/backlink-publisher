@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +13,6 @@ from backlink_publisher.publishing.adapters.notion_api import (
     _load_credentials,
     _required_headers,
 )
-from backlink_publisher.publishing.adapters.base import AdapterResult
 
 
 @pytest.fixture

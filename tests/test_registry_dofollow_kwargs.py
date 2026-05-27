@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from backlink_publisher._util.errors import RegistryError
-from backlink_publisher.publishing import registry
 from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.publishing.registry import (
     Publisher,

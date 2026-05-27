@@ -81,7 +81,8 @@ def test_velog_appears_in_filter_chip_row(client):
 
 def test_velog_appears_in_js_counter_dict(client):
     """platform_slugs in window.__indexBootstrap must include velog for initCounts."""
-    import json, re
+    import json
+    import re
     html = _get_index_html(client)
     # Plan B Unit 3: platform slugs are now in window.__indexBootstrap.platform_slugs
     # (JSON array), not as inline JS object keys like "velog: 0".
@@ -95,7 +96,8 @@ def test_velog_appears_in_js_counter_dict(client):
 
 def test_velog_in_norm_platform_tuple(client):
     """velog must appear in window.__indexBootstrap.platform_slugs (norm_platform contract)."""
-    import json, re
+    import json
+    import re
     html = _get_index_html(client)
     m = re.search(r'window\.__indexBootstrap\s*=\s*(\{.*?\});', html, re.DOTALL)
     assert m, "window.__indexBootstrap not found in page"
@@ -183,7 +185,8 @@ def test_dummy_adapter_auto_appears_in_filter_chip(fake_platform_registered, cli
 
 def test_dummy_adapter_auto_appears_in_js_counter(fake_platform_registered, client):
     """register("fake") → 'fake' in window.__indexBootstrap.platform_slugs (Plan B Unit 3)."""
-    import json, re
+    import json
+    import re
     html = _get_index_html(client)
     m = re.search(r'window\.__indexBootstrap\s*=\s*(\{.*?\});', html, re.DOTALL)
     assert m, "window.__indexBootstrap not found in page"

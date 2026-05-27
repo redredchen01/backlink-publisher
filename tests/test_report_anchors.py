@@ -19,7 +19,6 @@ from backlink_publisher.cli.report_anchors import (
     _build_profile_report,
     _build_report,
     _format_profile_report_markdown,
-    _markdown_table,
     main,
 )
 

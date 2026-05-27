@@ -17,11 +17,8 @@ import fcntl
 import os
 import threading
 import time
-from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from backlink_publisher.publishing.adapters.blogger_api import _refresh_lock
 

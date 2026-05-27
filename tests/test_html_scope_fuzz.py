@@ -13,8 +13,6 @@ Source: ``origin/pr/1:src/backlink_publisher/verifier.py``
 from __future__ import annotations
 
 import random
-import re
-from html.parser import HTMLParser
 
 import pytest
 

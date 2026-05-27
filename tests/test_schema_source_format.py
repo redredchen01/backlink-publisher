@@ -351,7 +351,7 @@ class TestContentHtmlSizeCap:
         row = _valid_output_row(content_html=oversized)
         errors = validate_output_payload(row)
         assert any(
-            f"content_html size" in e and f"exceeds {MAX_CONTENT_HTML_BYTES}" in e
+            "content_html size" in e and f"exceeds {MAX_CONTENT_HTML_BYTES}" in e
             for e in errors
         )
 

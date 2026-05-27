@@ -5,12 +5,10 @@ from __future__ import annotations
 import json
 import sys
 from io import StringIO
-from unittest.mock import patch
 
 import pytest
 
 from backlink_publisher.cli.validate_backlinks import main
-from backlink_publisher.linkcheck import ExternalServiceError
 
 
 def _run_validate(input_data: str, check_urls: bool = True, argv: list[str] | None = None) -> tuple[str, str, int]:

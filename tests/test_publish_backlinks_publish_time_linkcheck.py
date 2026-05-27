@@ -14,7 +14,6 @@ from io import StringIO
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 
 from backlink_publisher.cli import publish_backlinks
 

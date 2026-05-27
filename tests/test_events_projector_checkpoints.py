@@ -8,7 +8,6 @@ event + article rows landed as documented in the design notes.
 from __future__ import annotations
 
 import json
-import stat
 from pathlib import Path
 from typing import Any
 

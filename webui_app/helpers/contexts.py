@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 import os
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import render_template, session
-from google.oauth2.credentials import Credentials
+from flask import render_template
 
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher.config import (

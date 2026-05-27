@@ -6,7 +6,6 @@ show/verify/reseal; verify-hook stub still returns EXIT_NOT_IMPLEMENTED.
 
 from __future__ import annotations
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 from backlink_publisher.cli import phase0_seal as CLI

@@ -12,16 +12,13 @@ Coverage targets:
 
 from __future__ import annotations
 
-import json
 import os
 import stat
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backlink_publisher._util.errors import DependencyError
 import backlink_publisher.publishing.browser_publish._chrome_session_impl as _cs_impl
 
 from backlink_publisher.publishing.browser_publish import (

@@ -114,10 +114,10 @@ def test_blogger_forwards_xss_payload_verbatim(xss_payload):
     # sends to Google. We don't assert what Google does with it — that's
     # the platform contract (observed manually via quarterly sandbox post).
     assert xss_payload in body["content"], (
-        f"BloggerAPIAdapter did NOT forward content_html verbatim. "
-        f"Adapter-side sanitization detected — this contradicts the "
-        f"forwarder-role contract locked by plan 2026-05-18-006 Unit 5. "
-        f"Either remove the sanitization or update the threat model."
+        "BloggerAPIAdapter did NOT forward content_html verbatim. "
+        "Adapter-side sanitization detected — this contradicts the "
+        "forwarder-role contract locked by plan 2026-05-18-006 Unit 5. "
+        "Either remove the sanitization or update the threat model."
     )
 
 

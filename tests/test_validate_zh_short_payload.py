@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from backlink_publisher._util.markdown import (
     render_zh_short_article,

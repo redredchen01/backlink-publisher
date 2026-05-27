@@ -38,7 +38,6 @@ from backlink_publisher.footprint import (
 )
 from backlink_publisher.footprint_corpus import (
     CORPUS_NAMES,
-    canonical_fixture_inputs,
     compute_fixture_set_id,
     make_corpus,
 )

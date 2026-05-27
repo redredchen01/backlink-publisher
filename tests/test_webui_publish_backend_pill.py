@@ -7,9 +7,7 @@ for each backend kind.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 

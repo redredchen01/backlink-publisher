@@ -13,7 +13,6 @@ from backlink_publisher.publishing.adapters.devto_api import (
     _load_api_key,
     _required_headers,
 )
-from backlink_publisher.publishing.adapters.base import AdapterResult
 
 
 @pytest.fixture

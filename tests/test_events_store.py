@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import multiprocessing
 import sqlite3
+import subprocess
 import sys
-import time
 
 import pytest
 
@@ -239,7 +239,7 @@ def test_macos_xattr_attempted_on_first_create(tmp_path, monkeypatch):
         calls.append(list(cmd))
         return None
 
-    monkeypatch.setattr(store_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     store = EventStore()
     store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})
     assert any(
@@ -255,7 +255,7 @@ def test_macos_xattr_failure_is_silent(tmp_path, monkeypatch):
     def fake_run(*args, **kwargs):
         raise FileNotFoundError("xattr not in PATH")
 
-    monkeypatch.setattr(store_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "run", fake_run)
     store = EventStore()
     # Must not propagate the FileNotFoundError to the caller.
     event_id = store.append(kind="publish.intent", payload={"target_url": "https://x.com/a"})

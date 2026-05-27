@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
 
 from webui_store.base import JsonStore, _LazyStore
 from webui_store import _store_path

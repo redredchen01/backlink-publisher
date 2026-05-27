@@ -1,11 +1,10 @@
 """Tests for BloggerAPIAdapter."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, call, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.publishing.adapters.blogger_api import BloggerAPIAdapter, _near_expiry
 from backlink_publisher.config import Config, BloggerOAuthConfig
 from backlink_publisher._util.errors import AuthExpiredError, DependencyError, ExternalServiceError

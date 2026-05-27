@@ -21,8 +21,7 @@ from backlink_publisher._util.jsonl import write_jsonl
 from backlink_publisher._util.logger import publish_logger
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from backlink_publisher.publishing.adapters.base import carry_link_attr_verification
-from backlink_publisher.publishing.registry import registered_platforms
-from ..schema import supported_platforms, validate_publish_payload
+from ..schema import supported_platforms
 
 from ._publish_helpers import (
     _acquire_publish_leases,

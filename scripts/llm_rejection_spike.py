@@ -203,9 +203,9 @@ def _print_results(outcomes: list[SpikeOutcome], threshold: float) -> int:
     print(f"- **Rejection rate**: {rate * 100:.1f}%")
     print(f"- **Threshold**: {threshold * 100:.0f}%")
     if rate > threshold:
-        print(f"- **Verdict**: ❌ FAIL — rate exceeds threshold")
+        print("- **Verdict**: ❌ FAIL — rate exceeds threshold")
     else:
-        print(f"- **Verdict**: ✅ PASS — rate within threshold")
+        print("- **Verdict**: ✅ PASS — rate within threshold")
     print()
     print("| # | url_category | anchor_type | keyword | result | sample candidate |")
     print("|---|---|---|---|---|---|")

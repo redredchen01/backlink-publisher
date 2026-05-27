@@ -15,7 +15,6 @@ keyword on ``main()`` (production main() defaults to the real Playwright runner)
 from __future__ import annotations
 
 import json
-import sys
 
 import pytest
 
@@ -60,7 +59,6 @@ class TestChannelValidation:
 
 class TestHappyPath:
     def test_emits_four_events_in_order(self, monkeypatch, capsys):
-        from backlink_publisher.cli._bind import driver as drv
 
         fake = _RecordingBrowserRunner(success=True)
         with pytest.raises(SystemExit) as excinfo:

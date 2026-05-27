@@ -9,9 +9,6 @@ doesn't grow one".
 
 from __future__ import annotations
 
-import os
-import stat
-import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,7 +18,6 @@ from backlink_publisher.config import (
     _CONFIG_HISTORY_MAX,
     _preserve_unknown_sections,
     _SAVE_CONFIG_KNOWN_ROOTS,
-    _snapshot_config,
     _toml_heading_root,
     load_config,
     save_config,

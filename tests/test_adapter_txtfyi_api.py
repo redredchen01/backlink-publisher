@@ -15,7 +15,6 @@ from backlink_publisher._util.errors import AntiBotChallengeError, ExternalServi
 from backlink_publisher.config import Config
 from backlink_publisher.publishing.adapters.txtfyi_api import (
     TxtfyiFormPostAdapter,
-    _HIDDEN_FIELDS,
 )
 
 _ADAPTER = "backlink_publisher.publishing.adapters.txtfyi_api"

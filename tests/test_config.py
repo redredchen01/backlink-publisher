@@ -1,9 +1,6 @@
 """Tests for config loader."""
 
-import json
 import os
-import stat
-from pathlib import Path
 
 import pytest
 

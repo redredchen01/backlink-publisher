@@ -45,15 +45,10 @@ is ``publish`` (``verify_adapter_setup`` stays a module function).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 from backlink_publisher.config import Config
-from backlink_publisher._util.errors import (
-    AuthExpiredError,
-    DependencyError,
-    ExternalServiceError,
-    RegistryError,
-)
+from backlink_publisher._util.errors import RegistryError
 from backlink_publisher.publishing._manifest_types import (
     _BIND_BACKEND_VALUES,
     _VISIBILITY_VALUES,
@@ -69,9 +64,10 @@ if TYPE_CHECKING:
     # (dispatch/register/registered_platforms). When THIS module is the
     # first one loaded in the package, the cycle hits a partially
     # initialized state and ImportError fires. Type annotations are
-    # PEP 563 lazy via __future__ import above; the only runtime use is
-    # the AdapterResult(...) constructor inside dispatch() — that import
-    # is local to the function body, which by call time is safe.
+    # PEP 563 lazy via __future__ import above; the only runtime use of
+    # AdapterResult is inside dispatch() and Publisher.publish() —
+    # both of those imports are local to their respective scopes,
+    # which by call time is safe.
     from .adapters.base import AdapterResult
 
 
@@ -252,8 +248,8 @@ def register(
     referral_value: _ReferralValue | None = None,
     ui: UiMeta | None = None,
     bind: list[BindDescriptor] | tuple[BindDescriptor, ...] | None = None,
-    policy: Policy | None = None,
-    visibility: Visibility = "active",
+    policy: Policy | None = None,        # noqa: F811 — shadows re-exported manifest helper
+    visibility: Visibility = "active",   # noqa: F811 — shadows re-exported manifest helper
 ) -> None:
     """Register the fallback chain for one platform. Last call wins.
 
@@ -445,220 +441,21 @@ def dofollow_rationale(name: str) -> str | None:
     return _RATIONALE_BY_PLATFORM.get(name)
 
 
-# ---------------------------------------------------------------------------
-# Manifest helpers — Plan 2026-05-25-002 Unit 1
-# ---------------------------------------------------------------------------
-#
-# These six helpers are the reverse-lookup API the downstream layers
-# (binding_status.py, webui_app/__init__.py inject_platforms,
-# webui_app/helpers/contexts.py, config/_toml_utils.py, templates) will
-# call instead of carrying their own hardcoded channel lists.
-#
-# All helpers are pure-read; thread-safe; cheap (dict.get / list-comp on
-# ≤ 20 platforms). No caching needed at this layer — if downstream
-# call-frequency demands it (per [[flask-g-cache-pattern]]), the cache
-# belongs at the caller, not here.
+# Re-export from extracted sub-module. All existing callers import from
+# ``backlink_publisher.publishing.registry`` — the re-exports keep those paths
+# working without changes.
+from ._registry_manifest import (  # noqa: F401, E402
+    active_platforms,
+    bind_descriptors,
+    bound_platforms,
+    legacy_platforms,
+    policy,
+    ui_meta,
+    visibility,
+)
 
 
-def ui_meta(name: str) -> UiMeta | None:
-    """Return the declared ``UiMeta`` for ``name``, or ``None``.
-
-    ``None`` for platforms registered without ``ui=`` (legacy platforms
-    pre-manifest). Callers wanting a fallback should use
-    ``ui_meta(name) or UiMeta(display_name=name, domain="", category="")``.
-    """
-    return _UI_META_BY_PLATFORM.get(name)
-
-
-def bind_descriptors(name: str) -> tuple[BindDescriptor, ...]:
-    """Return the declared bind backends for ``name``, in display order.
-
-    Returns ``()`` for platforms registered without ``bind=`` — the
-    legacy state where bind wiring is hardcoded across webui_app /
-    helpers / templates rather than declared. Callers iterating to
-    auto-build UI cards (Plan Unit 4) treat ``()`` as "fall back to
-    legacy per-channel wiring".
-    """
-    return _BIND_BY_PLATFORM.get(name, ())
-
-
-def policy(name: str) -> Policy | None:
-    """Return the declared ``Policy`` for ``name``, or ``None``.
-
-    ``None`` for legacy registrations. Downstream throttle / retry /
-    language machinery keeps its existing defaults when ``policy()`` is
-    ``None`` — the manifest is additive metadata, not a behaviour
-    rewrite (Plan Scope Boundaries: "不改 publish 業務邏輯").
-    """
-    return _POLICY_BY_PLATFORM.get(name)
-
-
-def visibility(name: str) -> Visibility:
-    """Return the visibility state for ``name``.
-
-    Always returns a valid ``Visibility`` literal. Unregistered or
-    default-active platforms return ``"active"`` — this is the
-    load-bearing default that lets Unit 2 swap ``HIDDEN_FROM_UI``
-    frozenset to ``visibility(name) in {"hidden","retired"}`` without
-    needing a per-platform opt-in.
-    """
-    return _VISIBILITY_BY_PLATFORM.get(name, "active")
-
-
-def active_platforms() -> list[str]:
-    """Return registered platforms with ``visibility == "active"``.
-
-    Sorted (matches ``registered_platforms`` ordering). Used by Unit 4
-    WebUI wiring to populate filter chips and publish-select that
-    should *not* show hidden / retired / experimental channels.
-
-    For the variant that includes experimental (e.g. the
-    ``--include-experimental`` CLI path or WebUI advanced mode), call
-    sites should filter ``registered_platforms()`` themselves with
-    ``visibility(name) != "retired"`` — the goal here is the default
-    user-facing list, not every possible filter.
-    """
-    return sorted(
-        name for name in _REGISTRY
-        if visibility(name) == "active"
-    )
-
-
-def bound_platforms(
-    config: Config,
-    is_bound: Callable[[Config, str], bool],
-) -> list[str]:
-    """Return active platforms that are currently bound for ``config``.
-
-    ``is_bound`` is dependency-injected: this module lives in the
-    ``publishing`` layer and must not import from ``webui_app``
-    (binding-status helpers live up there). Callers in WebUI inject
-    ``lambda cfg, name: webui_app.binding_status.get_channel_status(cfg, name).get("bound", False)``
-    or the equivalent.
-
-    Filtering is composed: ``active_platforms()`` first (drops hidden /
-    retired / experimental), then ``is_bound(config, name)`` for the
-    remainder. This guarantees a retired platform never appears in
-    publish UI even if its credentials are still on disk.
-    """
-    return [name for name in active_platforms() if is_bound(config, name)]
-
-
-def legacy_platforms() -> list[str]:
-    """Return registered platforms with NO manifest metadata.
-
-    A platform is "legacy" iff none of ``ui_meta`` / ``bind_descriptors``
-    / ``policy`` was supplied at ``register()`` time. ``visibility`` is
-    intentionally excluded — leaving it at the default ``"active"`` is
-    the expected state for pre-manifest channels.
-
-    Plan Unit 5 surfaces this as a migration progress board (printed to
-    contract-test stdout, not failed). Becomes a CI fail gate once all
-    8 existing platforms are migrated (deferred to Phase 3 of the plan).
-    """
-    return sorted(
-        name for name in _REGISTRY
-        if name not in _UI_META_BY_PLATFORM
-        and name not in _BIND_BY_PLATFORM
-        and name not in _POLICY_BY_PLATFORM
-    )
-
-
-def dispatch(
-    payload: dict[str, Any],
-    mode: str,
-    config: Config,
-    dry_run: bool = False,
-    *,
-    banner_emit: Callable[[str, dict[str, Any]], None] | None = None,
-) -> AdapterResult:
-    """Walk the registered fallback chain for ``payload["platform"]``.
-
-    Error semantics: dry-run returns a sentinel result;
-    ``AuthExpiredError`` (subclass of ``DependencyError``) propagates
-    immediately so operator UX can prompt re-bind (Plan
-    2026-05-20-016 Unit 0b); plain ``DependencyError`` from one
-    adapter falls through to the next; ``ExternalServiceError``
-    propagates; unknown platform raises ``ExternalServiceError``.
-
-    Banner embed (Plan 2026-05-20-004 Unit 1): when ``banner_emit`` is
-    supplied AND the payload carries a non-degraded ``banner`` field
-    (``banner["path"]`` not None), each available adapter in the chain
-    gets a chance to embed via ``adapter.embed_banner`` before its
-    ``publish()`` runs.  See ``banner_dispatcher.apply`` for the
-    branch semantics.  ``banner_emit`` is the event sink (kind,
-    payload) and defaults to ``None`` which suppresses banner work
-    entirely (back-compat for callers that don't set up banners).
-    """
-    from .adapters.base import AdapterResult  # local: breaks module-level circular
-
-    plat = payload.get("platform", "")
-
-    if dry_run:
-        return AdapterResult(
-            status="draft",
-            adapter=f"{plat}-api",
-            platform=plat,
-            _dry_run=True,
-            _command=f"publish to {plat} --mode {mode} (dry-run)",
-        )
-
-    chain = _REGISTRY.get(plat)
-    if not chain:
-        raise ExternalServiceError(f"unsupported platform: {plat}")
-
-    banner_dict = payload.get("banner") if banner_emit is not None else None
-    do_banner = banner_dict is not None and banner_dict.get("path") is not None
-    strict = bool(do_banner and config.image_gen and config.image_gen.strict)
-
-    last_dep_error: DependencyError | None = None
-    for entry in chain:
-        # Entry may be a Publisher subclass (legacy) or instance
-        # (BrowserPublishDispatcher.for_channel — Plan 2026-05-21-001 U2).
-        is_class = isinstance(entry, type)
-        publisher_cls = entry if is_class else type(entry)
-        if not publisher_cls.available(config):
-            continue
-        try:
-            adapter = entry() if is_class else entry
-            if do_banner:
-                # Lazy import avoids a top-level cycle (banner_dispatcher
-                # lives in the same publishing package and is leaf-level,
-                # but importing it during registry init is unnecessary
-                # for the >99% of dispatch calls that have no banner).
-                from . import banner_dispatcher
-
-                new_body = banner_dispatcher.apply(
-                    adapter,
-                    banner=banner_dict,
-                    body=payload.get("content_markdown", ""),
-                    platform=plat,
-                    strict=strict,
-                    emit=banner_emit,  # type: ignore[arg-type]  # do_banner gates non-None
-                )
-                if new_body != payload.get("content_markdown"):
-                    payload = {**payload, "content_markdown": new_body}
-            return adapter.publish(payload, mode, config)
-        except AuthExpiredError:
-            # Plan 2026-05-20-016 Unit 0b: credentials were valid enough to
-            # reach the adapter but have expired — operator must re-bind.
-            # Falling through would silently try the next chain entry and
-            # hide the expiry; the correct semantics is to propagate so
-            # the webui can surface "请重新绑定 <channel>" UX.
-            # Order matters: AuthExpiredError IS-A DependencyError (per
-            # _util/errors.py), so this except MUST precede the
-            # DependencyError catch below — Python catches the first
-            # matching except clause.
-            raise
-        except DependencyError as e:
-            # Adapter declared itself missing a prerequisite → try next.
-            last_dep_error = e
-            continue
-        # ExternalServiceError propagates without catch (legacy semantics).
-
-    if last_dep_error is not None:
-        raise last_dep_error
-    raise DependencyError(
-        f"No available adapter for platform {plat!r} — every entry in the "
-        f"chain returned available()=False."
-    )
+# Re-export from extracted sub-modules. All existing callers import from
+# ``backlink_publisher.publishing.registry`` — the re-exports keep those paths
+# working without changes.
+from ._registry_dispatch import dispatch  # noqa: F401, E402

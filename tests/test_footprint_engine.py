@@ -11,7 +11,6 @@ import subprocess
 import sys
 from collections import Counter
 
-import pytest
 from hypothesis import given, strategies as st
 
 from backlink_publisher.footprint import (

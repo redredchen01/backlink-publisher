@@ -26,7 +26,6 @@ from pathlib import Path
 import pytest
 
 from backlink_publisher.cli import phase0_seal as CLI
-from backlink_publisher.phase0 import validation as V
 
 
 def _run(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

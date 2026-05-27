@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
 
 from backlink_publisher.events.store import EventStore
 

@@ -13,9 +13,7 @@ Plan 2026-05-18-006 Unit 5 R9 + R10 (drift direction inverted by plan
 
 from __future__ import annotations
 
-from typing import Any
 
-import pytest
 
 from backlink_publisher.publishing.content_negotiation import (
     ROUTE_TIER_MATRIX,
