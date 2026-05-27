@@ -663,7 +663,7 @@ fixtures cannot breach ≤1-link/no-exact-match or the data boundary; stored tex
 control-char-free; runs with no LLM configured and leaks no secret on the error path; the
 brief verb posts nothing and touches no events.db.
 
-- [ ] **Unit 8: `comment status` + locked ReviewStatus store**
+- [x] **Unit 8: `comment status` + locked ReviewStatus store**
 
 **Goal:** Persist and transition `ReviewStatus` in a 0o600 JSONL store under
 function-reresolved CONFIG_DIR; status is operator-set only.

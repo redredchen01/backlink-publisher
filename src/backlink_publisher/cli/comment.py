@@ -68,8 +68,35 @@ def _handle_brief(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _handle_status(args: argparse.Namespace) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("comment status not yet implemented (Unit 8)")
+def _handle_status(args: argparse.Namespace) -> int:
+    from backlink_publisher._util.errors import UsageError
+    from backlink_publisher.comment_outreach import schema
+    from backlink_publisher.comment_outreach.store import set_status
+
+    # Closed-set validation post-parse (never argparse choices=, which exits 2 and
+    # clashes with UsageError's exit 1).
+    if not args.target_id:
+        raise UsageError("comment status requires a target_id")
+    if not args.status:
+        raise UsageError("comment status requires --set <status>")
+    if args.status not in schema.STATUS_ENUM:
+        raise UsageError(
+            f"invalid status '{args.status}'; must be one of {sorted(schema.STATUS_ENUM)}"
+        )
+
+    record = set_status(
+        args.target_id,
+        args.status,
+        reviewer=args.reviewer,
+        comment_url=args.comment_url,
+        final_comment_text=args.final_comment_text,
+        result_notes=args.result_notes,
+    )
+    # Echo the resulting record to stdout (data) for confirmation / chaining.
+    import json
+
+    print(json.dumps(record, ensure_ascii=False))
+    return EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +162,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     status_p.add_argument("target_id", nargs="?", help="Target id to update")
     status_p.add_argument("--set", dest="status", metavar="STATUS", help="New review status")
+    status_p.add_argument("--reviewer", help="Operator who reviewed/acted")
+    status_p.add_argument("--comment-url", dest="comment_url", help="URL of the posted comment")
+    status_p.add_argument("--final-comment-text", dest="final_comment_text",
+                          help="The exact text actually posted (sensitive)")
+    status_p.add_argument("--result-notes", dest="result_notes", help="Free-text outcome notes")
     status_p.set_defaults(handler=_handle_status)
 
     return parser
