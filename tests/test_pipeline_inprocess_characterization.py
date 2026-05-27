@@ -1,7 +1,7 @@
 """Subprocess golden baseline for the thin-WebUI in-process migration.
 
 Phase 2 Unit 5 (plan ``2026-05-27-004``, audit
-``docs/plans/notes/inprocess-global-state-audit.md`` → "Characterization
+``docs/spike-notes/2026-05-27-inprocess-global-state-audit.md`` → "Characterization
 corpus"). Three read-only CLIs — ``validate-backlinks``, ``plan-backlinks``,
 ``report-anchors`` — run TODAY as fresh subprocesses, so each call starts with
 pristine process state. Unit 6/7 will run them **in-process** inside the

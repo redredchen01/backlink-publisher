@@ -543,7 +543,7 @@ subprocess output so the in-process swap is provably behavior-neutral.
 **Files:**
 - Create: `tests/test_pipeline_inprocess_characterization.py` (golden corpus:
   representative + error-path inputs for validate/plan/report-anchors, captured
-  from the subprocess path), `docs/plans/notes/inprocess-global-state-audit.md`
+  from the subprocess path), `docs/spike-notes/2026-05-27-inprocess-global-state-audit.md`
   (audit findings + per-surface decision)
 - Modify (if audit requires per-call reset): `webui_app/api/pipeline_api.py`
   (lazy `load_config()` per call), and document handling for `_util/logger.py`
