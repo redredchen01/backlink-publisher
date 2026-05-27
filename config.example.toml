@@ -364,3 +364,29 @@ client_secret = "your-client-secret"
 #
 # [cells."https://another-site.org"]
 # channels = ["medium", "velog", "wordpresscom"]
+
+# ────────────────────────────────────────────────────────────
+# Adapter Contract Canary (Plan 2026-05-27-001)
+# ────────────────────────────────────────────────────────────
+# Per-platform evergreen canary: the `canary-targets` verb re-fetches a
+# long-lived "canary post" on each dofollow platform and asserts that
+# YOUR target backlink's own anchor is still present and still dofollow.
+# This catches platforms that retroactively rewrite rel/noindex on
+# existing pages. It is NOT an indexability oracle and does NOT cover
+# forward publish-path drift (see the plan's threat matrix).
+#
+# Seed one canary post per platform via the real adapter publish path
+# (NOT a hand-pasted UI post), then record its live URL + the expected
+# target backlink here. Platform key = the registry platform name
+# (e.g. blogger / medium / telegraph / velog / ghpages / livejournal).
+#
+#   post_url        — the live canary post URL to re-fetch
+#   expected_target — the target backlink href the canary post links to
+#   hard_skip       — opt-in; when true, a confirmed-drift platform is
+#                     quarantined out of publish payloads (Unit 4).
+#                     Default false = advisory only (loud WARNING, no skip).
+#
+# [canary.blogger]
+# post_url = "https://your-canary-blog.blogspot.com/2026/05/canary.html"
+# expected_target = "https://your-site.com/"
+# hard_skip = false
