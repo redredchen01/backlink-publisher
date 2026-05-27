@@ -335,3 +335,32 @@ client_secret = "your-client-secret"
 #
 # [mastodon]
 # instance_url = "https://mastodon.social"
+
+# ─── Blast-radius cells (Plan 2026-05-27-003, R7-minimal) ──────────────────
+#
+# OPERATOR-EDIT-ONLY — do not add this root to any save_config() call.
+# The section is preserved verbatim across every save.
+#
+# Containment: map each money-site (main_domain) to the subset of
+# publishing channels it is allowed to use. plan-backlinks will DROP any
+# row whose (main_domain, platform) violates the declared cell and emit a
+# recon-level warning.
+#
+# Opt-in: money sites NOT listed here are UNRESTRICTED (full mesh,
+# default behaviour). Enroll sites one at a time; a misconfigured cell
+# drops rows for that site only and never halts the batch.
+#
+# Validation at load time (fail-loud):
+#   - unknown channel name → InputValidationError (typo guard)
+#   - same channel in two cells → InputValidationError (overlap defeats containment)
+#
+# Channel names must match registered_platforms() exactly.
+# Run `cull-channels` to see the full list with dofollow grading.
+#
+# Example (uncomment and edit — replace example.com with your money site):
+#
+# [cells."https://example.com"]
+# channels = ["telegraph", "rentry", "blogger"]
+#
+# [cells."https://another-site.org"]
+# channels = ["medium", "velog", "wordpresscom"]

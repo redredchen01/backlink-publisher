@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 
+import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before config load
 from .. import config_echo
 from backlink_publisher._util.jsonl import read_jsonl
 from backlink_publisher.anchor.profile import load_profile

@@ -43,6 +43,7 @@ plan-check = "backlink_publisher.cli.plan_check:main"
 frw-login = "backlink_publisher.cli.frw_login:main"
 audit-state = "backlink_publisher.cli.audit_state:main"
 preflight-targets = "backlink_publisher.cli.preflight_targets:main"
+cull-channels = "backlink_publisher.cli.cull_channels:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

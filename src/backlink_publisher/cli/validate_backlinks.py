@@ -8,6 +8,7 @@ from typing import Any
 import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before validation
 from .. import config_echo
 from .._util import errors
+from backlink_publisher._util.errors import InputValidationError
 from backlink_publisher.config import Config, load_config
 from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher.linkcheck.http import check_urls_strict
@@ -92,7 +93,9 @@ def main(argv: list[str] | None = None) -> None:
     config: Config | None = None
     try:
         config = load_config()
-    except Exception as exc:  # noqa: BLE001 — config-load failures are tolerated
+    except InputValidationError:
+        raise  # cells.py fail-loud contract: unknown channel / overlap must surface
+    except Exception as exc:  # noqa: BLE001 — other config-load failures are tolerated
         validate_logger.warn(
             f"config load failed ({exc}); branded_pool fallback disabled, "
             "relying on payload-emitted snapshots only"
