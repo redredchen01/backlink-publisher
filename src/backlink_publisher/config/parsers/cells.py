@@ -3,10 +3,10 @@
 Parses ``[cells."<main_domain>"]`` blocks into a mapping of
 ``main_domain → list[channel_name]``.  Example config fragment::
 
-    [cells."example.com"]
+    [cells."https://example.com"]
     channels = ["telegraph", "rentry"]
 
-    [cells."another-site.org"]
+    [cells."https://another-site.org"]
     channels = ["blogger", "medium"]
 
 **Fail-loud contract** (mirrors ``config/parsers/alarm.py`` — NOT the
@@ -62,7 +62,7 @@ def _parse_cell_assignments(cells_section: Any) -> dict[str, list[str]]:
     - a channel name not in ``registered_platforms()``
     - the same channel appearing in more than one site's cell (overlap)
     """
-    if not cells_section:
+    if cells_section is None:
         return {}
 
     if not isinstance(cells_section, dict):

@@ -135,7 +135,7 @@ def test_overlapping_cells_error_names_both_sites(fake_registered):
     with pytest.raises(InputValidationError) as exc_info:
         _parse_cell_assignments(raw)
     msg = str(exc_info.value)
-    assert "site-a.com" in msg or "site-b.com" in msg  # at least one site named
+    assert "site-a.com" in msg and "site-b.com" in msg  # both conflicting sites named
 
 
 def test_channels_not_a_list_raises(fake_registered):

@@ -213,14 +213,14 @@ def test_unenrolled_site_passes_through_enrolled_site_gated(cfg_dir: Path):
     """Edge: two sites in one run — enrolled site is gated, other is unrestricted."""
     (cfg_dir / "config.toml").write_text(
         '[blogger]\n[medium]\n\n'
-        '[cells."https://gated.com"]\n'
-        'channels = ["blogger"]\n',  # "medium" not in gated.com cell
+        '[cells."https://gated.example.com"]\n'
+        'channels = ["blogger"]\n',  # "medium" not in gated.example.com cell
         encoding="utf-8",
     )
 
     seeds = [
-        _seed(main_domain="https://gated.com", platform="medium",
-              target_url="https://gated.com/article"),     # should be dropped
+        _seed(main_domain="https://gated.example.com", platform="medium",
+              target_url="https://gated.example.com/article"),     # should be dropped
         _seed(main_domain="https://free.example.com", platform="medium",
               target_url="https://free.example.com/article"),  # unrestricted
     ]
@@ -310,3 +310,30 @@ def test_multiple_rows_partial_drop(cfg_dir: Path):
     )
     platforms = {p["platform"] for p in payloads}
     assert platforms == {"medium"}, f"Expected only medium payloads, got {platforms}"
+
+
+def test_trailing_slash_in_row_does_not_bypass_gate(cfg_dir: Path):
+    """P0 regression: main_domain with trailing slash must still be gated.
+
+    Config keys are stripped of trailing slashes at parse time; rows must be
+    normalised the same way before lookup, or an enrolled site with a slash
+    in its seed row silently bypasses the cell gate.
+    """
+    (cfg_dir / "config.toml").write_text(
+        '[blogger]\n[medium]\n\n'
+        '[cells."https://example.com"]\n'
+        'channels = ["blogger"]\n',  # medium NOT in cell
+        encoding="utf-8",
+    )
+
+    # Seed row has trailing slash in main_domain — gate must still fire
+    stdout, stderr, code = _run_plan(
+        _jsonl(_seed(main_domain="https://example.com/", platform="medium"))
+    )
+
+    assert code == 0, f"Expected exit 0, got {code}"
+    payloads = [l for l in stdout.strip().splitlines() if l.strip()]
+    assert payloads == [], (
+        "Row with trailing-slash main_domain must be gated — "
+        f"got {len(payloads)} payload(s) instead of 0.\nstderr: {stderr}"
+    )

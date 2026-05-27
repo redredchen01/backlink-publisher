@@ -53,12 +53,13 @@ CLASSES = ("cull-candidate", "unverifiable", "keep")
 def _classify(name: str) -> str:
     """Map a platform's registry grading to a cull classification.
 
-    "uncertain" (and the defensive None for an unregistered name) take
-    precedence — never auto-cull a channel whose dofollow value could not be
-    empirically confirmed.
+    "uncertain" takes precedence — never auto-cull a channel whose dofollow
+    value could not be empirically confirmed.  Every *registered* platform has
+    ``dofollow_status`` in ``{True, False, "uncertain"}``; ``None`` is only
+    returned for *unregistered* names and should not appear here.
     """
     status = dofollow_status(name)
-    if status == "uncertain" or status is None:
+    if status == "uncertain":
         return "unverifiable"
     if status is False and referral_value(name) == "low":
         return "cull-candidate"
@@ -67,10 +68,11 @@ def _classify(name: str) -> str:
 
 def _build_row(name: str) -> dict[str, Any]:
     """The single canonical serializer — one row per registered platform."""
+    df_status = dofollow_status(name)
     return {
         "platform": name,
         "classification": _classify(name),
-        "dofollow_status": dofollow_status(name),
+        "dofollow_status": df_status,
         "referral_value": referral_value(name),
         "rationale": dofollow_rationale(name),
     }
@@ -79,14 +81,14 @@ def _build_row(name: str) -> dict[str, Any]:
 def _render_markdown(rows: list[dict[str, Any]]) -> str:
     """Human-readable table, cull-candidates first, then unverifiable, then keep."""
     order = {cls: i for i, cls in enumerate(CLASSES)}
-    rows = sorted(rows, key=lambda r: (order[r["classification"]], r["platform"]))
+    sorted_rows = sorted(rows, key=lambda r: (order[r["classification"]], r["platform"]))
     lines = [
         "# Channel cull advisory",
         "",
         "| platform | classification | dofollow | referral | rationale |",
         "| --- | --- | --- | --- | --- |",
     ]
-    for r in rows:
+    for r in sorted_rows:
         rationale = (r["rationale"] or "").replace("|", "\\|").replace("\n", " ")
         lines.append(
             f"| {r['platform']} | {r['classification']} | "

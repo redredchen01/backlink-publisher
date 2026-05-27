@@ -72,10 +72,16 @@ def _cell_gate_drop(
     entry) AND the platform is not in that cell. Sites without a cell entry
     pass through unchanged — opt-in semantics. An empty ``cell_assignments``
     dict never drops any row.
+
+    ``main_domain`` is normalised (trailing slash stripped) to match the
+    parse-time normalisation in ``config/parsers/cells.py`` — without this,
+    a row with ``main_domain="https://example.com/"`` would not match the
+    config key ``"https://example.com"`` and the gate would be silently bypassed.
     """
-    if main_domain not in cell_assignments:
+    domain = main_domain.rstrip("/")  # match cells.py parse-time normalisation
+    if domain not in cell_assignments:
         return False  # unenrolled site — unrestricted
-    return platform not in cell_assignments[main_domain]
+    return platform not in cell_assignments[domain]
 
 
 def _emit_link_count_recon(payload: dict[str, Any], *, branch: str) -> None:
@@ -296,8 +302,10 @@ def main(argv: list[str] | None = None) -> None:
     # ── Cell gate: always-on enrolled-vs-unrestricted summary ─────────────
     # Emitted before the row loop so an accidentally-unenrolled site
     # (silent full mesh) is visible even on a zero-drop run.
+    # Guard on `cells` only — no point emitting a summary when no cells are
+    # configured (opt-in semantics), and `rows` alone would fire on every run.
     cells = cfg.cell_assignments
-    if cells or rows:
+    if cells:
         run_domains = {row.get("main_domain", "") for row in rows}
         enrolled = sorted(run_domains & set(cells))
         unrestricted = sorted(run_domains - set(cells))

@@ -120,3 +120,10 @@ def test_invalid_format_raises_usage_error(capsys):
     with pytest.raises(SystemExit) as exc:
         cull_channels.main(["--format", "xml"])
     assert exc.value.code == 1
+
+
+def test_invalid_log_level_raises_usage_error(capsys):
+    """Error path: invalid --log-level → UsageError exit 1, never argparse's exit 2."""
+    with pytest.raises(SystemExit) as exc:
+        cull_channels.main(["--log-level", "VERBOSE"])
+    assert exc.value.code == 1

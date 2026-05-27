@@ -4,6 +4,7 @@ type: feat
 status: active
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-cross-channel-blast-radius-requirements.md
+claims: {}
 ---
 
 # feat: Blast-radius Phase 1 — channel cull + money-site cell containment
@@ -227,7 +228,7 @@ Unit 1 (cull verb)         ── independent ──┐
 Unit 2 (cells config) ──► Unit 3 (gate)     │
 ```
 
-- [ ] **Unit 1: `cull-channels` read-only CLI verb (R9)**
+- [x] **Unit 1: `cull-channels` read-only CLI verb (R9)**
 
 **Goal:** Surface nofollow + `referral_value="low"` channels as retirement
 candidates; list `dofollow_status == None` channels separately as unverifiable.
@@ -250,8 +251,10 @@ candidates; list `dofollow_status == None` channels separately as unverifiable.
   valid set in `help=`. No `choices=`.
 - Enumerate channels via registry; for each read `dofollow_status` +
   `referral_value` + `dofollow_rationale`. Classify into: **cull candidate**
-  (`dofollow_status in (False, "uncertain")` AND `referral_value == "low"`),
-  **unverifiable** (`dofollow_status is None`), **keep** (everything else).
+  (`dofollow_status is False` AND `referral_value == "low"`),
+  **unverifiable** (`dofollow_status == "uncertain"`), **keep** (everything else).
+  Note: `"uncertain"` maps to `"unverifiable"` — never auto-culled; and
+  `dofollow_status is None` means *unregistered* platform, not a live signal.
 - Markdown table to stdout by default; `--json` emits machine-clean JSONL.
 - Always-on `.recon(...)` summary line to stderr (candidate count); exit 0.
 
@@ -282,7 +285,7 @@ for flag shape), `cli/plan_backlinks/_payload.py:29` `dofollow_tier_metadata`
 list whose membership matches a hand-traced application of the classification
 rule; `--json` output is machine-parseable; exit code 0.
 
-- [ ] **Unit 2: `[cells.*]` config section + round-trip preservation (R7-minimal)**
+- [x] **Unit 2: `[cells.*]` config section + round-trip preservation (R7-minimal)**
 
 **Goal:** Parse operator-authored money-site→channel-subset cells into
 `Config.cell_assignments`; fail loud on unknown channels; preserve the section
@@ -337,7 +340,7 @@ shape only), `config/loader.py:131-137`, `config/types.py` (`target_three_url` /
 channel fails loud; the section survives a `save→load→save→load` cycle
 semantically intact; overlapping cells fail loud at parse.
 
-- [ ] **Unit 3: opt-in cell admission gate in `plan-backlinks` (R7-minimal)**
+- [x] **Unit 3: opt-in cell admission gate in `plan-backlinks` (R7-minimal)**
 
 **Goal:** At the seed-row admission boundary, drop rows whose `(main_domain,
 platform)` violates the site's declared cell — opt-in (only sites with a cell),

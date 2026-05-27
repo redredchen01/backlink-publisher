@@ -353,7 +353,7 @@ class Config:
 
     Populated from ``[cells."<main_domain>"]`` blocks in config.toml::
 
-        [cells."example.com"]
+        [cells."https://example.com"]
         channels = ["telegraph", "rentry"]
 
     Keyed by ``main_domain`` (trailing slash stripped, consistent with
