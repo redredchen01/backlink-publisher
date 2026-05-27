@@ -10,10 +10,16 @@ from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
     normalize_url_for_fetch,
+    safe_hostname,
+    safe_urlparse,
     strip_fragment_query,
     validate_https_url,
     validate_main_domain_url,
 )
+
+# Inputs that make stdlib urlparse/urlsplit/urljoin raise (unterminated IPv6
+# literal). Shared across the never-raises tests below.
+_MALFORMED_URLS = ["http://[invalid", "http://[::1", "http://["]
 
 
 # ── validate_main_domain_url ────────────────────────────────────────────────
@@ -285,3 +291,57 @@ class TestNormalizeUrlForFetch:
         normalized = normalize_url_for_fetch(url)
         normalized.encode("ascii")  # would raise if not clean
         Request(normalized)
+
+
+# ── safe_urlparse / safe_hostname (Plan 2026-05-27-006 Unit 1) ──────────────
+
+
+class TestSafeUrlparse:
+    def test_valid_url_parses(self):
+        parsed = safe_urlparse("https://example.com/p?q=1")
+        assert parsed is not None
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "example.com"
+        assert parsed.path == "/p"
+
+    def test_valid_bracketed_ipv6_is_not_swallowed(self):
+        # A *well-formed* IPv6 literal must parse, not be mistaken for malformed.
+        parsed = safe_urlparse("http://[::1]:8080/")
+        assert parsed is not None
+        assert parsed.hostname == "::1"
+        assert parsed.port == 8080
+
+    def test_empty_string_returns_none(self):
+        assert safe_urlparse("") is None
+
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_malformed_ipv6_returns_none_never_raises(self, url):
+        assert safe_urlparse(url) is None
+
+    @pytest.mark.parametrize("bad", [123, ["x"], {}, 3.14, object()])
+    def test_non_str_returns_none_never_raises(self, bad):
+        # urlparse(123) raises AttributeError, not ValueError — the isinstance
+        # guard is load-bearing for the never-raises contract.
+        assert safe_urlparse(bad) is None
+
+    def test_none_returns_none(self):
+        assert safe_urlparse(None) is None
+
+
+class TestSafeHostname:
+    def test_valid_url_returns_host(self):
+        assert safe_hostname("https://example.com/p") == "example.com"
+
+    def test_valid_ipv6_returns_host(self):
+        assert safe_hostname("http://[::1]:8080/") == "::1"
+
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_malformed_returns_none_never_raises(self, url):
+        assert safe_hostname(url) is None
+
+    def test_non_str_returns_none(self):
+        assert safe_hostname(123) is None
+
+    def test_hostless_url_returns_none(self):
+        # parseable but no authority → no hostname
+        assert safe_hostname("mailto:x@y.com") is None

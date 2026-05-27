@@ -12,7 +12,40 @@ Conventions:
 
 from __future__ import annotations
 
-from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
+from urllib.parse import (
+    ParseResult,
+    parse_qsl,
+    quote,
+    urlencode,
+    urljoin,
+    urlparse,
+    urlsplit,
+    urlunparse,
+    urlunsplit,
+)
+
+
+def safe_urlparse(url: object) -> ParseResult | None:
+    """``urlparse`` that never raises — returns ``None`` on malformed/non-str input.
+
+    ``urlparse`` raises ``ValueError`` on a malformed authority (an unterminated
+    IPv6 literal like ``http://[invalid``) and ``AttributeError`` on a non-``str``
+    argument. Both are folded into a ``None`` return so callers on never-raises
+    code paths can branch instead of crashing. See
+    ``[[feedback_urlparse_raises_on_malformed_ipv6]]``.
+    """
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        return urlparse(url)
+    except ValueError:
+        return None
+
+
+def safe_hostname(url: object) -> str | None:
+    """``urlparse(url).hostname`` that never raises (malformed/non-str → ``None``)."""
+    parsed = safe_urlparse(url)
+    return parsed.hostname if parsed is not None else None
 
 
 def validate_main_domain_url(url: str | None) -> str | None:
