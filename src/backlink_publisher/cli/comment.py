@@ -59,8 +59,13 @@ def _handle_qualify(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _handle_brief(args: argparse.Namespace) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("comment brief not yet implemented (Unit 7)")
+def _handle_brief(args: argparse.Namespace) -> int:
+    # The provider is imported lazily inside brief._load_provider (function-local), so
+    # importing this CLI module and running the other verbs never loads the registry.
+    from backlink_publisher.comment_outreach.brief import brief_targets
+
+    brief_targets(args.input, None)
+    return EXIT_OK
 
 
 def _handle_status(args: argparse.Namespace) -> int:  # pragma: no cover - stub

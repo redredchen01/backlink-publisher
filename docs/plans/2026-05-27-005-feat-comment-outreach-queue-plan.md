@@ -590,7 +590,7 @@ worth always surfacing; avoid silent `else` (projector-silent-drop learning).
 **Verification:** No conservative-bias case yields `accept`; every decision carries reasons;
 exit 0.
 
-- [ ] **Unit 7: `comment brief` + LLM draft + post-LLM guardrails**
+- [x] **Unit 7: `comment brief` + LLM draft + post-LLM guardrails**
 
 **Goal:** Generate conservative `CommentBrief`s with optional LLM + deterministic guardrail
 validator + template fallback, treating scraped context as untrusted. The provider is

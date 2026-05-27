@@ -159,3 +159,34 @@ def test_non_brief_verb_loads_no_registry_and_no_events_db(
     )
     leaked_dbs = list(tmp_path.rglob("events.db"))
     assert not leaked_dbs, f"`comment {verb}` created an events.db: {leaked_dbs}"
+
+
+def test_brief_verb_creates_no_events_db(tmp_path: Path) -> None:
+    """The ``brief`` verb MAY load the publishing registry into ``sys.modules`` (for the
+    LLM provider) — that is accepted. What it must NOT do is touch the events pipeline:
+    no ``events.db`` is created. (No-posting is proven structurally by the AST test.)"""
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_SRC_DIR) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    env["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
+
+    code = textwrap.dedent(
+        """
+        from backlink_publisher.cli import comment
+        try:
+            comment.main(["brief"])  # empty stdin -> no accept rows
+        except SystemExit:
+            pass
+        print("DONE")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, env=env, cwd=str(_REPO_ROOT), timeout=30, input="",
+    )
+    assert "DONE" in result.stdout, f"brief crashed: stderr={result.stderr[:300]!r}"
+    leaked_dbs = list(tmp_path.rglob("events.db"))
+    assert not leaked_dbs, f"`comment brief` created an events.db: {leaked_dbs}"
