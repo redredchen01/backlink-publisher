@@ -4,6 +4,7 @@ type: refactor
 status: active
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-remove-jianshu-and-sweep-retired-channels-requirements.md
+claims: {}  # opt-out: pure-removal refactor, no origin/main-reachable SHAs pre-merge
 ---
 
 # refactor: Remove jianshu Channel + Sweep ghost/cnblogs/zhihu Dead References

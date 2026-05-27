@@ -148,9 +148,9 @@ _REJECTED_PLATFORMS: dict[str, str] = {
         "Jianshu (简书) routes outbound body links through a "
         "https://link.jianshu.com/go?to= redirect interstitial that strips "
         "link equity server-side (same pattern as juejin/csdn), so external "
-        "<a> elements pass no PageRank. Removed 2026-05-27 — operator has no "
-        "account and the nofollow verdict makes it dead weight; re-register "
-        "only with a fresh dofollow canary disproving the interstitial."
+        "<a> elements pass no PageRank — nofollow dead weight. Removed "
+        "2026-05-27; re-register only with a fresh dofollow canary that "
+        "disproves the interstitial."
     ),
 }
 

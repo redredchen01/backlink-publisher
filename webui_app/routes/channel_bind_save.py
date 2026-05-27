@@ -68,6 +68,9 @@ _URL_FIELDS: frozenset[str] = frozenset({"site", "site_url"})
 
 # PASTE-BLOB — pasted {"cookies":[...]} JSON; written as <channel>-credentials.json.
 # Each entry maps channel → (basename, expected_domain_suffix).
+# NOTE: when hard-removing a paste-blob/userpass channel, also add its slug to
+# ``webui_store.channel_status._REMOVED_CREDENTIAL_SLUGS`` so its orphaned 0600
+# credential file gets purged (its UI clear path disappears with the row below).
 # Domain suffix is checked against at least one cookie's domain field (advisory
 # only — warn, not reject — because some channels use multiple subdomains).
 _PASTE_BLOB_CHANNELS: dict[str, tuple[str, str]] = {

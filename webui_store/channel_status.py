@@ -218,14 +218,20 @@ def reconcile_on_load() -> None:
     channel_status_store.update(_apply)
 
 
-# Channels hard-removed 2026-05-27 (Plan 2026-05-27-001). Their bind-save UI
-# clear path is gone, so any orphaned <slug>-credentials.json 0600 secret left
-# on disk can no longer be cleared from the UI. The purge below removes them
-# once. A closed literal set (NOT registry-derived) keeps the blast radius
-# bounded; the sentinel makes it one-shot so a future re-registration of any of
-# these slugs can never have its fresh credentials silently deleted.
-_REMOVED_CREDENTIAL_SLUGS: tuple[str, ...] = ("jianshu", "zhihu", "cnblogs")
-_PURGE_SENTINEL_NAME = ".removed-channel-purge-v1.done"
+# Channels whose bind-save dispatch rows were removed 2026-05-27 (Plan
+# 2026-05-27-001 + the same PR's dead-row sweep). Their UI clear path is gone,
+# so any orphaned <slug>-credentials.json 0600 secret left on disk can no longer
+# be cleared from the UI. The purge below removes them once. Must stay in sync
+# with the rows deleted from channel_bind_save._PASTE_BLOB_CHANNELS /
+# _USERPASS_MODULES (jianshu/zhihu/habr/pikabu/segmentfault + cnblogs). A closed
+# literal set (NOT registry-derived) keeps the blast radius bounded; the sentinel
+# makes it one-shot so a future re-registration of any of these slugs can never
+# have its fresh credentials silently deleted. If this list changes after the
+# sentinel may already exist in the field, bump _PURGE_SENTINEL_NAME to v2.
+_REMOVED_CREDENTIAL_SLUGS: tuple[str, ...] = (
+    "jianshu", "zhihu", "cnblogs", "habr", "pikabu", "segmentfault",
+)
+_PURGE_SENTINEL_NAME: str = ".removed-channel-purge-v1.done"
 
 
 def purge_removed_channel_credentials() -> None:
@@ -238,6 +244,10 @@ def purge_removed_channel_credentials() -> None:
     Called by ``webui_app.create_app`` at startup (single-threaded path).
     """
     config_dir = _config_dir()
+    # Ensure the dir exists so the sentinel write below succeeds even on a fresh
+    # install — otherwise FileNotFoundError would prevent stamping and the
+    # "one-shot" would re-scan on every boot.
+    config_dir.mkdir(parents=True, exist_ok=True)
     sentinel = config_dir / _PURGE_SENTINEL_NAME
     if sentinel.exists():
         return

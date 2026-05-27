@@ -89,14 +89,19 @@ def test_reintroduction_safe_after_sentinel():
     assert _cred("zhihu").exists(), "post-sentinel re-add must be safe"
 
 
-def test_symlink_is_refused_not_followed(tmp_path):
+def test_symlink_is_refused_not_followed(tmp_path, caplog):
     outside = tmp_path / "outside-secret.json"
     outside.write_text("victim")
     link = _cred("jianshu")
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(outside)
-    purge_removed_channel_credentials()
+    with caplog.at_level(logging.WARNING):
+        purge_removed_channel_credentials()
     assert outside.exists(), "symlink target outside config_dir must survive"
+    assert link.is_symlink(), "the symlink node itself must not be unlinked"
+    assert any("symlink" in r.message.lower() for r in caplog.records), (
+        "refused symlink must be logged so the stranded link is discoverable"
+    )
 
 
 def test_unlink_failure_logs_warning_and_continues(monkeypatch, caplog):
