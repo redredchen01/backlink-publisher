@@ -283,7 +283,7 @@ graph TB
 
 Phase 1 = Units 1–3 (ship independently). Phase 2 = Units 4–8.
 
-- [x] **Unit 1: Typed-error envelope + shared chokepoint**
+- [ ] **Unit 1: Typed-error envelope + shared chokepoint**
 
 **Goal:** A dependency-free typed-error envelope (schema: `error_class`,
 `exit_code`, `message`) and an additive machine-readable emission through the
@@ -338,7 +338,7 @@ Phase 1 = Units 1–3 (ship independently). Phase 2 = Units 4–8.
 **Verification:** Round-trip and chokepoint tests pass; existing `errors.py` tests
 still green (human text preserved).
 
-- [x] **Unit 2: Route every CLI fatal-error emit site through the chokepoint**
+- [ ] **Unit 2: Route every CLI fatal-error emit site through the chokepoint**
 
 **Goal:** All fatal-error exits in the in-scope CLIs go through the Unit 1
 chokepoint so each emits the typed envelope — no direct `print(...,file=stderr)+SystemExit`.
@@ -393,7 +393,7 @@ guards in `validate_backlinks.py:108`, `publish_backlinks.py:69`.
 golden stdout unchanged; `tests/test_no_monolith_regrowth.py` still green (or
 ceiling raised in-PR with rationale).
 
-- [x] **Unit 3: WebUI consumes typed errors; delete `stderr[:200]`** ✅ Phase 1 complete (reconciled with f44e8f3 fidelity layer)
+- [ ] **Unit 3: WebUI consumes typed errors; delete `stderr[:200]`**
 
 **Goal:** `run_pipe` / `PipeResult` parse the envelope into a typed
 `PipeResult.error`; routes show the real error; QUARANTINE unknown shapes.
@@ -443,7 +443,7 @@ ceiling raised in-PR with rationale).
 `stderr[:200]`/`[:300]`/`[:500]` for pipeline CLIs (pipeline.py *and* checkpoint.py);
 existing pipeline-route + checkpoint tests green.
 
-- [x] **Unit 4: B0 — funnel all callers through `PipelineAPI`; add `report-anchors` method**
+- [ ] **Unit 4: B0 — funnel all callers through `PipelineAPI`; add `report-anchors` method**
 
 **Goal:** Single seam: no route/service calls `run_pipe`/`subprocess` for in-scope
 CLIs directly; `PipelineAPI` gains `report_anchors()`. Still subprocess underneath
@@ -508,29 +508,7 @@ CLIs directly; `PipelineAPI` gains `report_anchors()`. Still subprocess undernea
 through `PipelineAPI`; seo_viz output unchanged; checkpoint resume exit-code
 branching preserved; guard test passes.
 
-#### Phase 2 latency gate — MEASURED 2026-05-27 (verdict: GO, low priority)
-
-Phase 2's value is removing the per-call subprocess spawn tax (interpreter
-cold-start + module import) that the resident Flask process would no longer pay.
-A spike measured that tax directly — median of 9 spawns each, `python -m <module>`
-import time on the Phase-1 branch, interpreter baseline 27ms:
-
-| CLI | spawn tax (median) | import-only | in-process saves/call |
-|---|---|---|---|
-| `report-anchors` | 216ms | +189ms | ~189ms |
-| `validate-backlinks` | 248ms | +220ms | ~220ms |
-| `plan-backlinks` | 308ms | +281ms | ~281ms |
-
-**Verdict: GO, but low priority.** The tax (216–308ms) clears the ~100ms "instant"
-bar and `plan-backlinks` touches the ~300ms "felt-lag" zone, so this is **not** an
-"unfelt → defer" case — the saving is real and paid on every call. *Caveat:* these
-CLIs' actual work (target-URL network checks, work-URL scraping) is typically
-seconds, which partially masks the tax from total wait time. So Phase 2 is worth
-doing but is not the dominant source of perceived latency — Phase 1 (error
-fidelity) already delivered the primary value. Start with the Unit 6 `validate`
-pilot; `plan-backlinks` (heaviest import, ~281ms) has the largest payoff.
-
-- [x] **Unit 5: Global-state audit + characterization lock (gates in-process)**
+- [ ] **Unit 5: Global-state audit + characterization lock (gates in-process)**
 
 **Goal:** Enumerate every process-lifetime side effect the in-scope CLIs mutate,
 decide per-call isolation, and capture a golden/characterization corpus of current
@@ -543,7 +521,7 @@ subprocess output so the in-process swap is provably behavior-neutral.
 **Files:**
 - Create: `tests/test_pipeline_inprocess_characterization.py` (golden corpus:
   representative + error-path inputs for validate/plan/report-anchors, captured
-  from the subprocess path), `docs/spike-notes/2026-05-27-inprocess-global-state-audit.md`
+  from the subprocess path), `docs/plans/notes/inprocess-global-state-audit.md`
   (audit findings + per-surface decision)
 - Modify (if audit requires per-call reset): `webui_app/api/pipeline_api.py`
   (lazy `load_config()` per call), and document handling for `_util/logger.py`
@@ -575,7 +553,7 @@ in-process code exists.
 runs green against the current subprocess path and is ready to assert against the
 in-process path in Unit 6.
 
-- [x] **Unit 6: `validate-backlinks` in-process pilot (engine extraction)**
+- [ ] **Unit 6: `validate-backlinks` in-process pilot (engine extraction)**
 
 **Goal:** Extract `validate-backlinks` core into a pure engine; `PipelineAPI.validate()`
 dispatches in-process; CLI shell calls the engine. Prove the pattern end-to-end
