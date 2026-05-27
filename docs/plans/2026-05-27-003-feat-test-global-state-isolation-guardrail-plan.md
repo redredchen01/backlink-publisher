@@ -1,7 +1,7 @@
 ---
 title: "feat: Test global-state pollution — containment net, AST gate, CSRF canary"
 type: feat
-status: active
+status: completed
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-test-global-state-pollution-guardrail-requirements.md
 claims: {}
@@ -256,7 +256,7 @@ graph TB
   U4[Unit 4: positive CSRF canary]
 ```
 
-- [ ] **Unit 0: Shared security-toggle key constants (in conftest)**
+- [x] **Unit 0: Shared security-toggle key constants (in conftest)**
 
 **Goal:** Single source of truth for the security-relevant config + env keys, importable by
 both the net fixture and the gate test.
@@ -288,7 +288,7 @@ both the net fixture and the gate test.
 
 **Verification:** `from conftest import SECURITY_CONFIG_KEYS` resolves in the gate test.
 
-- [ ] **Unit 1: Containment net fixture**
+- [x] **Unit 1: Containment net fixture**
 
 **Goal:** Autouse function-scope fixture restoring `webui.app.config` security keys + env
 to a clean baseline after each test.
@@ -343,7 +343,7 @@ implement the net to make it pass.
 **Verification:** Suspect leak-then-read ordering passes in full suite; existing suite green
 (modulo Unit 5 flips); single-file runs unchanged.
 
-- [ ] **Unit 2: Sanctioned `disable_csrf` fixture + docs**
+- [x] **Unit 2: Sanctioned `disable_csrf` fixture + docs**
 
 **Goal:** One obvious, restoring way to disable CSRF in a test.
 
@@ -370,7 +370,7 @@ implement the net to make it pass.
 
 **Verification:** Fixture usable from any test; AGENTS.md no longer advertises raw mutation.
 
-- [ ] **Unit 3: Static AST gate + grandfather allowlist + count canary**
+- [x] **Unit 3: Static AST gate + grandfather allowlist + count canary**
 
 **Goal:** Fail CI when a test raw-mutates a security-toggle key outside the sanctioned fixture.
 
@@ -423,7 +423,7 @@ recursion-coverage test, positive-fires test); `SLOC_CANARY_EXPECTED` (count can
 **Verification:** `pytest tests/test_security_toggle_mutation_gate.py` green on current tree;
 adding a new raw mutation reds it.
 
-- [ ] **Unit 4: Positive CSRF canary**
+- [x] **Unit 4: Positive CSRF canary**
 
 **Goal:** Prove the guard is live under default config, independent of isolation fixtures.
 
@@ -461,9 +461,11 @@ adding a new raw mutation reds it.
 **Verification:** Canary green on default config and trustworthy (asserts CSRF flag state +
 discriminator); would red if the guard regressed to a no-op.
 
-- [ ] **Unit 5: Enumerate flips + fix inherited-leak false-greens**
+- [x] **Unit 5: Enumerate flips + fix inherited-leak false-greens**
 
 **Goal:** Surface and fix tests that were green only on inherited leaked state.
+
+**Result (execution):** Full suite under the net = **5092 passed, 6 skipped, 0 flips** — no inherited-leak false-greens exist; containment achieved with zero cleanup churn, so no PR split needed.
 
 **Requirements:** R8, R9
 
