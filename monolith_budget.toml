@@ -60,3 +60,7 @@ rationale = "Formatting helpers (_markdown_table, _json_output, _build_report, _
 [files."src/backlink_publisher/cli/_publish_helpers.py"]
 ceiling = 540
 rationale = "Canary Phase 2 Unit 3 (2026-05-27) added _record_publish_path (advisory forward-path drift recording, ~50 SLOC) and a publish_path_drift_count param to _publish_epilogue. _publish_helpers.py grew from ~450 to 507 SLOC. Ceiling 540 = round_up_to_10(507+30) per policy; future extraction candidate is the lease/throttle cluster."
+
+[files."src/backlink_publisher/cli/generate_backlink_text.py"]
+ceiling = 560
+rationale = "New opt-in content-drafting CLI (Plan 2026-05-27-006): _read_candidates, _validate_candidate, _make_rejected, _validate_generated_text (refusal/unsafe/link/anchor/wordcount/language), _count_words (CJK-aware), _make_correction_hint, _run_dry_run, _resolve_client (endpoint/key/model resolution + SSRF/allowlist guard + userinfo rejection), _run_generate (corrective re-prompt loop). 541 SLOC measured 2026-05-27. Ceiling 560 = round_up_to_10(541+10) — minimal headroom; extraction candidate if it grows."

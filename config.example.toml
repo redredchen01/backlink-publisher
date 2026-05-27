@@ -275,6 +275,17 @@ client_secret = "your-client-secret"
 # model = "gpt-4o-mini"
 # timeout_s = 30
 
+# ── generate-backlink-text (opt-in content-drafting tool) ──────────────────
+# The `generate-backlink-text` CLI verb is an opt-in content-drafting tool
+# that drafts backlink text via an OpenAI-compatible LLM.  It is NOT part of
+# the default pipeline (seeds → plan → validate → publish) and does NOT
+# auto-publish.  It reuses [llm.anchor_provider] if configured; you can also
+# pass --endpoint / --model / --api-key-env flags directly.
+#
+# The LLM API key is NEVER required in this file — supply it via the env var
+# (default: BACKLINK_LLM_API_KEY).  Use --dry-run to preview prompts offline
+# with no key or endpoint configured.
+
 # ────────────────────────────────────────────────────────────
 # [ghpages] — GitHub Pages adapter (Phase 3 Unit 7)
 # ────────────────────────────────────────────────────────────
