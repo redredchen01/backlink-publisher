@@ -5,6 +5,7 @@ status: completed
 date: 2026-05-27
 deepened: 2026-05-27
 origin: docs/brainstorms/2026-05-27-channel-binding-bug-sweep-requirements.md
+claims: {}
 ---
 
 # fix: Retire dead medium bespoke CSRF layer + reach origin-guard parity + harden tests
