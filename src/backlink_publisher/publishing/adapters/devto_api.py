@@ -203,7 +203,7 @@ class DevtoAPIAdapter(Publisher):
                         or str(err_body.get("errors", ""))
                         or resp.text[:200]
                     )
-                except Exception:
+                except ValueError:
                     msg = resp.text[:200]
                 raise ExternalServiceError(
                     f"Dev.to rejected article (HTTP 422 — validation error): {msg}"

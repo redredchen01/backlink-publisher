@@ -94,7 +94,8 @@ def _build_credentials(config: Config):
     if token_data:
         try:
             creds = Credentials.from_authorized_user_info(token_data, _SCOPES)
-        except Exception:
+        except Exception as exc:
+            log.warn("Failed to load Blogger credentials from config token: %s", exc)
             creds = None
 
     if creds and _near_expiry(creds, 300) and creds.refresh_token:

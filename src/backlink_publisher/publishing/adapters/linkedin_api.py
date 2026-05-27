@@ -137,8 +137,9 @@ class LinkedInAPIAdapter(Publisher):
                 data = {}
                 try:
                     data = resp.json()
-                except Exception:
-                    pass
+                except ValueError as exc:
+                    log.debug("Failed to decode JSON response for HTTP 403 error: %s", exc)
+                    data = {}
                 err = (data.get("message") or resp.text)[:200]
                 raise ExternalServiceError(
                     f"LinkedIn API rejected (HTTP 403): {err}. "
