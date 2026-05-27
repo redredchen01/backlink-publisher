@@ -5,6 +5,7 @@ status: completed
 date: 2026-05-27
 deepened: 2026-05-27
 origin: docs/brainstorms/2026-05-27-url-parse-never-raises-requirements.md
+claims: {}
 ---
 
 # fix: URL-parse never-raises hardening sweep
