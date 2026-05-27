@@ -549,3 +549,292 @@ def fake_platform_registered():
             __VISIBILITY_BY_PLATFORM.pop("fake", None)
         else:
             __VISIBILITY_BY_PLATFORM["fake"] = previous_visibility
+
+
+# ── Layer 3: Credential tripwire (Plan 2026-05-27-005 Unit 7) ───────────────
+#
+# Session fixture that watches REAL_CONFIG_ROOT / REAL_CACHE_ROOT for unexpected
+# writes to operator credential/state files during the test suite.
+#
+# ON CI: REAL_CONFIG_ROOT typically does not exist (sandboxed HOME), so the
+# snapshot is empty and the fixture is a cheap no-op.  Phase 2 is dev-only.
+#
+# Security contract (see plan Risks & Dependencies):
+#  - Failure message: relative filename only, boolean "changed" — no SHA-256,
+#    no file contents, no absolute real-home path.
+#  - Setup reads wrap exceptions so a mid-setup read failure cannot propagate
+#    secret bytes into a visible traceback frame.
+#  - events.db snapshot: tmpdir cleaned in finally; copies 0o600; not a fixed path.
+#  - Failure uses pytest.fail(), not bare assert (avoids assertion-rewrite
+#    leaking digest bytes into pytest output).
+#
+# NOTE: helper functions (snapshot_protected_files, check_protected_files) are
+# intentionally importable from conftest so meta-tests can call them with a
+# controlled fake-root without touching real operator files.
+
+import fnmatch as _fnmatch
+import hashlib as _hashlib
+import sqlite3 as _sqlite3
+import subprocess as _subprocess
+
+
+# ---- Exclusion helpers -------------------------------------------------------
+
+_CHROME_PROFILE_EXCLUDES: tuple[str, ...] = (
+    "real-chrome-profile",
+    "browser-profile",
+)
+_WAL_EXCLUDE_SUFFIXES: tuple[str, ...] = ("-shm", "-journal")
+
+
+def _tw_relpath(path: Path, root: Path) -> str:
+    """Return POSIX relpath of path relative to root, falling back to basename."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _tw_is_excluded(path: Path, root: Path) -> bool:
+    """True if path should be excluded from byte-hash (chrome profiles, WAL sidecars)."""
+    rel = _tw_relpath(path, root)
+    for prefix in _CHROME_PROFILE_EXCLUDES:
+        if rel == prefix or rel.startswith(prefix + "/"):
+            return True
+    for suffix in _WAL_EXCLUDE_SUFFIXES:
+        if path.name.endswith(suffix):
+            return True
+    return False
+
+
+def _tw_is_protected(filename: str) -> bool:
+    """True if filename matches any glob from PROTECTED_GLOBS (Unit 6)."""
+    # Import at call time — test-time evaluation (invert-drift lesson).
+    from test_protected_set_coverage import PROTECTED_GLOBS  # noqa: PLC0415
+    return any(_fnmatch.fnmatch(filename, g) for g in PROTECTED_GLOBS)
+
+
+# ---- Digest helpers ----------------------------------------------------------
+
+def _tw_sha256_file(path: Path) -> "str | None":
+    """SHA-256 hex digest of path bytes, or None on any read failure."""
+    try:
+        data = path.read_bytes()
+        return _hashlib.sha256(data).hexdigest()
+    except OSError:
+        return None
+
+
+def _tw_events_db_fingerprint(db_path: Path) -> "str | None":
+    """Logical fingerprint for events.db via WAL snapshot-copy.
+
+    Returns sorted-rows SHA-256 across all user tables, or None if the db is
+    absent or cannot be read.  WAL-safe: copies db + -wal before opening
+    (mirrors audit/readers.py:_read_articles_from_snapshot).
+
+    Security: tmpdir is cleaned in finally; never a fixed path; copies 0o600.
+    """
+    if not db_path.exists():
+        return None
+    wal_path = db_path.with_name(db_path.name + "-wal")
+    tmp_dir = Path(tempfile.mkdtemp(prefix="bp-tripwire-"))
+    try:
+        copy_db = tmp_dir / "events.db"
+        try:
+            shutil.copy2(db_path, copy_db)
+            copy_db.chmod(0o600)
+            if wal_path.exists():
+                copy_wal = tmp_dir / "events.db-wal"
+                shutil.copy2(wal_path, copy_wal)
+                copy_wal.chmod(0o600)
+            conn = _sqlite3.connect(f"file:{copy_db}?mode=ro", uri=True)
+            try:
+                tables = sorted(
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                    if not row[0].startswith("sqlite_")
+                )
+                rows_repr: list[str] = []
+                for tbl in tables:
+                    try:
+                        rows = conn.execute(f"SELECT * FROM {tbl}").fetchall()
+                        rows_repr.extend(sorted(str(tuple(r)) for r in rows))
+                    except _sqlite3.Error:
+                        pass
+                combined = "\n".join(rows_repr)
+                return _hashlib.sha256(combined.encode()).hexdigest()
+            finally:
+                conn.close()
+        except (OSError, _sqlite3.Error):
+            return None
+    finally:
+        shutil.rmtree(str(tmp_dir), ignore_errors=True)
+
+
+def _tw_chrome_profile_size(config_root: Path) -> int:
+    """Total byte-size of the real-chrome-profile subtree, or 0 if absent."""
+    profile_dir = config_root / "real-chrome-profile"
+    if not profile_dir.exists():
+        return 0
+    total = 0
+    try:
+        for p in profile_dir.rglob("*"):
+            if p.is_file():
+                try:
+                    total += p.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
+
+
+# ---- Public API (importable by meta-tests) -----------------------------------
+
+def snapshot_protected_files(
+    config_root: Path,
+    cache_root: Path,
+) -> "dict[str, str | None]":
+    """Snapshot all protected credential files under config_root and cache_root.
+
+    Returns ``{relative_name: digest_or_None}`` for every file matching
+    PROTECTED_GLOBS.  A None digest means the file existed but could not be
+    read.  The special key ``"__chrome_profile_size__"`` tracks the coarse
+    presence/size tripwire over the real-chrome-profile subtree.
+
+    Importable by tests/test_credential_tripwire.py so meta-tests can drive
+    the logic with a controlled fake-root.
+    """
+    state: dict[str, str | None] = {}
+    for root in (config_root, cache_root):
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            if _tw_is_excluded(p, root):
+                continue
+            if not _tw_is_protected(p.name):
+                continue
+            rel = _tw_relpath(p, root)
+            if p.name == "events.db":
+                state[rel] = _tw_events_db_fingerprint(p)
+            else:
+                state[rel] = _tw_sha256_file(p)
+    # Coarse presence/size tripwire for real-chrome-profile.
+    state["__chrome_profile_size__"] = str(_tw_chrome_profile_size(config_root))
+    return state
+
+
+def check_protected_files(
+    initial: "dict[str, str | None]",
+    config_root: Path,
+    cache_root: Path,
+) -> list[str]:
+    """Return relative names of protected files that changed since initial snapshot.
+
+    Detects: modifications, new protected files added, files that disappeared.
+    Also detects real-chrome-profile subtree growth (coarse presence/size check).
+
+    Importable by tests/test_credential_tripwire.py.
+    """
+    current = snapshot_protected_files(config_root, cache_root)
+    changed: list[str] = []
+    for key in sorted(set(initial) | set(current)):
+        if key == "__chrome_profile_size__":
+            prev_size = int(initial.get(key) or "0")
+            curr_size = int(current.get(key) or "0")
+            if curr_size > prev_size:
+                changed.append("real-chrome-profile/ (grew during suite)")
+        elif initial.get(key) != current.get(key):
+            changed.append(key)
+    return changed
+
+
+def _tw_is_operator_live() -> bool:
+    """True if a running WebUI or Chrome operator process is detected.
+
+    Best-effort: uses pgrep if available; fails silently (returns False).
+    Result is advisory — a True result means benign writes may be in flight;
+    a False result means the suite is the most likely writer of any change.
+    """
+    for pattern in ("webui.py", "backlink-publisher webui"):
+        try:
+            result = _subprocess.run(
+                ["pgrep", "-f", pattern],
+                capture_output=True,
+                timeout=2,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+        except (OSError, _subprocess.TimeoutExpired):
+            pass
+    return False
+
+
+# ---- Fixture -----------------------------------------------------------------
+
+@pytest.fixture(scope="session", autouse=True)
+def _credential_tripwire():
+    """Layer 3: session tripwire over real operator credential files.
+
+    Plan 2026-05-27-005 Unit 7 (Phase 2 — dev-only backstop).
+
+    Harmless on CI where REAL_CONFIG_ROOT does not exist (sandboxed HOME
+    means no real credentials present — the snapshot is empty and teardown
+    is a no-op).
+
+    On a developer machine, hashes protected credential files at session
+    start and re-checks at session end.  If any file changed while no
+    operator process was live, fails with a redacted message naming only the
+    relative filenames (no SHA-256, no contents, no absolute home path).
+    """
+    # Guard: REAL_CONFIG_ROOT must not equal the sandbox config dir.
+    # If they match, the tripwire would silently watch the sandbox — a bug.
+    try:
+        from backlink_publisher.config.loader import _config_dir as _get_sandbox
+        _sandbox_cfg = _get_sandbox()
+    except Exception:
+        _sandbox_cfg = None
+
+    if _sandbox_cfg is not None and REAL_CONFIG_ROOT == _sandbox_cfg:
+        pytest.fail(
+            "Credential tripwire bug: REAL_CONFIG_ROOT equals the sandbox "
+            "config dir — the HOME redirect did not capture real roots before "
+            "running. Check conftest.py ordering."
+        )
+
+    initial = snapshot_protected_files(REAL_CONFIG_ROOT, REAL_CACHE_ROOT)
+
+    yield
+
+    changed = check_protected_files(initial, REAL_CONFIG_ROOT, REAL_CACHE_ROOT)
+    if not changed:
+        return
+
+    operator_live = _tw_is_operator_live()
+    # Redaction: emit relative filenames only — no SHA-256, no absolute paths,
+    # no file contents.
+    changed_names = ", ".join(changed)
+
+    if operator_live:
+        import warnings as _warnings
+        _warnings.warn(
+            f"[tripwire] {len(changed)} protected file(s) changed during the "
+            f"test suite, but an operator process is live — likely benign. "
+            f"Relative names: {changed_names}",
+            UserWarning,
+            stacklevel=1,
+        )
+    else:
+        pytest.fail(
+            f"[tripwire] {len(changed)} protected credential file(s) changed "
+            f"during the test suite with no live operator process detected. "
+            f"The test suite is the likely writer.\n"
+            f"Changed (relative names only): {changed_names}\n"
+            f"Fix: ensure the offending test uses the sandboxed _config_dir() "
+            f"(via BACKLINK_PUBLISHER_CONFIG_DIR) rather than a hardcoded or "
+            f"Path.home()-derived path."
+        )
