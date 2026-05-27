@@ -99,10 +99,10 @@ class _SSRFSafeRedirectHandler(HTTPRedirectHandler):
         # ``newurl`` is the server-controlled Location header (untrusted) — a
         # malformed authority must block the hop (URLError), not crash the
         # downgrade check with a ValueError. Guard it before any parse use.
-        # Plan 006 R3c. (``req.full_url`` cannot be malformed here: urllib's
-        # Request(...) raises at construction on a malformed URL, so a Request
-        # object with a bad full_url cannot exist — the safe_urlparse on it is
-        # defence-in-depth.)
+        # Plan 006 R3c. (``req.full_url`` should not be malformed in normal
+        # operation — urllib's Request(...) raises at construction on a malformed
+        # URL, so a Request object with a bad full_url should not exist — the
+        # safe_urlparse on it below is defence-in-depth against that assumption.)
         new_parsed = safe_urlparse(newurl)
         if new_parsed is None:
             raise URLError("ssrf_redirect:invalid_host")

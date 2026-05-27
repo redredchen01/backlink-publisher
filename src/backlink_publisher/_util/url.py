@@ -28,10 +28,12 @@ from urllib.parse import (
 def safe_urlparse(url: object) -> ParseResult | None:
     """``urlparse`` that never raises — returns ``None`` on malformed/non-str input.
 
-    ``urlparse`` raises ``ValueError`` on a malformed authority (an unterminated
-    IPv6 literal like ``http://[invalid``) and ``AttributeError`` on a non-``str``
-    argument. Both are folded into a ``None`` return so callers on never-raises
-    code paths can branch instead of crashing. See
+    Two failure modes are handled so callers on never-raises code paths can
+    branch instead of crashing: a non-``str`` (or empty) argument is rejected by
+    the ``isinstance`` guard *before* ``urlparse`` is called (``urlparse(123)``
+    would otherwise raise ``AttributeError``), and a malformed authority — an
+    unterminated IPv6 literal like ``http://[invalid`` — is caught as the
+    ``ValueError`` that ``urlparse`` raises. Both yield ``None``. See
     ``[[feedback_urlparse_raises_on_malformed_ipv6]]``.
     """
     if not isinstance(url, str) or not url:

@@ -29,7 +29,6 @@ Safety guarantees:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 import requests
@@ -380,7 +379,10 @@ def _filter_urls(
             continue
         if cleaned.rstrip("/") in (main_root_canon, list_canon):
             continue
-        path = urlparse(cleaned).path or "/"
+        parsed_clean = safe_urlparse(cleaned)
+        if parsed_clean is None:
+            continue
+        path = parsed_clean.path or "/"
         if any(path.startswith(b) for b in blocklist):
             continue
         if cleaned in seen:

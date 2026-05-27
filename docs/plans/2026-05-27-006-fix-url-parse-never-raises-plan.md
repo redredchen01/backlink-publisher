@@ -1,7 +1,7 @@
 ---
 title: "fix: URL-parse never-raises hardening sweep"
 type: fix
-status: active
+status: completed
 date: 2026-05-27
 deepened: 2026-05-27
 origin: docs/brainstorms/2026-05-27-url-parse-never-raises-requirements.md
@@ -98,7 +98,7 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 ## Implementation Units
 
-- [ ] **Unit 1: Shared safe-parse helpers in `_util/url.py`**
+- [x] **Unit 1: Shared safe-parse helpers in `_util/url.py`**
 
 **Goal:** Add `safe_urlparse(url) -> ParseResult | None` and `safe_hostname(url) -> str | None`, returning `None` on malformed/non-`str` input (never raising). Foundation for all later units.
 
@@ -130,7 +130,7 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 ---
 
-- [ ] **Unit 2: Harden the scraper untrusted-input path (collection + filtering)**
+- [x] **Unit 2: Harden the scraper untrusted-input path (collection + filtering)**
 
 **Goal:** Make `absolutize`, `is_same_host`, `strip_fragment_query` internally never-raise so a malformed scraped href is skipped, not fatal.
 
@@ -162,7 +162,7 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 ---
 
-- [ ] **Unit 3: Harden never-raises classification sites (linkcheck + fetch)**
+- [x] **Unit 3: Harden never-raises classification sites (linkcheck + fetch)**
 
 **Goal:** `_check_url_once` and `_is_valid_http_url` return their typed "invalid" verdict on malformed input instead of raising.
 
@@ -191,7 +191,7 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 ---
 
-- [ ] **Unit 4: Harden the SSRF gates (both backends) + list_url, fail-closed**
+- [x] **Unit 4: Harden the SSRF gates (both backends) + list_url, fail-closed**
 
 **Goal:** Every SSRF gate and the `list_url` validator convert malformed input into their intended *blocked/raised* outcome, never a bare `ValueError`, never a skipped check or allowed hop. This is the security-critical unit — it covers the urllib backend (the main fetch path + redirect handler), the requests backend, and the scraper entry validation.
 
@@ -201,11 +201,11 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 **Files:**
 - Modify: `src/backlink_publisher/_util/net_safety.py`, `src/backlink_publisher/content/_http.py`, `src/backlink_publisher/content/scraper.py`
-- Test: `tests/test_content_fetch.py`, `tests/test_work_scraper.py` (+ a `net_safety`/SSRF test home — see Verification)
+- Test: `tests/test_content_fetch.py`, `tests/test_work_scraper.py`, `tests/test_net_safety.py`
 
 **Approach:**
 - **`_util/net_safety.py:_check_url_for_ssrf`** (R3b, the main urllib gate via `fetch.py:_check_once`): `parsed = safe_urlparse(url); if parsed is None: return "invalid_host"` (explicit None check before any `.hostname` deref), then `host = parsed.hostname` as today. The function *already* returns `"invalid_host"` for a host-less URL, and any non-`None` reason is treated as **blocked** by callers, so `None → "invalid_host"` is the natural fail-closed mapping (no caller change needed).
-- **`_util/net_safety.py:_SSRFSafeRedirectHandler.redirect_request`** (R3c): the handler first does an https→http downgrade check using `urlparse(req.full_url).scheme` and `urlparse(newurl).scheme` — **both unguarded, and both run BEFORE `_check_url_for_ssrf(newurl)`**. So R3b alone does not save this path: a malformed `newurl` (or malformed `req.full_url`) crashes the downgrade check first. Fix: parse both via `safe_urlparse` **at the very top of `redirect_request`, before the downgrade comparison**; if either is `None`, raise `URLError("ssrf_redirect:invalid_host")` immediately (fail-closed — block the hop, don't crash, don't fall through to the comparison). Only after both parse cleanly does the existing downgrade check + `_check_url_for_ssrf(newurl)` (already R3b-hardened) run. **Implementation order within Unit 4: do R3b first, then R3c can rely on it for the `_check_url_for_ssrf(newurl)` call.**
+- **`_util/net_safety.py:_SSRFSafeRedirectHandler.redirect_request`** (R3c): the handler first does an https→http downgrade check using `urlparse(req.full_url).scheme` and `urlparse(newurl).scheme` — **both unguarded, and both run BEFORE `_check_url_for_ssrf(newurl)`**. So R3b alone does not save this path: a malformed `newurl` crashes the downgrade check first. Fix: parse `newurl` via `safe_urlparse` **at the very top of `redirect_request`**; if `None`, raise `URLError("ssrf_redirect:invalid_host")` immediately. `req.full_url` is also parsed via `safe_urlparse` as a belt-and-suspenders guard, but only uses empty-string fallback if `None` (it cannot actually be malformed: urllib's `Request()` validates on construction, so a `Request` with a bad `full_url` cannot exist). Only after both parse cleanly does the existing downgrade check + `_check_url_for_ssrf(newurl)` (already R3b-hardened) run. **Implementation order within Unit 4: do R3b first, then R3c can rely on it for the `_check_url_for_ssrf(newurl)` call.**
 - **`content/_http.py:_block_if_private`** (R3, requests backend): replace `host = urlparse(url).hostname` with `host = safe_hostname(url)`; the existing `if not host: raise InputValidationError("URL has no resolvable host: …")` then catches malformed input (None) AND host-less URLs in one branch. Fail-closed: None → raise.
 - **`content/scraper.py:211`** (R5): parse `list_url` via `safe_urlparse`; on `None` raise `InputValidationError("invalid list_url: …")` (same error the scheme/netloc check raises). Loud failure — operator config error, not a silent skip.
 
@@ -228,7 +228,7 @@ This sweep generalizes the pattern. Feedback: `[[feedback_urlparse_raises_on_mal
 
 ---
 
-- [ ] **Unit 5 (optional): Consolidate #258's local guards**
+- [x] **Unit 5 (optional): Consolidate #258's local guards**
 
 **Goal:** Refactor `_preflight_fetch._safe_hostname` / `_is_http_url` to call the shared `_util/url.py` helpers, removing the duplication.
 
