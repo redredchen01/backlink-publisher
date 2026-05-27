@@ -45,7 +45,9 @@ _ABSENT = object()
 
 # Lazily-built clean baseline of NET_CONFIG_RESTORE_KEYS, captured from a fresh
 # create_app() (never the possibly-mutated module-level webui.app singleton).
-_CSRF_CONFIG_BASELINE: dict[str, object] = {}
+# ``None`` until built — an explicit "not built" marker rather than dict
+# truthiness (a populated baseline could in principle be falsy-shaped).
+_CSRF_CONFIG_BASELINE: dict[str, object] | None = None
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -215,18 +217,19 @@ def _ensure_csrf_config_baseline() -> dict[str, object]:
     ``create_app()`` reads the isolated tmp config dir, not the operator's
     real ``~/.config``.
     """
-    if not _CSRF_CONFIG_BASELINE:
+    global _CSRF_CONFIG_BASELINE
+    if _CSRF_CONFIG_BASELINE is None:
         from webui_app import create_app
 
         fresh = create_app(start_scheduler=False)
-        for key in NET_CONFIG_RESTORE_KEYS:
-            _CSRF_CONFIG_BASELINE[key] = fresh.config.get(key, _ABSENT)
+        baseline = {key: fresh.config.get(key, _ABSENT) for key in NET_CONFIG_RESTORE_KEYS}
         # Fail loud if the baseline itself is not CSRF-enabled — otherwise the
         # net would faithfully restore the guard to a disabled state.
-        assert _CSRF_CONFIG_BASELINE.get("CSRF_ENABLED") is True, (
+        assert baseline.get("CSRF_ENABLED") is True, (
             "create_app() baseline does not have CSRF_ENABLED=True; the "
             "containment net cannot trust it as a restore target."
         )
+        _CSRF_CONFIG_BASELINE = baseline
     return _CSRF_CONFIG_BASELINE
 
 
@@ -254,8 +257,11 @@ def _restore_global_state_net():
     """Containment net: restore security-relevant config + env around each test.
 
     Plan 2026-05-27-003 Unit 1. Defined *after* the three monkeypatch-based
-    autouse fixtures above so it sets up last / tears down last — the singleton
-    config is restored after any per-test fixture leaves it disabled.
+    autouse fixtures above so its setup runs last among autouse fixtures (a
+    clean baseline is established right before the test body). On teardown it
+    restores the singleton config after the test's own non-autouse fixtures
+    (e.g. a ``client`` fixture that left CSRF disabled) have already finished,
+    so no disabled-guard state survives into the next test.
 
     Setup resets ``webui.app.config`` security keys to a clean baseline so a
     leak from a prior test cannot create an in-test guard-dead window. Teardown

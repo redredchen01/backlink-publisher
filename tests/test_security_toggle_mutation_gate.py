@@ -171,9 +171,15 @@ def test_scanner_flags_subscript_but_ignores_testing_update_and_env() -> None:
         'webui.app.config["CSRF_ENABLED"] = False\n'          # flagged
         'app.config["SESSION_COOKIE_SECURE"] = False\n'        # flagged
         'a.config["WTF_CSRF_ENABLED"] = False\n'               # flagged
+        'x = app.config["SECRET_KEY"] = "k"\n'                 # flagged (multi-target Assign)
         'app.config["TESTING"] = True\n'                       # NOT gated
         'webui.app.config.update({"CSRF_ENABLED": False})\n'   # Call, not subscript
         'os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"\n'    # env, not .config
     )
     keys = {key for key, _lineno in _security_config_mutations(ast.parse(snippet))}
-    assert keys == {"CSRF_ENABLED", "SESSION_COOKIE_SECURE", "WTF_CSRF_ENABLED"}, keys
+    assert keys == {
+        "CSRF_ENABLED",
+        "SESSION_COOKIE_SECURE",
+        "WTF_CSRF_ENABLED",
+        "SECRET_KEY",
+    }, keys

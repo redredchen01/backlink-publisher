@@ -17,13 +17,14 @@ mutation; ``TESTING`` is ungated).
 from __future__ import annotations
 
 import pytest
+from flask.testing import FlaskClient
 
 _TOKEN = "canary-csrf-token"
 _MUTATING_METHODS = ("POST", "PUT", "PATCH", "DELETE")
 
 
 @pytest.fixture
-def canary_client(monkeypatch):
+def canary_client(monkeypatch: pytest.MonkeyPatch) -> FlaskClient:
     # Strip process-global toggles a sibling test may have leaked, so the fresh
     # app's cookie/network posture is genuinely default.
     for key in (
@@ -40,7 +41,7 @@ def canary_client(monkeypatch):
 
     # Prove the baseline is genuinely default-on before exercising the guard.
     assert app.config.get("CSRF_ENABLED") is True
-    assert app.config.get("WTF_CSRF_ENABLED", True) is not False
+    assert app.config.get("WTF_CSRF_ENABLED", True) is True
     # env unset -> False, so the HTTP test-client cookie round-trips.
     assert app.config.get("SESSION_COOKIE_SECURE") is False
 
