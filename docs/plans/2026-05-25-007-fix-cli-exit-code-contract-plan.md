@@ -1,7 +1,7 @@
 ---
 title: "fix: Enforce CLI exit-code contract (fix out-of-range exit_code=45 + add guard test)"
 type: fix
-status: active
+status: shipped
 date: 2026-05-25
 claims:
   paths:

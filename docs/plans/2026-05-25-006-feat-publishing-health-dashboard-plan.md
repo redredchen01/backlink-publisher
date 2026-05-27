@@ -1,7 +1,7 @@
 ---
 title: "feat: Publishing Health Dashboard (built on 005-fix projector correctness)"
 type: feat
-status: active
+status: shipped
 date: 2026-05-25
 deepened: 2026-05-25
 origin: docs/brainstorms/2026-05-25-publishing-health-dashboard-requirements.md

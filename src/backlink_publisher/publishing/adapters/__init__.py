@@ -215,9 +215,9 @@ register(
 register(
     "livejournal",
     LivejournalAPIAdapter,
-    dofollow="uncertain",  # R4 canary pending; Phase 0 preliminary = dofollow
+    dofollow="uncertain",
     rationale=_R["livejournal"],
-    referral_value="high",  # established DA + referral if it turns out nofollow
+    referral_value="high",
     **LIVEJOURNAL_MANIFEST,
 )
 register(

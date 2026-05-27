@@ -1,7 +1,7 @@
 ---
 title: "feat: events.db Kind & Classification Contract"
 type: feat
-status: active
+status: shipped
 date: 2026-05-26
 deepened: 2026-05-26
 origin: docs/brainstorms/2026-05-25-events-db-kind-contract-requirements.md

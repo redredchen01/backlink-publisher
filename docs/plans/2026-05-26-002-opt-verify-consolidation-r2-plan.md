@@ -1,7 +1,7 @@
 ---
 title: "opt: adapters/__init__.py verify consolidation R2"
 type: refactor
-status: active
+status: shipped
 date: 2026-05-26
 claims: {}
 ---
