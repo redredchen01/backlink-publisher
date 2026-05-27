@@ -22,14 +22,23 @@ from backlink_publisher.linkcheck.http import MAX_CONCURRENT as _LINKCHECK_MAX_C
 
 _HTTP_5XX_RE = re.compile(r"\b5[0-9]{2}\b")
 
-_GATE_BANNER_SENTINEL = (
-    Path.home() / ".cache" / "backlink-publisher" / "v0.3-gate-banner-seen"
-)
-_GATE_BANNER_TEXT = (
+
+def _gate_banner_sentinel() -> Path:
+    """Lazy resolver for the gate-banner sentinel path.
+
+    Uses the env-aware ``_cache_dir()`` so the path lands in the test
+    sandbox (not real ``~/.cache``) when ``BACKLINK_PUBLISHER_CACHE_DIR``
+    is set.  Mirrors the ``frw_token_path()`` pattern in ``_util/secrets.py``.
+    """
+    from backlink_publisher import config as _cfg
+
+    return _cfg._cache_dir() / "backlink-publisher" / "v0.3-gate-banner-seen"
+
+
+_GATE_BANNER_TEXT_TEMPLATE = (
     "publish-backlinks now performs a publish-time reachability re-check "
     "on every row before dispatch. Use --skip-publish-time-check to "
-    "restore prior behavior. This message will not repeat (sentinel: "
-    f"{_GATE_BANNER_SENTINEL})."
+    "restore prior behavior. This message will not repeat (sentinel: {sentinel})."
 )
 
 
@@ -70,12 +79,13 @@ def _acquire_publish_leases(platforms: set[str], dry_run: bool) -> None:
 
 
 def _maybe_emit_gate_banner(skip_flag: bool) -> None:
-    if skip_flag or _GATE_BANNER_SENTINEL.exists():
+    sentinel = _gate_banner_sentinel()
+    if skip_flag or sentinel.exists():
         return
-    publish_logger.warn(_GATE_BANNER_TEXT)
+    publish_logger.warn(_GATE_BANNER_TEXT_TEMPLATE.format(sentinel=sentinel))
     try:
-        _GATE_BANNER_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
-        _GATE_BANNER_SENTINEL.touch(exist_ok=True)
+        sentinel.parent.mkdir(parents=True, exist_ok=True)
+        sentinel.touch(exist_ok=True)
     except OSError:
         pass
 

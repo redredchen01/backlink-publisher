@@ -10,8 +10,63 @@ not mass-migrate them.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
+
+# ── Config-sandbox-escape guardrails (Plan 2026-05-27-005) ──────────────────
+# Sentinel env var that marks "we are inside a sandboxed test run".
+# Set by the HOME/override redirect (Unit 3) and propagated to spawned children.
+# Keyed here so the AST gate (test_no_raw_home_path_primitives.py) and the
+# fail-closed resolver (loader.py Unit 4) share the exact same string without
+# any module-level import dependency chain.
+SANDBOX_SENTINEL = "BACKLINK_PUBLISHER_TEST_SANDBOX"
+
+# AST gate: the one allowlisted module that may contain raw home-path primitives.
+_RAW_HOME_ALLOWED_MODULE = "src/backlink_publisher/config/loader.py"
+
+# Sites whose .expanduser() calls on operator-supplied env vars are legitimate
+# (expanding BACKLINK_PUBLISHER_REAL_CHROME_* config, not constructing a raw root).
+# Format: frozenset of (relative_file_path, 0-indexed_line_number) pairs.
+# Shrink-only: the gate asserts discovered_grandfathered_set == this set.
+# To add: audit the site carefully; add a rationale comment here.
+GRANDFATHERED_EXPANDUSER_SITES: frozenset[tuple[str, int]] = frozenset(
+    {
+        # discover_chrome_binary(): expands BACKLINK_PUBLISHER_REAL_CHROME_BIN
+        # (operator-supplied Chrome binary path, not an operator-state-root
+        # construction — legitimately uses ~ to find the binary).
+        (
+            "src/backlink_publisher/publishing/browser_publish/_chrome_session_impl.py",
+            66,
+        ),
+        # _resolve_chrome_profile_dir(): expands BACKLINK_PUBLISHER_REAL_CHROME_PROFILE_DIR
+        # (same rationale — operator-supplied profile dir may contain "~"; the
+        # default branch already calls _config_dir() correctly).
+        (
+            "src/backlink_publisher/publishing/browser_publish/_chrome_session_impl.py",
+            116,
+        ),
+        # _ChromeSession.open() in instant_web.py: env var
+        # BACKLINK_PUBLISHER_REAL_CHROME_PROFILE_DIR may contain "~"; the
+        # default arg now uses _config_dir() (folded in Unit 1) so the raw-root
+        # escape is gone — only the env-var expansion remains.
+        # AST lineno 77 = start of the Path(os.environ.get(...)).expanduser()
+        # multi-line expression (AST reports the opening line of the call).
+        (
+            "src/backlink_publisher/publishing/adapters/instant_web.py",
+            77,
+        ),
+    }
+)
+
+# Real operator state roots — populated by Unit 3's HOME redirect (before the
+# redirect fires) and consumed by Unit 7's tripwire.  ``None`` until Unit 3
+# initialises them; the tripwire asserts they are non-None before use.
+#
+# Using module-level variables (not constants) because conftest.py is not a
+# package and the fixtures below must mutate these in place.
+REAL_CONFIG_ROOT: Path | None = None
+REAL_CACHE_ROOT: Path | None = None
 
 # ── Test global-state pollution guardrail (Plan 2026-05-27-003) ─────────────
 # Single source of truth for the security-relevant keys, shared by the
