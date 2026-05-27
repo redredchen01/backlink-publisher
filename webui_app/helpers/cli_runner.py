@@ -129,6 +129,26 @@ def surface_cli_error(stderr: str | None, *, limit: int = _MAX_SURFACED_ERROR) -
     return cleaned
 
 
+def describe_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
+    """Operator-facing description of a failed CLI's stderr, envelope-aware.
+
+    Prefers the Unit 1 typed-error envelope (rendered ``[<error_class>] <message>``)
+    when the CLI emitted one — the in-scope CLIs now do for every fatal exit. Falls
+    back to :func:`surface_cli_error` (the full banner-stripped text) when no
+    envelope is present: an argparse usage error, a crash, or any uninstrumented
+    exit. Either way the result is full (never the old ``[:200]`` truncation) and
+    length-bounded. The string form, for callers that don't need the structured
+    ``error_class``/``exit_code`` fields (the checkpoint route).
+    """
+    from backlink_publisher._util.error_envelope import parse
+
+    env = parse(stderr or "")
+    if env is not None:
+        msg = f"[{env.error_class}] {env.message}"
+        return msg if len(msg) <= limit else msg[:limit].rstrip() + " …(truncated)"
+    return surface_cli_error(stderr, limit=limit)
+
+
 def run_pipe_capture(cmd, stdin) -> dict[str, str | int]:
     """Run a pipeline command and return ``{stdout, stderr, returncode}``.
 

@@ -10,7 +10,7 @@ from flask import Blueprint, redirect, request, session
 from backlink_publisher import checkpoint as _checkpoint_mod
 from backlink_publisher._util.logger import plan_logger
 from ..helpers.contexts import _render
-from ..helpers.cli_runner import run_pipe_capture, surface_cli_error
+from ..helpers.cli_runner import describe_cli_error, run_pipe_capture
 from ..helpers.security import _check_localhost, _validate_webui_run_id
 from ..helpers.history import _parse_publish_results, _push_history_aggregate
 
@@ -66,15 +66,15 @@ def checkpoint_resume():
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "article_urls": [r.get("published_url") or r.get("draft_url", "")
                              for r in done],
-            "stderr_summary": surface_cli_error(result["stderr"]),
+            "stderr_summary": describe_cli_error(result["stderr"]),
         })
         return _render('index.html',
             publish_results=publish_results, config=config,
             history_active=True,
-            error=f"部分发布失败。{surface_cli_error(result['stderr'])}")
+            error=f"部分发布失败。{describe_cli_error(result['stderr'])}")
     else:
         return _render('index.html', config=config,
-            error=f"恢复发布失败 (exit {result['returncode']}): {surface_cli_error(result['stderr'])}")
+            error=f"恢复发布失败 (exit {result['returncode']}): {describe_cli_error(result['stderr'])}")
 
 
 @bp.route("/checkpoint/dismiss", methods=["POST"])
