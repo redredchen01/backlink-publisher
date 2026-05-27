@@ -571,3 +571,20 @@ def test_required_link_urls_url_coerced_to_str():
     payload = {"links": [{"url": 12345, "required": True}]}
     result = required_link_urls(payload)
     assert result == ["12345"]
+
+
+def test_target_nofollow_interstitial_appears_in_both_lists():
+    """A URL reachable only via a nofollow shim → target_rewritten=True AND target_nofollow=True.
+    The URL appears in both target_rewritten_urls and target_nofollow_urls simultaneously."""
+    target = "https://myblog.example.com/post/one"
+    shim = "https://shim.example.com/?url=" + target
+    html = _html(f'<a href="{shim}" rel="nofollow">link via nofollow shim</a>')
+    with patch("backlink_publisher.http.get", return_value=_mock_resp(html)):
+        result = verify_link_attributes("https://pub.example.com", target_urls=[target])
+
+    assert result["target_found"] is True  # found via effective (unwrapped) href
+    assert result["target_rewritten"] is True  # only via interstitial, no direct href
+    assert result["target_nofollow"] is True  # no surviving dofollow instance
+    assert target in result["target_rewritten_urls"]
+    assert target in result["target_nofollow_urls"]
+    assert result["target_missing_urls"] == []

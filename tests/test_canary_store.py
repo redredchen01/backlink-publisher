@@ -408,3 +408,74 @@ def test_publish_path_file_is_0600():
     store.record_publish_path_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     mode = stat.S_IMODE(_health_path().stat().st_mode)
     assert mode == 0o600
+
+
+def test_get_publish_path_health_corrupted_stream_returns_default():
+    """Non-dict _publish_path value → isinstance guard → returns default (P1 fix)."""
+    # Directly write a corrupted JSON to canary-health.json.
+    hp = _health_path()
+    hp.write_text(json.dumps({"_publish_path": "corrupted-string"}), encoding="utf-8")
+    hp.chmod(0o600)
+    store.canary_health_store.reset()
+
+    rec = store.get_publish_path_health("medium")
+    assert rec == dict(store._PUBLISH_PATH_DEFAULT)
+    # And the predicate must not raise.
+    assert store.is_publish_path_degraded("medium") is False
+    store.canary_health_store.reset()
+
+
+def test_list_publish_path_all_absent_key_returns_empty():
+    """Store with only evergreen records (no _publish_path key) → {}."""
+    store.record_verdict("velog", store.STATUS_LINK_ALIVE)
+    assert "_publish_path" not in json.loads(
+        _health_path().read_text(encoding="utf-8")
+    )
+    assert store.list_publish_path_all() == {}
+
+
+def test_list_publish_path_all_non_dict_value_returns_empty():
+    """_publish_path exists but is not a dict → isinstance guard → {}."""
+    hp = _health_path()
+    hp.write_text(json.dumps({"_publish_path": 99}), encoding="utf-8")
+    hp.chmod(0o600)
+    store.canary_health_store.reset()
+
+    assert store.list_publish_path_all() == {}
+    store.canary_health_store.reset()
+
+
+def test_list_publish_path_all_fills_missing_defaults():
+    """On-disk record with only 'status' key → missing fields filled from _PUBLISH_PATH_DEFAULT."""
+    hp = _health_path()
+    hp.write_text(
+        json.dumps({"_publish_path": {"medium": {"status": "drift-confirmed"}}}),
+        encoding="utf-8",
+    )
+    hp.chmod(0o600)
+    store.canary_health_store.reset()
+
+    result = store.list_publish_path_all()
+    assert "medium" in result
+    rec = result["medium"]
+    # The stored "status" overrides the default
+    assert rec["status"] == "drift-confirmed"
+    # But other fields are filled from _PUBLISH_PATH_DEFAULT
+    assert "degraded" in rec
+    assert rec["degraded"] is False
+    assert "consecutive_failures" in rec
+    store.canary_health_store.reset()
+
+
+def test_publish_path_noop_for_not_configured_and_unknown():
+    """STATUS_NOT_CONFIGURED and an arbitrary unknown string are both no-ops."""
+    store.record_publish_path_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
+    before = store.get_publish_path_health("blogger")
+
+    store.record_publish_path_verdict("blogger", store.STATUS_NOT_CONFIGURED)
+    after_not_configured = store.get_publish_path_health("blogger")
+    assert after_not_configured == before
+
+    store.record_publish_path_verdict("blogger", "totally-unknown-status")
+    after_unknown = store.get_publish_path_health("blogger")
+    assert after_unknown == before

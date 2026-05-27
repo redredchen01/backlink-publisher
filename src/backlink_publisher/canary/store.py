@@ -212,9 +212,10 @@ def get_publish_path_health(platform: str) -> dict[str, Any]:
     evergreen platform record. Unknown platforms return the minimal default so
     callers need not branch on membership."""
     data = canary_health_store.load() or {}
-    stream = data.get(_PUBLISH_PATH_KEY) or {}
+    raw_stream = data.get(_PUBLISH_PATH_KEY)
+    stream = raw_stream if isinstance(raw_stream, dict) else {}
     rec = stream.get(platform)
-    if rec is None:
+    if rec is None or not isinstance(rec, dict):
         return dict(_PUBLISH_PATH_DEFAULT)
     return rec
 

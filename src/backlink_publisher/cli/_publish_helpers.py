@@ -530,8 +530,10 @@ def _record_publish_path(platform: str, result: Any, row: dict[str, Any]) -> int
         )
         verdict = STATUS_DRIFT_CONFIRMED if is_drift else STATUS_LINK_ALIVE
         record_publish_path_verdict(platform, verdict)
-    except Exception:
-        pass  # advisory — never fail publish
+    except Exception as _exc:  # noqa: BLE001
+        publish_logger.debug(
+            f"[publish-path-canary] store write failed for {platform!r}: {_exc}"
+        )  # advisory — never fail publish
 
     if is_drift:
         nofollow_urls = link_attr.get("target_nofollow_urls", [])

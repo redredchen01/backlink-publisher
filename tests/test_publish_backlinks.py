@@ -705,6 +705,28 @@ def test_record_publish_path_no_provider_meta_records_nothing(monkeypatch, tmp_p
     cstore.canary_health_store.reset()
 
 
+def test_record_publish_path_empty_provider_meta_records_nothing(monkeypatch, tmp_path):
+    """_provider_meta={} (empty dict, distinct code path from None) → returns 0."""
+    from backlink_publisher.cli._publish_helpers import _record_publish_path
+    from backlink_publisher.canary import store as cstore
+
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    cstore.canary_health_store.reset()
+
+    result = AdapterResult(
+        status="published",
+        adapter="medium-api",
+        platform="medium",
+        published_url="https://pub.example.com/p/1",
+        _provider_meta={},
+    )
+    ret = _record_publish_path("medium", result, _drift_row())
+
+    assert ret == 0
+    assert cstore.get_publish_path_health("medium")["status"] == cstore.STATUS_NOT_CONFIGURED
+    cstore.canary_health_store.reset()
+
+
 def test_record_publish_path_or_logic_any_drift_is_drift(monkeypatch, tmp_path):
     """Multi-link row: one dofollow, one rewritten → OR → platform verdict = drift."""
     from backlink_publisher.cli._publish_helpers import _record_publish_path

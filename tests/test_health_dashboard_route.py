@@ -261,3 +261,23 @@ def test_forward_path_error_does_not_500(client, monkeypatch):
     )
     resp = client.get("/ce:health")
     assert resp.status_code == 200
+
+
+def test_forward_path_degraded_badge_renders(client):
+    """degraded=True (>= QUARANTINE_AFTER_N consecutive drifts) shows degraded badge."""
+    from backlink_publisher.canary import store as cstore
+    from backlink_publisher.canary.store import QUARANTINE_AFTER_N
+
+    cstore.canary_health_store.reset()
+
+    for _ in range(QUARANTINE_AFTER_N):
+        cstore.record_publish_path_verdict("medium", cstore.STATUS_DRIFT_CONFIRMED)
+
+    assert cstore.get_publish_path_health("medium")["degraded"] is True
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Publish-path drift monitor" in html
+    assert "degraded" in html
+    cstore.canary_health_store.reset()

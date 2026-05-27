@@ -271,7 +271,6 @@ def _run_resume(args: Any) -> None:
         completed_at = datetime.now(timezone.utc).isoformat()
         # U3: advisory forward-path drift recording (Plan 2026-05-27-006).
         # Must run on both fresh and resume paths (R7). Never gating.
-        row = item["payload"]
         _record_publish_path(platform, result, row)
 
         # Verify before the checkpoint write so the `done` record carries the
