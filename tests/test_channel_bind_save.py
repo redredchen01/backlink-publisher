@@ -474,6 +474,22 @@ def test_userpass_clear_unlinks_file(client, tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_dispatch_maps_have_no_dead_rows():
+    """Every channel in the bind-save dispatch maps must be a registered
+    platform — guards against re-introducing rows for removed channels
+    (jianshu/zhihu/cnblogs/habr/pikabu/segmentfault were swept 2026-05-27)."""
+    import backlink_publisher.publishing.adapters  # noqa: F401 — trigger registration
+    from backlink_publisher.publishing.registry import registered_platforms
+    from webui_app.routes.channel_bind_save import (
+        _PASTE_BLOB_CHANNELS,
+        _USERPASS_MODULES,
+    )
+
+    reg = set(registered_platforms())
+    dead = (set(_PASTE_BLOB_CHANNELS) | set(_USERPASS_MODULES)) - reg
+    assert dead == set(), f"dead dispatch rows for unregistered channels: {dead}"
+
+
 def test_anon_save_returns_info(client):
     """Saving an anon channel (telegraph) returns info, no file written."""
     csrf = _seed_csrf(client)

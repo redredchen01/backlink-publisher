@@ -14,8 +14,8 @@ Security guarantees
   and must use https.
 * Paste-blob: size-capped, JSON-schema checked, domain-validated per channel.
 * Credential files written via ``atomic_write_json`` 0600; userpass via the
-  adapter's own ``store_credentials`` (preserves livejournal md5 vs cnblogs
-  plaintext divergence — dispatch by module, not bare symbol import).
+  adapter's own ``store_credentials`` (preserves per-adapter credential
+  formats, e.g. livejournal md5 — dispatch by module, not bare symbol import).
 
 Channels devto / ghpages / notion keep their existing routes in
 ``token_paste.py``; this route ignores them to avoid conflicts.
@@ -68,25 +68,22 @@ _URL_FIELDS: frozenset[str] = frozenset({"site", "site_url"})
 
 # PASTE-BLOB — pasted {"cookies":[...]} JSON; written as <channel>-credentials.json.
 # Each entry maps channel → (basename, expected_domain_suffix).
+# NOTE: when hard-removing a paste-blob/userpass channel, also add its slug to
+# ``webui_store.channel_status._REMOVED_CREDENTIAL_SLUGS`` so its orphaned 0600
+# credential file gets purged (its UI clear path disappears with the row below).
 # Domain suffix is checked against at least one cookie's domain field (advisory
 # only — warn, not reject — because some channels use multiple subdomains).
 _PASTE_BLOB_CHANNELS: dict[str, tuple[str, str]] = {
     "csdn":          ("csdn-credentials.json",          "csdn.net"),
-    "habr":          ("habr-credentials.json",           "habr.com"),
-    "jianshu":       ("jianshu-credentials.json",        "jianshu.com"),
     "juejin":        ("juejin-credentials.json",         "juejin.cn"),
     "note":          ("note-credentials.json",           "note.com"),
-    "pikabu":        ("pikabu-credentials.json",         "pikabu"),
-    "segmentfault":  ("segmentfault-credentials.json",   "segmentfault.com"),
     "substack":      ("substack-credentials.json",       "substack.com"),
-    "zhihu":         ("zhihu-credentials.json",          "zhihu.com"),
 }
 _PASTE_BLOB_MAX_BYTES = 100_000
 
 # USERPASS — module path for dispatch; call module.store_credentials(config, u, p).
 _USERPASS_MODULES: dict[str, str] = {
     "livejournal": "backlink_publisher.publishing.adapters.livejournal_api",
-    "cnblogs":     "backlink_publisher.publishing.adapters.cnblogs_api",
 }
 
 

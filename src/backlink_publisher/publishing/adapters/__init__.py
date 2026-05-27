@@ -33,7 +33,6 @@ from .._manifests import (
     DEVTO_MANIFEST,
     GHPAGES_MANIFEST,
     HASHNODE_MANIFEST,
-    JIANSHU_MANIFEST,
     JUEJIN_MANIFEST,
     LINKEDIN_MANIFEST,
     LIVEJOURNAL_MANIFEST,
@@ -73,7 +72,6 @@ from .csdn_api import CSDNAPIAdapter
 from .linkedin_api import LinkedInAPIAdapter
 from .substack_api import SubstackAPIAdapter
 from .note_api import NoteAPIAdapter
-from .jianshu_api import JianshuAPIAdapter
 from .rentry_api import RentryAPIAdapter
 
 # Import the Unit 4a velog browser recipe module so it can populate
@@ -166,14 +164,6 @@ register(
     rationale=_R["note"],
     referral_value="high",
     **NOTE_MANIFEST,
-)
-register(
-    "jianshu",
-    JianshuAPIAdapter,
-    dofollow=False,  # link.jianshu.com/go redirect interstitial strips equity
-    rationale=_R["jianshu"],
-    referral_value="high",
-    **JIANSHU_MANIFEST,
 )
 register(
     "rentry",

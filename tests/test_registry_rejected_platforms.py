@@ -15,13 +15,14 @@ from backlink_publisher.publishing.registry import _REJECTED_PLATFORMS
 
 
 class TestRejectedPlatformsMap:
-    def test_initial_entries_present(self) -> None:
+    def test_rejected_entries(self) -> None:
         # PR #108 → #109 negative-knowledge corpus.
-        # devto removed in Plan 2026-05-21-001 Unit 4b (chrome-publish channel).
-        # mastodon removed in Unit 4c (chrome-publish channel).
-        # wordpresscom removed in Phase 3 expansion.
-        # All rejected platforms have now been un-rejected and registered.
-        assert len(_REJECTED_PLATFORMS) == 0
+        # devto/mastodon/wordpresscom were all un-rejected and re-registered.
+        # jianshu re-rejected 2026-05-27 (hard removal): nofollow redirect
+        #   interstitial strips equity + operator has no account. The entry
+        #   arms register()'s re-add tripwire.
+        assert "jianshu" in _REJECTED_PLATFORMS
+        assert len(_REJECTED_PLATFORMS) == 1
 
     def test_every_rationale_meets_length_floor(self) -> None:
         # Mirrors monolith_budget.toml rationale discipline. Loop assertion

@@ -408,9 +408,6 @@ CSDN_MANIFEST: dict[str, Any] = dict(
 HASHNODE_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="Hashnode", domain="hashnode.com", category="dev-blog"),
 )
-JIANSHU_MANIFEST: dict[str, Any] = dict(
-    ui=UiMeta(display_name="简书", domain="jianshu.com", category="general-blog"),
-)
 JUEJIN_MANIFEST: dict[str, Any] = dict(
     ui=UiMeta(display_name="掘金", domain="juejin.cn", category="dev-blog"),
 )
