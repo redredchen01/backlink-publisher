@@ -116,7 +116,7 @@ def _rewrite_cli_cmd(cmd):
 _MAX_SURFACED_ERROR = 4000
 
 
-def surface_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
+def surface_cli_error(stderr: str | None, *, limit: int = _MAX_SURFACED_ERROR) -> str:
     """Banner-stripped, length-bounded CLI error text for operator display.
 
     Replaces the old ``stderr[:200]`` truncation: strips the config_echo banner
@@ -129,7 +129,7 @@ def surface_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
     return cleaned
 
 
-def run_pipe_capture(cmd, stdin):
+def run_pipe_capture(cmd, stdin) -> dict[str, str | int]:
     """Run a pipeline command and return ``{stdout, stderr, returncode}``.
 
     The non-raising sibling of :func:`run_pipe`. Callers that must branch on the

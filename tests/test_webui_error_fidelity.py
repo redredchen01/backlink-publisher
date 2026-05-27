@@ -98,3 +98,15 @@ def test_run_pipe_still_raises_on_nonzero():
     with patch("webui_app.helpers.cli_runner.subprocess.run", return_value=fake):
         with pytest.raises(Exception, match="boom"):
             run_pipe(["validate-backlinks"], "{}\n")
+
+
+def test_run_pipe_silent_failure_raises_diagnostic():
+    """run_pipe's silent-failure guard survives the run_pipe_capture refactor:
+    exit 0 + empty stdout/stderr + non-empty stdin = a broken entry-point
+    (missing __main__.py / __name__ guard), which must raise a real diagnostic
+    rather than be consumed as success."""
+    from webui_app.helpers.cli_runner import run_pipe
+    fake = _FakeCompleted(stdout="", stderr="", returncode=0)
+    with patch("webui_app.helpers.cli_runner.subprocess.run", return_value=fake):
+        with pytest.raises(Exception, match="produced no output"):
+            run_pipe(["validate-backlinks"], "{}\n")
