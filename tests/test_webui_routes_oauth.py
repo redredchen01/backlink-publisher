@@ -18,9 +18,9 @@ as a generic failure) are now fixed in ``oauth.py`` and asserted by
 
 CSRF note (see reference_webui_csrf_architecture): these POST routes are gated by
 the app-level ``_global_csrf_guard`` (``session['csrf_token']`` vs form
-``csrf_token`` / ``X-CSRFToken``). We seed ``session['csrf_token']`` directly —
-NOT the Medium-blueprint ``medium_csrf`` key. The GET callback endpoint ends in
-``oauth_callback`` and is CSRF-exempt, so it uses the plain client.
+``csrf_token`` / ``X-CSRFToken``). We seed ``session['csrf_token']`` directly.
+The GET callback endpoint ends in ``oauth_callback`` and is CSRF-exempt, so it
+uses the plain client.
 
 Mock-path note (feedback_mock_patch_paths_after_extraction): ``Flow``,
 ``save_blogger_token`` and ``json_from_creds`` are imported lazily *inside* the

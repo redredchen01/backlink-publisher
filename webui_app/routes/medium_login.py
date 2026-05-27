@@ -1,20 +1,24 @@
 """Medium browser-login POST routes: launch / probe / clear.
 
-CSRF: double-submit cookie pattern (no Flask-WTF dependency).
-Existing routes in this project have no CSRF; these three are the first
-to carry it because they spawn OS-level browser processes.
-SEC-001 mitigation — Plan 013.
+CSRF is enforced globally by ``_global_csrf_guard`` in ``create_app()`` (it
+aborts 403 on any POST without a valid canonical ``csrf_token`` before this
+blueprint runs), so these routes carry no bespoke CSRF layer. Because they
+spawn OS-level browser processes and delete the persistent login profile, each
+POST additionally guards origin like the ``bind`` routes do:
+``_refuse_when_allow_network()`` + ``_check_bind_origin_or_abort()``.
 """
 
 from __future__ import annotations
 
-import secrets
-
-from flask import Blueprint, redirect, request, session
+from flask import Blueprint, redirect, session
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher.config import load_config
 
+from ..helpers.security import (
+    _check_bind_origin_or_abort,
+    _refuse_when_allow_network,
+)
 from ..medium_login import (
     clear_browser_profile,
     launch_login_window,
@@ -23,48 +27,14 @@ from ..medium_login import (
 
 bp = Blueprint("medium_login", __name__)
 
-_CSRF_COOKIE = "medium_csrf"
-_CSRF_FIELD = "_csrf_token"
-
-
-# ── CSRF helpers ──────────────────────────────────────────────────────────────
-
-def _ensure_csrf_token() -> str:
-    """Return the CSRF token, creating it on first call."""
-    if _CSRF_COOKIE not in session:
-        session[_CSRF_COOKIE] = secrets.token_hex(32)
-    return session[_CSRF_COOKIE]
-
-
-def _validate_csrf() -> bool:
-    session_token = session.get(_CSRF_COOKIE)
-    form_token = request.form.get(_CSRF_FIELD)
-    return bool(session_token and form_token and secrets.compare_digest(
-        session_token, form_token
-    ))
-
-
-@bp.before_request
-def _csrf_check() -> None:
-    if request.method == "POST":
-        if not _validate_csrf():
-            return redirect(
-                "/settings?flash_type=danger"
-                "&flash_msg=CSRF token 无效，请刷新页面后重试#channel-medium"
-            )
-
-
-# Jinja global so templates can call {{ medium_csrf_token() }}
-@bp.app_context_processor
-def _inject_csrf() -> dict:
-    return {"medium_csrf_token": _ensure_csrf_token}
-
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @bp.route("/settings/medium/launch-browser-login", methods=["POST"])
 def medium_launch_browser_login():
     """Open a headed Chromium for the user to log in to Medium."""
+    _refuse_when_allow_network()
+    _check_bind_origin_or_abort()
     cfg = load_config()
     try:
         result = launch_login_window(cfg)
@@ -86,6 +56,8 @@ def medium_launch_browser_login():
 @bp.route("/settings/medium/probe-browser-login", methods=["POST"])
 def medium_probe_browser_login():
     """Probe Medium login state via a short Playwright navigation."""
+    _refuse_when_allow_network()
+    _check_bind_origin_or_abort()
     cfg = load_config()
     try:
         result = probe_login_status(cfg)
@@ -112,6 +84,8 @@ def medium_probe_browser_login():
 @bp.route("/settings/medium/clear-browser-login", methods=["POST"])
 def medium_clear_browser_login():
     """Delete the persistent Chromium profile (clears stored login cookies)."""
+    _refuse_when_allow_network()
+    _check_bind_origin_or_abort()
     cfg = load_config()
     try:
         clear_browser_profile(cfg)
