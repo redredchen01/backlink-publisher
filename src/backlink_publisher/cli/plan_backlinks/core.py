@@ -61,6 +61,23 @@ from ._payload import (                            # noqa: F401
 )
 
 
+def _cell_gate_drop(
+    main_domain: str,
+    platform: str,
+    cell_assignments: dict[str, list[str]],
+) -> bool:
+    """Return True if the row should be dropped by the cell admission gate.
+
+    A row is dropped only when the site is enrolled (has a ``[cells.*]``
+    entry) AND the platform is not in that cell. Sites without a cell entry
+    pass through unchanged — opt-in semantics. An empty ``cell_assignments``
+    dict never drops any row.
+    """
+    if main_domain not in cell_assignments:
+        return False  # unenrolled site — unrestricted
+    return platform not in cell_assignments[main_domain]
+
+
 def _emit_link_count_recon(payload: dict[str, Any], *, branch: str) -> None:
     links = payload.get("links") or []
     kinds = sorted({lk.get("kind", "?") for lk in links})
@@ -274,6 +291,23 @@ def main(argv: list[str] | None = None) -> None:
     validation_drops: list[int] = []
     generation_drops: list[int] = []
     content_gate_drops: list[int] = []
+    cell_gate_drops: list[int] = []
+
+    # ── Cell gate: always-on enrolled-vs-unrestricted summary ─────────────
+    # Emitted before the row loop so an accidentally-unenrolled site
+    # (silent full mesh) is visible even on a zero-drop run.
+    cells = cfg.cell_assignments
+    if cells or rows:
+        run_domains = {row.get("main_domain", "") for row in rows}
+        enrolled = sorted(run_domains & set(cells))
+        unrestricted = sorted(run_domains - set(cells))
+        plan_logger.recon(
+            "cell_gate_summary",
+            enrolled=enrolled,
+            unrestricted=unrestricted,
+            n_enrolled=len(enrolled),
+            n_unrestricted=len(unrestricted),
+        )
 
     fetch_verify_enabled = not args.no_fetch_verify
 
@@ -303,6 +337,20 @@ def main(argv: list[str] | None = None) -> None:
         if errs:
             all_errors.extend(errs)
             validation_drops.append(line_num)
+            continue
+        # ── Cell admission gate (R7-minimal) ──────────────────────────────
+        # Opt-in: only enrolled sites are gated. A row whose platform is
+        # not in its site's cell is dropped with a recon warning; exit 0.
+        # Unenrolled sites pass through unchanged (no config entry = no gate).
+        if _cell_gate_drop(row.get("main_domain", ""), row.get("platform", ""), cells):
+            plan_logger.recon(
+                "cell_gate_drop",
+                main_domain=row.get("main_domain", ""),
+                platform=row.get("platform", ""),
+                line_num=line_num,
+                cell=cells.get(row.get("main_domain", ""), []),
+            )
+            cell_gate_drops.append(line_num)
             continue
         try:
             for payload in _dispatch_row(
@@ -354,11 +402,13 @@ def main(argv: list[str] | None = None) -> None:
             "validation": len(validation_drops),
             "generation": len(generation_drops),
             "content_gate": len(content_gate_drops),
+            "cell_gate": len(cell_gate_drops),
         },
         dropped_line_numbers={
             "validation": validation_drops,
             "generation": generation_drops,
             "content_gate": content_gate_drops,
+            "cell_gate": cell_gate_drops,
         },
     )
 
