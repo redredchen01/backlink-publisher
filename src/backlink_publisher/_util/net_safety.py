@@ -10,8 +10,9 @@ import ipaddress
 import socket
 from typing import Optional
 from urllib.error import URLError
-from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, OpenerDirector, build_opener
+
+from backlink_publisher._util.url import safe_urlparse
 
 
 _BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
@@ -69,7 +70,12 @@ def _resolve_host_ips(host: str) -> tuple[list[str], Optional[str]]:
 
 
 def _check_url_for_ssrf(url: str) -> Optional[str]:
-    parsed = urlparse(url)
+    # Never-raises: a malformed authority (unterminated IPv6) parses to None and
+    # is treated as a *blocked* "invalid_host" (fail-closed) — _check_once calls
+    # this on untrusted URLs and must never leak a ValueError. Plan 006 R3b.
+    parsed = safe_urlparse(url)
+    if parsed is None:
+        return "invalid_host"
     host = parsed.hostname
     if not host:
         return "invalid_host"
@@ -90,9 +96,19 @@ def _check_url_for_ssrf(url: str) -> Optional[str]:
 
 class _SSRFSafeRedirectHandler(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        old_scheme = urlparse(req.full_url).scheme
-        new_scheme = urlparse(newurl).scheme
-        if old_scheme == "https" and new_scheme == "http":
+        # ``newurl`` is the server-controlled Location header (untrusted) — a
+        # malformed authority must block the hop (URLError), not crash the
+        # downgrade check with a ValueError. Guard it before any parse use.
+        # Plan 006 R3c. (``req.full_url`` should not be malformed in normal
+        # operation — urllib's Request(...) raises at construction on a malformed
+        # URL, so a Request object with a bad full_url should not exist — the
+        # safe_urlparse on it below is defence-in-depth against that assumption.)
+        new_parsed = safe_urlparse(newurl)
+        if new_parsed is None:
+            raise URLError("ssrf_redirect:invalid_host")
+        old_parsed = safe_urlparse(req.full_url)
+        old_scheme = old_parsed.scheme if old_parsed is not None else ""
+        if old_scheme == "https" and new_parsed.scheme == "http":
             raise URLError("ssrf_https_downgrade")
         blocked = _check_url_for_ssrf(newurl)
         if blocked:

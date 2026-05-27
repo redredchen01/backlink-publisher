@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
 
 import requests
 from backlink_publisher.http import get as http_get
 
 from backlink_publisher._util.errors import ExternalServiceError, InputValidationError
-from backlink_publisher._util.url import validate_https_url
+from backlink_publisher._util.url import safe_hostname, validate_https_url
 from backlink_publisher.publishing.adapters.retry import retry_transient_call
 
 _USER_AGENT = "backlink-publisher-scraper/0.2.0"
@@ -36,7 +35,7 @@ def _block_if_private(url: str) -> None:
     """Raise ``InputValidationError`` if any resolved IP is private,
     loopback, or link-local. Treats DNS resolution failure as transient
     (raises ``ExternalServiceError`` so the retry path can decide)."""
-    host = urlparse(url).hostname
+    host = safe_hostname(url)
     if not host:
         raise InputValidationError(f"URL has no resolvable host: {url!r}")
     try:
