@@ -181,6 +181,19 @@ class MastodonConfig:
     instance_url: str = ""
 
 
+def _velog_default_cookies_path() -> Path:
+    """Lazy resolver for the default Velog cookies path.
+
+    Uses the env-aware ``_config_dir()`` so tests and CI land in the
+    sandbox, not the operator's real ``~/.config``.  The lambda in
+    ``VelogConfig.cookies_path``'s ``default_factory`` calls this function
+    at instance-creation time, never at import time.
+    """
+    from backlink_publisher import config as _cfg
+
+    return _cfg._config_dir() / "velog-cookies.json"
+
+
 @dataclass(frozen=True)
 class VelogConfig:
     """Velog adapter configuration.
@@ -192,10 +205,7 @@ class VelogConfig:
     """
 
     cookies_path: Path = field(
-        default_factory=lambda: Path.home()
-        / ".config"
-        / "backlink-publisher"
-        / "velog-cookies.json"
+        default_factory=lambda: _velog_default_cookies_path()
     )
 
 
