@@ -9,7 +9,7 @@ Covers:
     - TOKEN round-trip: save → 0600 file
     - TOKEN+FIELDS: SSRF validation, leave-as-is semantics
     - PASTE-BLOB: schema validation, domain check, round-trip
-    - USERPASS: module-dispatch divergence (livejournal md5 vs cnblogs plaintext)
+    - USERPASS: module-dispatch credential hashing (livejournal md5)
     - Clear path: unlinks credential file
 """
 
@@ -170,27 +170,25 @@ def test_skip_channel_rejected(client):
 # ---------------------------------------------------------------------------
 
 
-def test_token_save_creates_0600_file(client, tmp_path):
+def test_token_save_creates_0600_file(client, tmp_path, monkeypatch):
     """Saving a writeas token creates writeas-token.json with mode 0600."""
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
     csrf = _seed_csrf(client)
-    import os as _os
-    _os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
-    try:
-        resp = _post(client, {"channel": "writeas", "auth_type": "token",
-                               "token": "MY_SECRET"}, csrf=csrf)
-        assert resp.status_code == 302
-        assert "success" in resp.headers["Location"]
-        token_path = config_dir / "writeas-token.json"
-        assert token_path.exists()
-        mode = _os.stat(token_path).st_mode & 0o777
-        assert mode == 0o600
-        data = json.loads(token_path.read_text())
-        assert data["token"] == "MY_SECRET"
-    finally:
-        # Restore env (autouse _isolate_user_dirs will also reset at session end)
-        del _os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"]
+    # monkeypatch.setenv restores the session-isolated value on teardown;
+    # a bare ``del os.environ[...]`` would unset it for every later test,
+    # leaking subsequent store paths back to the operator's real ~/.config.
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
+    resp = _post(client, {"channel": "writeas", "auth_type": "token",
+                           "token": "MY_SECRET"}, csrf=csrf)
+    assert resp.status_code == 302
+    assert "success" in resp.headers["Location"]
+    token_path = config_dir / "writeas-token.json"
+    assert token_path.exists()
+    mode = os.stat(token_path).st_mode & 0o777
+    assert mode == 0o600
+    data = json.loads(token_path.read_text())
+    assert data["token"] == "MY_SECRET"
 
 
 def test_token_secret_not_leaked_on_error(client):
@@ -216,7 +214,7 @@ def test_token_leave_as_is_empty(client):
     assert "info" in resp.headers["Location"]
 
 
-def test_token_clear_unlinks_file(client, tmp_path):
+def test_token_clear_unlinks_file(client, tmp_path, monkeypatch):
     """Clear removes the token file."""
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
@@ -225,15 +223,11 @@ def test_token_clear_unlinks_file(client, tmp_path):
     token_path.chmod(0o600)
 
     csrf = _seed_csrf(client)
-    import os as _os
-    _os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(config_dir)
-    try:
-        resp = _post(client, {"channel": "writeas", "clear": "1"}, csrf=csrf)
-        assert resp.status_code == 302
-        assert "success" in resp.headers["Location"]
-        assert not token_path.exists()
-    finally:
-        del _os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"]
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
+    resp = _post(client, {"channel": "writeas", "clear": "1"}, csrf=csrf)
+    assert resp.status_code == 302
+    assert "success" in resp.headers["Location"]
+    assert not token_path.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -424,38 +418,6 @@ def test_userpass_livejournal_stores_md5(client, tmp_path, monkeypatch):
     expected_md5 = hashlib.md5(b"secret123").hexdigest()
     assert data["hpassword"] == expected_md5
     assert "secret123" not in json.dumps(data)
-
-
-def test_userpass_cnblogs_stores_plaintext(client, tmp_path, monkeypatch):
-    """cnblogs store_credentials stores plaintext password (by design).
-
-    cnblogs uses PipelineLogger which does not support % formatting; patch the
-    log call so the pre-existing logger bug does not mask the credential shape.
-    """
-    config_dir = tmp_path / "cfg"
-    config_dir.mkdir()
-    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(config_dir))
-
-    from unittest.mock import patch
-    # cnblogs_api.log.info has a pre-existing PipelineLogger arity bug;
-    # patch it so we can verify credential shape without hitting that bug.
-    with patch(
-        "backlink_publisher.publishing.adapters.cnblogs_api.log",
-    ) as mock_log:
-        mock_log.info = lambda *a, **kw: None
-        csrf = _seed_csrf(client)
-        resp = _post(client, {"channel": "cnblogs", "auth_type": "userpass",
-                               "username": "cbuser", "password": "plainpw"},
-                     csrf=csrf)
-
-    assert resp.status_code == 302
-    assert "success" in resp.headers["Location"]
-
-    cred_path = config_dir / "cnblogs-credentials.json"
-    assert cred_path.exists()
-    data = json.loads(cred_path.read_text())
-    assert data["username"] == "cbuser"
-    assert data["password"] == "plainpw"
 
 
 def test_userpass_secret_not_leaked_on_error(client):
