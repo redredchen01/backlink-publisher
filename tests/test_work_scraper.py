@@ -545,6 +545,33 @@ class TestFetchUrlsHtmlFallback:
             )
         assert result == ["https://target.example.com/work/1"]
 
+    def test_malformed_href_skipped_not_fatal(self):
+        # A single malformed-IPv6 href must NOT abort discovery — the valid
+        # links survive (Plan 2026-05-27-006 R9). Before the fix, absolutize ->
+        # urljoin raised ValueError on the malformed href and crashed the scrape.
+        html = (
+            b"<html><body>"
+            b"<a href='https://target.example.com/work/1'>ok</a>"
+            b"<a href='http://[invalid/work/bad'>malformed</a>"
+            b"<a href='https://target.example.com/work/2'>ok2</a>"
+            b"</body></html>"
+        )
+
+        def _side_effect(url, **_kw):
+            if url.endswith("/sitemap.xml") or url.endswith("/sitemap_index.xml"):
+                return _make_response(status=404, body=b"")
+            return _html_resp(html)
+
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
+            result = fetch_work_urls_from_list(
+                "https://target.example.com/list",
+                main_url="https://target.example.com/",
+            )
+        assert result == [
+            "https://target.example.com/work/1",
+            "https://target.example.com/work/2",
+        ]
+
     def test_custom_blocklist_overrides_default(self):
         html = (
             b"<html><body>"

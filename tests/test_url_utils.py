@@ -151,6 +151,14 @@ class TestAbsolutize:
     def test_empty_href_returns_empty(self):
         assert absolutize("https://site.com/", "") == ""
 
+    @pytest.mark.parametrize("href", _MALFORMED_URLS)
+    def test_malformed_href_returns_empty_never_raises(self, href):
+        # urljoin raises ValueError on malformed IPv6 just like urlparse.
+        assert absolutize("https://site.com/", href) == ""
+
+    def test_malformed_base_returns_empty_never_raises(self):
+        assert absolutize("http://[invalid", "/page") == ""
+
 
 # ── strip_fragment_query ────────────────────────────────────────────────────
 
@@ -345,3 +353,27 @@ class TestSafeHostname:
     def test_hostless_url_returns_none(self):
         # parseable but no authority → no hostname
         assert safe_hostname("mailto:x@y.com") is None
+
+
+# ── scrape-path helpers never-raise on malformed input (Unit 2) ─────────────
+
+
+class TestScrapePathHelpersNeverRaise:
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_is_same_host_malformed_a_returns_false(self, url):
+        assert is_same_host(url, "https://site.com") is False
+
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_is_same_host_malformed_b_returns_false(self, url):
+        assert is_same_host("https://site.com", url) is False
+
+    def test_is_same_host_valid_pair_unchanged(self):
+        assert is_same_host("https://site.com/a", "https://www.site.com/b") is True
+        assert is_same_host("https://a.com", "https://b.com") is False
+
+    @pytest.mark.parametrize("url", _MALFORMED_URLS)
+    def test_strip_fragment_query_malformed_returns_empty(self, url):
+        assert strip_fragment_query(url) == ""
+
+    def test_strip_fragment_query_valid_still_strips(self):
+        assert strip_fragment_query("https://s.com/p?q=1#frag") == "https://s.com/p"

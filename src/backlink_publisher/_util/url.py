@@ -109,8 +109,12 @@ def is_same_host(a: str, b: str) -> bool:
     """
     if not a or not b:
         return False
-    netloc_a = urlparse(a).netloc
-    netloc_b = urlparse(b).netloc
+    parsed_a = safe_urlparse(a)
+    parsed_b = safe_urlparse(b)
+    if parsed_a is None or parsed_b is None:
+        return False
+    netloc_a = parsed_a.netloc
+    netloc_b = parsed_b.netloc
     if not netloc_a or not netloc_b:
         return False
     return _normalize_host_for_compare(netloc_a) == _normalize_host_for_compare(netloc_b)
@@ -128,18 +132,31 @@ def absolutize(base: str, href: str) -> str:
     """Resolve a possibly-relative ``href`` against ``base``.
 
     Wraps :func:`urllib.parse.urljoin` with empty-input safety. Returns
-    ``""`` when ``href`` is empty so callers can filter cleanly.
+    ``""`` when ``href`` is empty so callers can filter cleanly. ``urljoin``
+    raises ``ValueError`` on a malformed authority (unterminated IPv6) in either
+    ``base`` or ``href``; that is folded to ``""`` so a single malformed scraped
+    href is skipped, not fatal to the whole scrape (Plan 2026-05-27-006 R6).
     """
     if not href:
         return ""
-    return urljoin(base, href)
+    try:
+        return urljoin(base, href)
+    except ValueError:
+        return ""
 
 
 def strip_fragment_query(url: str) -> str:
-    """Return ``url`` with fragment AND query removed (path preserved)."""
+    """Return ``url`` with fragment AND query removed (path preserved).
+
+    Malformed input (unterminated IPv6) returns ``""`` instead of raising, so a
+    scraped href that cannot be parsed is skipped downstream (the empty result
+    makes ``is_same_host`` return ``False``) — Plan 2026-05-27-006 R8.
+    """
     if not url:
         return ""
-    parsed = urlparse(url)
+    parsed = safe_urlparse(url)
+    if parsed is None:
+        return ""
     return urlunparse((
         parsed.scheme,
         parsed.netloc,
