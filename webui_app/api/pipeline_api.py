@@ -113,6 +113,30 @@ def _typed_error_result(stderr: str, fallback_label: str) -> PipeResult:
 # ── helpers used by both PipelineAPI and external callers (scheduler) ──────
 
 
+def _parse_jsonl_rows(jsonl_str: str) -> list[dict[str, Any]]:
+    """Parse a JSONL **string** into dict rows for in-process engine calls.
+
+    Used by the in-process ``validate`` path: the engine takes ``list[dict]``,
+    not a stream, and we must NOT use ``_util.jsonl.read_jsonl`` here because it
+    reads ``sys.stdin`` and ``SystemExit``s on malformed/empty input — both wrong
+    inside the long-lived Flask process. Mirrors ``PipeResult.rows``: blank lines
+    skipped, non-dict / non-JSON lines dropped (the engine's per-row gates surface
+    the real validation errors).
+    """
+    rows: list[dict[str, Any]] = []
+    for line in (jsonl_str or "").strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
 def parse_publish_results(jsonl_str: str) -> list[dict[str, Any]]:
     """Parse publish-backlinks JSONL stdout into result rows.
 
@@ -253,11 +277,69 @@ class PipelineAPI:
         *,
         no_check_urls: bool = True,
     ) -> PipeResult:
-        """Run ``validate-backlinks`` with optional ``--no-check-urls``."""
-        cmd = ["validate-backlinks"]
-        if no_check_urls:
-            cmd.append("--no-check-urls")
-        return self._invoke(cmd, plans_jsonl, "validate-backlinks failed")
+        """Validate planned-backlink JSONL **in-process** (thin-WebUI Phase 2 U6).
+
+        Replaces the old ``validate-backlinks`` subprocess with a direct call to
+        the pure :func:`validate.engine.validate_rows`. Output data + typed error
+        match the Unit 5 subprocess golden by construction (shared engine).
+
+        Hazard handling (audit ``2026-05-27-inprocess-global-state-audit``):
+        - H1: we do NOT call ``set_log_level`` — the engine never touches it and
+          the shell's call is intentionally not replicated, so this in-process
+          path runs at ambient verbosity and can't flip the scheduler thread's
+          logger level.
+        - H3: the engine never writes ``sys.stdout``/``sys.stderr``; we build the
+          stdout JSONL ourselves from ``outcome.outputs``.
+
+        Config is loaded with the SAME fail-soft tolerance as the CLI shell via
+        the shared ``load_config_tolerant`` helper (engine stays pure — config is
+        passed in). ``no_check_urls`` mirrors the CLI flag: True → skip URL checks.
+        """
+        import io
+
+        from backlink_publisher._util.errors import ExternalServiceError
+        from backlink_publisher._util.jsonl import write_jsonl
+        from backlink_publisher.validate.engine import (
+            load_config_tolerant,
+            validate_rows,
+        )
+
+        rows = _parse_jsonl_rows(plans_jsonl)
+        config = load_config_tolerant()
+
+        def _jsonl(outputs: list[dict[str, Any]]) -> str:
+            buf = io.StringIO()
+            write_jsonl(outputs, buf)
+            return buf.getvalue()
+
+        try:
+            outcome = validate_rows(rows, config, check_urls=not no_check_urls)
+        except ExternalServiceError as exc:
+            return PipeResult(
+                success=False,
+                error=f"URL check failed: {exc}",
+                error_class="ExternalServiceError",
+                exit_code=4,
+            )
+
+        if outcome.errors:
+            message = (
+                f"validation failed: {len(outcome.errors)} errors "
+                f"({len(outcome.outputs)} passed, {outcome.failed_count} failed)"
+            )
+            return PipeResult(
+                stdout=_jsonl(outcome.outputs),
+                success=False,
+                error=message,
+                error_class="InputValidationError",
+                exit_code=2,
+            )
+
+        return PipeResult(
+            stdout=_jsonl(outcome.outputs),
+            success=True,
+            exit_code=0,
+        )
 
     # ── publish ──────────────────────────────────────────────────────────
 

@@ -50,8 +50,8 @@ ceiling = 260
 rationale = "Three-tier decomposition (2026-05-26): schema (frontmatter/claims/filename-date-lock) moved to _plan_check_schema.py (166 SLOC), git resolution (fetch freshness, path/sha checks, stderr classification) to _plan_check_git.py (148 SLOC), output formatting (JSON/human/RECON lines) to _plan_check_format.py (76 SLOC). plan_check.py now holds main() + re-exports only at 227 SLOC. Ceiling 260 = round_up_to_10(227+30) per policy."
 
 [files."src/backlink_publisher/cli/validate_backlinks.py"]
-ceiling = 200
-rationale = "_enhance_payload (101 lines) + its exclusive helpers (_HrefCollector, _extract_hrefs_from_html, _check_main_domain_in_html, _resolve_branded_pool, _nfc_normalize_in_place, _detect_row_body_language) extracted to _validate_payload.py (2026-05-22). validate_backlinks.py dropped from 323 to 168 SLOC — holds _row_field_text, re-exports from _validate_payload, and main() only. Ceiling 200 = round_up_to_10(168+30)."
+ceiling = 150
+rationale = "thin-WebUI Phase 2 Unit 6 (2026-05-27): the pure validation kernel (URL-collection + check_urls_strict + the per-row loop) extracted to validate/engine.py so the in-process PipelineAPI.validate path shares it. validate_backlinks.py dropped from 168 to 116 SLOC — now argparse + set_log_level + load_config_tolerant + config_echo banner + read_jsonl + a single validate_rows call + recon/emit_envelope_and_exit shell only. Ceiling 150 = round_up_to_10(116+30)."
 
 [files."src/backlink_publisher/cli/report_anchors.py"]
 ceiling = 130

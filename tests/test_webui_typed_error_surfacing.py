@@ -49,11 +49,14 @@ def test_pipeline_api_parses_typed_envelope():
 def test_pipeline_api_quarantine_when_no_envelope():
     # An argparse usage error / crash carries no envelope → QUARANTINE: loud,
     # full banner-stripped text, flagged "unrecognized" (never empty/truncated).
+    # Uses publish() — a still-subprocess method — to exercise the run_pipe →
+    # _typed_error_result bridge. (validate() is now in-process per thin-WebUI
+    # Phase 2 Unit 6, so it no longer routes through run_pipe.)
     stderr = _BANNER + "error: unrecognized arguments: --bogus\n"
     with mock.patch(
         "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
     ):
-        result = PipelineAPI().validate("{}")
+        result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.success is False
     assert result.error_class == "unrecognized"
     assert "unrecognized arguments: --bogus" in result.error
@@ -73,12 +76,13 @@ def test_pipeline_api_success_has_no_error():
 
 def test_pipeline_api_long_error_not_truncated():
     # Regression for the stderr[:200] bug: a long typed message survives in full.
+    # publish() exercises the run_pipe bridge (validate() is now in-process, U6).
     long_msg = "validation failed: " + "x" * 600
     stderr = _stderr_with_envelope("InputValidationError", 2, long_msg)
     with mock.patch(
         "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
     ):
-        result = PipelineAPI().validate("{}")
+        result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.error == long_msg
     assert len(result.error) > 200  # the old [:200] truncation is gone
 
@@ -104,12 +108,13 @@ def test_describe_cli_error_falls_back_to_full_text():
 def test_pipeline_api_caps_oversized_envelope_message():
     # A huge envelope message (validate aggregate / untrusted snippet) must be
     # bounded the same as surface_cli_error — it flows into logs + history JSON.
+    # publish() exercises the run_pipe bridge (validate() is now in-process, U6).
     huge = "x" * 50_000
     stderr = _stderr_with_envelope("InputValidationError", 2, huge)
     with mock.patch(
         "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
     ):
-        result = PipelineAPI().validate("{}")
+        result = PipelineAPI().publish("{}", "medium", "draft")
     assert len(result.error) < len(huge)
     assert result.error.endswith("…(truncated)")
     assert len(result.error) <= 4000 + len(" …(truncated)")

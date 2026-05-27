@@ -268,6 +268,67 @@ def test_validate_bad_config_fail_soft(tmp_path):
     assert res.envelope is None
 
 
+# ---------------------------------------------------------------------------
+# In-process parity (thin-WebUI Phase 2 Unit 6): PipelineAPI.validate now runs
+# the engine in-process. Its data + typed-error MUST match the subprocess
+# golden above. We compare on stable structural properties + parsed JSONL rows
+# (not byte-identical stdout — the only differences are the run-invariant
+# ``checked_at`` timestamps, which we normalize away).
+# ---------------------------------------------------------------------------
+
+
+def _normalize_validate_rows(rows: list[dict]) -> list[dict]:
+    """Drop the run-variant ``validation.checked_at`` so two runs compare equal."""
+    out = []
+    for row in rows:
+        row = json.loads(json.dumps(row))  # deep copy
+        if isinstance(row.get("validation"), dict):
+            row["validation"].pop("checked_at", None)
+        out.append(row)
+    return out
+
+
+def test_validate_inprocess_matches_subprocess_good_payload(cfg_dir):
+    """In-process validate good-payload rows == subprocess golden rows."""
+    from webui_app.api.pipeline_api import PipelineAPI
+
+    stdin = json.dumps(_valid_validate_payload()) + "\n"
+    sub = _run_cli(
+        "validate-backlinks", ["--no-validate-url-check"],
+        stdin=stdin, extra_env=_env(cfg_dir),
+    )
+    assert sub.returncode == 0, f"stderr: {sub.stderr}"
+
+    res = PipelineAPI().validate(stdin, no_check_urls=True)
+    assert res.success is True
+    assert res.exit_code == 0
+    assert res.error is None
+    assert _normalize_validate_rows(res.rows) == _normalize_validate_rows(
+        sub.jsonl_rows()
+    )
+
+
+def test_validate_inprocess_matches_subprocess_malformed(cfg_dir):
+    """In-process validate malformed-payload → same typed error/exit as golden."""
+    from webui_app.api.pipeline_api import PipelineAPI
+
+    stdin = json.dumps({"id": "r0", "platform": "linkedin"}) + "\n"
+    sub = _run_cli(
+        "validate-backlinks", ["--no-validate-url-check"],
+        stdin=stdin, extra_env=_env(cfg_dir),
+    )
+    assert sub.returncode == 2
+    sub_env = sub.envelope
+    assert sub_env is not None
+
+    res = PipelineAPI().validate(stdin, no_check_urls=True)
+    assert res.success is False
+    assert res.error_class == sub_env.error_class == "InputValidationError"
+    assert res.exit_code == sub_env.exit_code == 2
+    assert res.rows == []  # zero passing rows → no JSONL data, matching golden
+    assert "validation failed" in (res.error or "")
+
+
 # ===========================================================================
 # plan-backlinks  (network-free via --no-fetch-verify)
 # ===========================================================================

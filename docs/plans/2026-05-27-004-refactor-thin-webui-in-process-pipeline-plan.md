@@ -575,7 +575,7 @@ in-process code exists.
 runs green against the current subprocess path and is ready to assert against the
 in-process path in Unit 6.
 
-- [ ] **Unit 6: `validate-backlinks` in-process pilot (engine extraction)**
+- [x] **Unit 6: `validate-backlinks` in-process pilot (engine extraction)**
 
 **Goal:** Extract `validate-backlinks` core into a pure engine; `PipelineAPI.validate()`
 dispatches in-process; CLI shell calls the engine. Prove the pattern end-to-end
