@@ -40,8 +40,13 @@ def _handle_discover(args: argparse.Namespace) -> int:  # pragma: no cover - stu
     raise NotImplementedError("comment discover not yet implemented (Unit 5)")
 
 
-def _handle_import(args: argparse.Namespace) -> int:  # pragma: no cover - stub
-    raise NotImplementedError("comment import not yet implemented (Unit 3)")
+def _handle_import(args: argparse.Namespace) -> int:
+    # Lazy, function-local import keeps `comment --help` and sibling verbs from
+    # paying io_import's cost (and keeps the CLI module's import graph minimal).
+    from backlink_publisher.comment_outreach.io_import import import_targets
+
+    import_targets(args.input, args.output)
+    return EXIT_OK
 
 
 def _handle_qualify(args: argparse.Namespace) -> int:  # pragma: no cover - stub
@@ -74,9 +79,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Fetch operator-supplied exact public URLs and detect comment regions",
     )
     discover_p.add_argument(
-        "--input",
-        metavar="PATH",
-        help="Seed JSONL file (default: stdin)",
+        "--input", "-i", type=argparse.FileType("r"), default=None,
+        help="Seed JSONL (default: stdin)",
     )
     discover_p.set_defaults(handler=_handle_discover)
 
@@ -84,22 +88,34 @@ def _build_parser() -> argparse.ArgumentParser:
         "import",
         help="Validate and ingest externally-provided CommentTarget records",
     )
-    import_p.add_argument("--input", metavar="PATH", help="CommentTarget JSONL (default: stdin)")
-    import_p.add_argument("--output", metavar="PATH", help="Validated JSONL (default: stdout)")
+    import_p.add_argument(
+        "--input", "-i", type=argparse.FileType("r"), default=None,
+        help="CommentTarget JSONL (default: stdin)",
+    )
+    import_p.add_argument(
+        "--output", "-o", type=argparse.FileType("w"), default=None,
+        help="Validated JSONL (default: stdout)",
+    )
     import_p.set_defaults(handler=_handle_import)
 
     qualify_p = sub.add_parser(
         "qualify",
         help="Score CommentTargets and emit QualificationResult records",
     )
-    qualify_p.add_argument("--input", metavar="PATH", help="CommentTarget JSONL (default: stdin)")
+    qualify_p.add_argument(
+        "--input", "-i", type=argparse.FileType("r"), default=None,
+        help="CommentTarget JSONL (default: stdin)",
+    )
     qualify_p.set_defaults(handler=_handle_qualify)
 
     brief_p = sub.add_parser(
         "brief",
         help="Generate conservative CommentBrief drafts for accepted targets",
     )
-    brief_p.add_argument("--input", metavar="PATH", help="QualificationResult JSONL (default: stdin)")
+    brief_p.add_argument(
+        "--input", "-i", type=argparse.FileType("r"), default=None,
+        help="QualificationResult JSONL (default: stdin)",
+    )
     brief_p.set_defaults(handler=_handle_brief)
 
     status_p = sub.add_parser(

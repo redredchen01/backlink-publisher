@@ -412,7 +412,7 @@ and `tests/test_schema_output_payload_characterization.py`.
 
 **Verification:** Validators return error lists (never raise on bad data); order locked.
 
-- [ ] **Unit 3: `comment import`**
+- [x] **Unit 3: `comment import`**
 
 **Goal:** Ingest external `CommentTarget` JSONL (the only social entry path), validating
 and skip-logging malformed rows.
