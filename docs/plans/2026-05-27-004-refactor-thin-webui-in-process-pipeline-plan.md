@@ -508,6 +508,28 @@ CLIs directly; `PipelineAPI` gains `report_anchors()`. Still subprocess undernea
 through `PipelineAPI`; seo_viz output unchanged; checkpoint resume exit-code
 branching preserved; guard test passes.
 
+#### Phase 2 latency gate — MEASURED 2026-05-27 (verdict: GO, low priority)
+
+Phase 2's value is removing the per-call subprocess spawn tax (interpreter
+cold-start + module import) that the resident Flask process would no longer pay.
+A spike measured that tax directly — median of 9 spawns each, `python -m <module>`
+import time on the Phase-1 branch, interpreter baseline 27ms:
+
+| CLI | spawn tax (median) | import-only | in-process saves/call |
+|---|---|---|---|
+| `report-anchors` | 216ms | +189ms | ~189ms |
+| `validate-backlinks` | 248ms | +220ms | ~220ms |
+| `plan-backlinks` | 308ms | +281ms | ~281ms |
+
+**Verdict: GO, but low priority.** The tax (216–308ms) clears the ~100ms "instant"
+bar and `plan-backlinks` touches the ~300ms "felt-lag" zone, so this is **not** an
+"unfelt → defer" case — the saving is real and paid on every call. *Caveat:* these
+CLIs' actual work (target-URL network checks, work-URL scraping) is typically
+seconds, which partially masks the tax from total wait time. So Phase 2 is worth
+doing but is not the dominant source of perceived latency — Phase 1 (error
+fidelity) already delivered the primary value. Start with the Unit 6 `validate`
+pilot; `plan-backlinks` (heaviest import, ~281ms) has the largest payoff.
+
 - [ ] **Unit 5: Global-state audit + characterization lock (gates in-process)**
 
 **Goal:** Enumerate every process-lifetime side effect the in-scope CLIs mutate,
