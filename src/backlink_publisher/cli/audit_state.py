@@ -45,6 +45,22 @@ _REMEDIATION: dict[str, str] = {
     "article_orphan": (
         "events.db has a link absent from history; verify the live URL on the web"
     ),
+    "duplicate_key": (
+        "two dedup keys resolve to one live URL; inspect both and `--forget` the "
+        "stale key if one is a mistaken/re-published duplicate"
+    ),
+    "aged_uncertain": (
+        "an uncertain hold has not been adjudicated; resolve it with "
+        "`--adjudicate-uncertain ... --to (succeeded|failed)`"
+    ),
+    "aged_attempting": (
+        "an attempting row outlived the publish-lease TTL (crashed run); `--forget` "
+        "it to allow re-publish, or confirm the post then adjudicate"
+    ),
+    "suspect_done": (
+        "a done row has no live_url (likely mis-seeded backfill); verify the post "
+        "actually landed, else `--forget` so enforce will not skip a needed backlink"
+    ),
 }
 
 

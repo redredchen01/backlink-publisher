@@ -21,16 +21,29 @@ Plan 2026-05-26-001 Unit 2.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from .readers import StoreSnapshot, _canon
 
 #: R8 static source→tier map. The draft-queue ("drafts") source lands with R4
-#: as "informational"; v1 sources are all high-signal.
-_SOURCE_TIER: dict[str, str] = {"history": "high-signal", "articles": "high-signal"}
+#: as "informational"; v1 sources are all high-signal. ``dedup`` is the
+#: authoritative idempotency store (U4) — its findings are high-signal.
+_SOURCE_TIER: dict[str, str] = {
+    "history": "high-signal",
+    "articles": "high-signal",
+    "dedup": "high-signal",
+}
 
 _PUBLISHED_STATUS = "published"
+
+#: U4 age thresholds (seconds). An ``uncertain`` row is a human-adjudication
+#: backlog item — a week unresolved is worth surfacing so a withheld backlink
+#: does not silently rot. An ``attempting`` row older than the publish-lease TTL
+#: (3600s) is certainly from a crashed run (no single dispatch runs that long).
+_AGED_UNCERTAIN_S: int = 7 * 24 * 3600
+_AGED_ATTEMPTING_S: int = 3600
 
 
 @dataclass
@@ -42,7 +55,9 @@ class DivergenceRecord:
     """
 
     divergence_class: str  # null_url_orphan | history_orphan | article_orphan
-    source: str  # history | articles
+    #                        | duplicate_key | aged_uncertain | aged_attempting
+    #                        | suspect_done  (the last four read the dedup store, U4)
+    source: str  # history | articles | dedup
     authority: str = "indeterminate"
     canonical_url: str | None = None
     article_id: int | None = None
@@ -152,4 +167,85 @@ def find_divergences(snapshot: StoreSnapshot) -> list[DivergenceRecord]:
                 )
             )
 
+    # R16/U4: findings drawn from the authoritative dedup store.
+    records.extend(_dedup_findings(snapshot, authority))
+
     return records
+
+
+def _dedup_findings(snapshot: StoreSnapshot, authority: str) -> list[DivergenceRecord]:
+    """U4 read-only findings over the dedup store (R16).
+
+    * ``duplicate_key`` — two or more distinct keys whose ``done`` rows resolve to
+      the **same** canonical ``live_url`` (one physical post double-registered).
+      Note: the plan's literal "two ``done`` rows sharing one key" is structurally
+      impossible — the store's ``PRIMARY KEY (platform, account, target_url)``
+      permits exactly one row per key — so the meaningful, store-readable duplicate
+      is a shared ``live_url`` across keys.
+    * ``aged_uncertain`` / ``aged_attempting`` — held/in-flight rows older than
+      their threshold, so a withheld backlink is surfaced rather than left to rot.
+    * ``suspect_done`` — a ``done`` row with a NULL ``live_url`` (a likely
+      mis-seeded backfill row that would make enforce permanently skip a needed
+      backlink — the correctness gap the U7 count gate cannot catch).
+    """
+    findings: list[DivergenceRecord] = []
+    now = time.time()
+
+    # duplicate_key: group done rows by canonical live_url; emit when >= 2 keys share one.
+    by_live_url: dict[str, list[Any]] = {}
+    for row in snapshot.dedup:
+        if row.state == "done" and row.live_url:
+            by_live_url.setdefault(_canon(row.live_url), []).append(row)
+    for live_url, group in sorted(by_live_url.items()):
+        if len(group) >= 2:
+            findings.append(
+                DivergenceRecord(
+                    divergence_class="duplicate_key",
+                    source="dedup",
+                    authority=authority,
+                    canonical_url=live_url,
+                    details={
+                        "keys": sorted(
+                            f"{r.platform}/{r.account}/{r.target_url}" for r in group
+                        ),
+                    },
+                )
+            )
+
+    for row in snapshot.dedup:
+        age = now - row.updated_at
+        if row.state == "uncertain" and age > _AGED_UNCERTAIN_S:
+            findings.append(_aged(row, "aged_uncertain", age, authority))
+        elif row.state == "attempting" and age > _AGED_ATTEMPTING_S:
+            findings.append(_aged(row, "aged_attempting", age, authority))
+        elif row.state == "done" and not row.live_url:
+            findings.append(
+                DivergenceRecord(
+                    divergence_class="suspect_done",
+                    source="dedup",
+                    authority=authority,
+                    canonical_url=_canon(row.target_url),
+                    details={
+                        "platform": row.platform,
+                        "account": row.account,
+                        "reason": "done row has NULL live_url",
+                    },
+                )
+            )
+
+    return findings
+
+
+def _aged(row: Any, cls: str, age: float, authority: str) -> DivergenceRecord:
+    return DivergenceRecord(
+        divergence_class=cls,
+        source="dedup",
+        authority=authority,
+        canonical_url=_canon(row.target_url),
+        details={
+            "platform": row.platform,
+            "account": row.account,
+            "state": row.state,
+            "age_seconds": int(age),
+        },
+    )
