@@ -138,7 +138,9 @@ def main(argv: list[str] | None = None) -> None:
                 check_urls_strict(list(all_urls))
             except errors.ExternalServiceError as exc:
                 validate_logger.error(f"URL check failed: {exc}")
-                raise SystemExit(4) from None
+                errors.emit_envelope_and_exit(
+                    "ExternalServiceError", 4, f"URL check failed: {exc}"
+                )
 
     outputs: list[dict[str, Any]] = []
     all_errors: list[str] = []
@@ -220,7 +222,12 @@ def main(argv: list[str] | None = None) -> None:
             f"validation failed: {len(all_errors)} errors "
             f"({len(outputs)} passed, {failed_count} failed)"
         )
-        raise SystemExit(2)
+        errors.emit_envelope_and_exit(
+            "InputValidationError",
+            2,
+            f"validation failed: {len(all_errors)} errors "
+            f"({len(outputs)} passed, {failed_count} failed)",
+        )
 
     validate_logger.info(
         f"validated {len(outputs)} payloads "

@@ -15,6 +15,7 @@ from backlink_publisher._util.errors import (
     ContentRejectedError,
     DependencyError,
     ExternalServiceError,
+    emit_envelope_and_exit,
     emit_error,
 )
 from backlink_publisher._util.jsonl import read_jsonl
@@ -83,7 +84,9 @@ def main(argv: list[str] | None = None) -> None:
         if errs:
             for e in errs:
                 print(f"row {idx}: {e}", file=sys.stderr)
-            raise SystemExit(2)
+            emit_envelope_and_exit(
+                "InputValidationError", 2, f"row {idx}: payload validation failed"
+            )
 
     if not args.dry_run:
         platforms_in_use = {

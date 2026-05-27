@@ -119,6 +119,26 @@ def test_emit_error_unknown_exit_code_falls_back(capsys):
     assert env.exit_code == 42
 
 
+def test_emit_envelope_and_exit_emits_only_envelope(capsys):
+    # For sites that already printed their own human text: the helper adds ONLY
+    # the sentinel line (no human text of its own) and raises SystemExit.
+    with pytest.raises(SystemExit) as ei:
+        errors.emit_envelope_and_exit("ExternalServiceError", 4, "5 payloads failed")
+    assert ei.value.code == 4
+    captured = capsys.readouterr()
+    # The only stderr line is the envelope — no duplicated human preamble.
+    non_envelope = [
+        ln for ln in captured.err.splitlines()
+        if ln.strip() and not ln.strip().startswith("__BLP_ERR__")
+    ]
+    assert non_envelope == []
+    env = parse(captured.err)
+    assert env is not None
+    assert env.error_class == "ExternalServiceError"
+    assert env.exit_code == 4
+    assert env.message == "5 payloads failed"
+
+
 def test_handle_unexpected_error_carries_real_class(capsys):
     with pytest.raises(SystemExit) as ei:
         errors.handle_unexpected_error(ValueError("kaboom"))

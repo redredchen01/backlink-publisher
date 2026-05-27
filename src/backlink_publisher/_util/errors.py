@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 
 class PipelineError(Exception):
     """Base exception for pipeline errors."""
@@ -211,6 +213,24 @@ def emit_error(message: str, exit_code: int = 5) -> None:
     _emit_error_envelope(
         _EXIT_CODE_CLASS_NAME.get(exit_code, "PipelineError"), exit_code, message
     )
+    raise SystemExit(exit_code)
+
+
+def emit_envelope_and_exit(error_class: str, exit_code: int, message: str) -> NoReturn:
+    """Attach the typed-error envelope, then ``raise SystemExit(exit_code)``.
+
+    For fatal-exit sites that have ALREADY printed their own domain-specific
+    human-readable diagnostics (a per-row validation-error loop, a plan-check
+    schema-violation line, a publish-epilogue failure list) and now need only the
+    machine-readable envelope before exiting. Unlike :func:`emit_error` it prints
+    no human text of its own, so existing stderr stays byte-identical and the
+    additive sentinel line is the only new output. ``error_class`` is the
+    operator-facing type string — an exception class name when one is in hand, or
+    the canonical name for the exit code (see ``_EXIT_CODE_CLASS_NAME``) / a
+    descriptive name for domain exit codes outside the 1–5 taxonomy (e.g. the
+    anchor-distribution alarm's exit 6, plan-check drift's exit 7).
+    """
+    _emit_error_envelope(error_class, exit_code, message)
     raise SystemExit(exit_code)
 
 
