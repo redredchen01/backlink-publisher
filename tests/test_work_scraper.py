@@ -239,6 +239,16 @@ class TestFetchWorkMetadataSecuritySSRF:
                     fetch_work_metadata("https://target.example.com/work/1")
                 mock_get.assert_not_called()
 
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_block_if_private_malformed_raises_input_validation_not_value_error(self, bad):
+        """The requests-backend SSRF guard must reject a malformed-IPv6 URL with
+        the intended InputValidationError (fail-closed), never a bare ValueError,
+        and never reach DNS resolution (Plan 2026-05-27-006 R3)."""
+        with patch.object(scraper_http, "_resolve_addresses") as mock_resolve:
+            with pytest.raises(InputValidationError):
+                scraper_http._block_if_private(bad)
+            mock_resolve.assert_not_called()
+
 
 class TestFetchWorkMetadataSecuritySize:
     """Body size guards: header pre-check AND streamed total."""
@@ -674,3 +684,13 @@ class TestFetchUrlsSecurity:
                         main_url="https://internal.example.com/",
                     )
                 mock_get.assert_not_called()
+
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_malformed_list_url_fails_loudly_not_value_error(self, bad):
+        """A malformed list_url must raise the intended InputValidationError
+        (operator config error — loud), never a bare ValueError, and never make
+        a network call (Plan 2026-05-27-006 R5)."""
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
+            with pytest.raises(InputValidationError, match="list_url"):
+                fetch_work_urls_from_list(bad, main_url="https://target.example.com/")
+            mock_get.assert_not_called()

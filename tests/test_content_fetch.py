@@ -805,6 +805,58 @@ class TestSSRFDefense:
         # Base class returns a Request object on success.
         assert result is not None
 
+    # ── malformed-IPv6 never-raises (Plan 2026-05-27-006 Unit 4, R3b/R3c) ──
+
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_check_url_for_ssrf_malformed_returns_invalid_host_not_raises(self, bad, monkeypatch):
+        """The urllib SSRF gate must return 'invalid_host' (blocked) on malformed
+        IPv6, never leak ValueError, and never reach DNS. _check_once calls this
+        on untrusted URLs and is contractually never-raises."""
+        from backlink_publisher.content.fetch import _check_url_for_ssrf
+
+        def _boom(*a, **k):
+            raise AssertionError("getaddrinfo must not be called for malformed input")
+
+        monkeypatch.setattr(
+            "backlink_publisher._util.net_safety.socket.getaddrinfo", _boom,
+        )
+        assert _check_url_for_ssrf(bad) == "invalid_host"
+
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1"])
+    def test_verify_url_malformed_ipv6_returns_invalid_without_network(self, bad, monkeypatch):
+        """End-to-end: a malformed-IPv6 URL short-circuits to invalid_url before
+        any HTTP attempt (fail-closed, never crashes the fetch gate)."""
+        def _track(*a, **k):
+            raise AssertionError("opener must not be reached for malformed input")
+
+        monkeypatch.setattr(
+            "backlink_publisher.content.fetch._SSRF_OPENER.open", _track,
+        )
+        ok, reason, _ = verify_url_has_content(bad)
+        assert ok is False
+        assert reason == "invalid_url"
+
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_redirect_handler_malformed_location_blocks_not_raises(self, bad, monkeypatch):
+        """A malformed (server-controlled) Location must be a blocked redirect
+        (URLError), never a bare ValueError, never followed, never reaching DNS."""
+        from backlink_publisher._util.net_safety import _SSRFSafeRedirectHandler
+
+        def _boom(*a, **k):
+            raise AssertionError("getaddrinfo must not be called for malformed redirect")
+
+        monkeypatch.setattr(
+            "backlink_publisher._util.net_safety.socket.getaddrinfo", _boom,
+        )
+        handler = _SSRFSafeRedirectHandler()
+        req = Request("https://from.example/")
+        with pytest.raises(_URLError):
+            handler.redirect_request(req, None, 302, "Found", {}, bad)
+        # Note: req.full_url itself can never be malformed here — urllib's
+        # Request(...) raises at construction on a malformed URL, and the
+        # original URL already passed _check_url_for_ssrf. So only `newurl`
+        # (the raw server Location string) is a real malformed-input vector.
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Soft-404 title detection

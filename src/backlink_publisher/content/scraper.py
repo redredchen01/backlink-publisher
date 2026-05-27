@@ -41,6 +41,7 @@ from ._http import _ResponseTooLarge, _safe_get
 from backlink_publisher._util.url import (
     absolutize,
     is_same_host,
+    safe_urlparse,
     strip_fragment_query,
 )
 
@@ -208,8 +209,8 @@ def fetch_work_urls_from_list(
         else _DEFAULT_LIST_PATH_BLOCKLIST
     )
 
-    parsed = urlparse(list_url)
-    if parsed.scheme != "https" or not parsed.netloc:
+    parsed = safe_urlparse(list_url)
+    if parsed is None or parsed.scheme != "https" or not parsed.netloc:
         raise InputValidationError(f"invalid list_url: {list_url!r}")
     host_root = f"{parsed.scheme}://{parsed.netloc}"
 
