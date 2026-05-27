@@ -4,6 +4,7 @@ type: feat
 status: active
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-adapter-contract-canary-requirements.md
+claims: {}
 ---
 
 # feat: Adapter Contract Canary

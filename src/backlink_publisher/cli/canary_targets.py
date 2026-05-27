@@ -26,7 +26,7 @@ from __future__ import annotations
 import random
 import sys
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 from backlink_publisher._util.errors import PipelineError, UsageError, handle_error
 from backlink_publisher._util.jsonl import write_jsonl

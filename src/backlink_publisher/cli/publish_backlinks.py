@@ -147,18 +147,20 @@ def main(argv: list[str] | None = None) -> None:
         # the dominant path; opt-in (hard_skip=true) + quarantined → filter the
         # row out of the payload. Fail-open: no canary health → proceeds.
         canary_skip, canary_reason = _canary_gate(
-            platform, config=config, warned=canary_warned
+            platform, warned=canary_warned
         )
         if canary_skip:
+            # Opt-in hard-skip is a deliberate advisory filter, NOT a publish
+            # failure: the row is dropped from the payload (never published) but
+            # must not be appended to ``outputs`` with an error — that would let
+            # ``_publish_epilogue`` count it as failed and exit 4 on every run
+            # for a platform the operator intentionally quarantined. Surface it
+            # as a stderr WARNING + recon count instead.
             row_id = row.get("id", "")
             publish_logger.warn(
                 f"[publish-backlinks] row_id={row_id} platform={platform} "
                 f"status=skipped_quarantined — {canary_reason}"
             )
-            outputs.append(_build_failure_row(
-                "skipped_quarantined", row, platform,
-                canary_reason, ts, adapter=platform,
-            ))
             skipped_quarantined_count += 1
             continue
 
@@ -308,6 +310,7 @@ def main(argv: list[str] | None = None) -> None:
         success_count,
         fail_count,
         skipped_unreachable_count,
+        skipped_quarantined_count,
     )
 
 

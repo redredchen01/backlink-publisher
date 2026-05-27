@@ -164,7 +164,7 @@ def test_quarantined_platform_is_degraded_even_if_last_status_advisory():
 def test_gate_advisory_default_does_not_skip(capsys):
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)  # degraded, not quarantined
     warned: set[str] = set()
-    skip, reason = _canary_gate("blogger", config=None, warned=warned)
+    skip, reason = _canary_gate("blogger", warned=warned)
     assert skip is False
     assert reason is None
     assert "blogger" in warned
@@ -175,9 +175,9 @@ def test_gate_advisory_default_does_not_skip(capsys):
 def test_gate_dedups_warning_within_invocation(capsys):
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     warned: set[str] = set()
-    _canary_gate("blogger", config=None, warned=warned)
-    _canary_gate("blogger", config=None, warned=warned)
-    _canary_gate("blogger", config=None, warned=warned)
+    _canary_gate("blogger", warned=warned)
+    _canary_gate("blogger", warned=warned)
+    _canary_gate("blogger", warned=warned)
     err = capsys.readouterr().err
     # Deduped: the per-platform advisory WARNING line appears exactly once.
     n_canary_lines = sum(
@@ -209,7 +209,7 @@ def test_gate_hard_skip_filters_quarantined_opted_in(tmp_path, monkeypatch):
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     assert store.is_quarantined("blogger") is True
 
-    skip, reason = _canary_gate("blogger", config=None, warned=set())
+    skip, reason = _canary_gate("blogger", warned=set())
     assert skip is True
     assert reason is not None
     assert "blogger" in reason
@@ -227,7 +227,7 @@ def test_gate_no_hard_skip_quarantined_still_advisory_not_skipped(tmp_path, monk
     store.canary_health_store.reset()
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
-    skip, reason = _canary_gate("blogger", config=None, warned=set())
+    skip, reason = _canary_gate("blogger", warned=set())
     assert skip is False  # not opted in → advisory only
 
 
@@ -237,7 +237,7 @@ def test_gate_quarantined_but_no_config_entry_not_skipped(tmp_path, monkeypatch)
     store.canary_health_store.reset()
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
-    skip, _reason = _canary_gate("blogger", config=None, warned=set())
+    skip, _reason = _canary_gate("blogger", warned=set())
     assert skip is False
 
 
@@ -246,7 +246,7 @@ def test_gate_quarantined_but_no_config_entry_not_skipped(tmp_path, monkeypatch)
 
 def test_gate_fail_open_for_unknown_platform(capsys):
     warned: set[str] = set()
-    skip, reason = _canary_gate("never-run", config=None, warned=warned)
+    skip, reason = _canary_gate("never-run", warned=warned)
     assert skip is False
     assert reason is None
     assert warned == set()  # no spurious warning
@@ -255,7 +255,7 @@ def test_gate_fail_open_for_unknown_platform(capsys):
 
 
 def test_gate_empty_platform_is_noop():
-    skip, reason = _canary_gate("", config=None, warned=set())
+    skip, reason = _canary_gate("", warned=set())
     assert skip is False
     assert reason is None
 
@@ -280,7 +280,7 @@ def test_gate_reason_carries_no_secret_substring(tmp_path, monkeypatch):
     store.canary_health_store.reset()
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
     store.record_verdict("blogger", store.STATUS_DRIFT_CONFIRMED)
-    _skip, reason = _canary_gate("blogger", config=None, warned=set())
+    _skip, reason = _canary_gate("blogger", warned=set())
     assert reason is not None
     for secret in ("token", "SECRET123", "cookie", "Authorization"):
         assert secret not in reason

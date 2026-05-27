@@ -116,7 +116,6 @@ def _check_row_reachability(row: dict[str, Any]) -> tuple[bool, str | None]:
 def _canary_gate(
     platform: str,
     *,
-    config: Any,
     warned: set[str],
 ) -> tuple[bool, str | None]:
     """Read-side canary health gate for the publish row loop (Plan
@@ -506,6 +505,7 @@ def _publish_epilogue(
     success_count: int,
     fail_count: int,
     skipped_unreachable_count: int,
+    skipped_quarantined_count: int = 0,
 ) -> None:
     if run_id is not None:
         from ..events import project_run_safe as _project_run_safe
@@ -553,10 +553,12 @@ def _publish_epilogue(
 
     publish_logger.info(
         f"publish complete: {success_count} succeeded, {fail_count} failed, "
-        f"{skipped_unreachable_count} skipped_unreachable",
+        f"{skipped_unreachable_count} skipped_unreachable, "
+        f"{skipped_quarantined_count} skipped_quarantined",
         extra={
             "success": success_count,
             "failed": fail_count,
             "skipped_unreachable": skipped_unreachable_count,
+            "skipped_quarantined": skipped_quarantined_count,
         },
     )

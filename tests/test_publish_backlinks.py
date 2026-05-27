@@ -500,3 +500,50 @@ def test_checkpoint_3_rows_2_done_1_failed(mock_pub, mock_verify, mock_cache, tm
     assert by_id["r0"]["status"] == "done"
     assert by_id["r1"]["status"] == "done"
     assert by_id["r2"]["status"] == "failed"
+
+
+@patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
+@patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
+def test_publish_quarantined_hard_skip_is_skipped_not_failed(
+    mock_pub, mock_verify, tmp_path, monkeypatch
+):
+    """A quarantined platform opted into hard_skip is filtered from the payload
+    WITHOUT being counted as a publish failure: the run still exits 0 (a
+    deliberate advisory skip is not exit-4). Regression for the ce:review
+    finding that skipped_quarantined rows were appended as failure rows."""
+    from backlink_publisher.canary import store as canary_store
+
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        "\n".join(
+            [
+                "[canary.blogger]",
+                'post_url = "https://canary.example.com/p.html"',
+                'expected_target = "https://example.com/"',
+                'marker = "cnry-zzz"',
+                "hard_skip = true",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    canary_store.canary_health_store.reset()
+    # Quarantine blogger (two consecutive drifts crosses QUARANTINE_AFTER_N).
+    canary_store.record_verdict("blogger", canary_store.STATUS_DRIFT_CONFIRMED)
+    canary_store.record_verdict("blogger", canary_store.STATUS_DRIFT_CONFIRMED)
+    assert canary_store.is_quarantined("blogger") is True
+
+    payload = _make_valid_payload(platform="blogger")
+    stdout, stderr, code = _run_publish(
+        json.dumps(payload), ["--platform", "blogger", "--mode", "draft"]
+    )
+
+    # The deliberate skip must NOT be a publish failure.
+    assert code != 4, f"quarantine skip wrongly treated as failure. stderr: {stderr}"
+    assert code in (0, 5)  # 0 = clean; 5 = "no payloads published" (all skipped)
+    # The adapter was never invoked for the skipped row.
+    assert mock_pub.call_count == 0
+    # Operator gets a clear advisory on stderr; nothing published to stdout.
+    assert "skipped_quarantined" in stderr
+    assert stdout.strip() == ""
+    canary_store.canary_health_store.reset()
