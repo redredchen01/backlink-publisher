@@ -16,24 +16,50 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
     Uses ``tempfile.mkstemp`` for a unique sibling filename so concurrent
     callers do not collide on a shared ``.new`` temporary.  Readers see
     either the old file or the fully written new one — never a partial write.
+    Protects the write path with a cooperative flock sibling lock file under
+    multi-process environments to prevent lost updates.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=path.name + ".",
-        text=False,
-    )
+    
+    # Cooperative flock sibling lock file protection
+    lock_path = path.parent / (path.name + ".lock")
+    lock_fd = None
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except BaseException:
+        import fcntl
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o600)
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    except Exception as exc:
+        _log.debug(f"Optional cooperative lock acquisition failed on {lock_path}: {exc}")
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
+            lock_fd = None
+
+    try:
+        fd, tmp = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=path.name + ".",
+            text=False,
+        )
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.chmod(tmp, mode)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    finally:
+        if lock_fd is not None:
+            try:
+                os.close(lock_fd)
+            except OSError:
+                pass
 
 
 def rotate_snapshots(
