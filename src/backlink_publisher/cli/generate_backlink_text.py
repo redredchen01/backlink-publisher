@@ -16,8 +16,10 @@ Plan 2026-05-27-006.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any
+from urllib.parse import urlparse
 
 from backlink_publisher._util.errors import (
     DependencyError,
@@ -36,6 +38,33 @@ _OUTPUT_FORMATS = {"jsonl", "json"}
 _REQUIRED_FIELDS = ("target_url", "anchor_text", "mode")
 _DEFAULT_MAX_INPUT_BYTES = 2_000_000
 _DEFAULT_MAX_RECORDS = 200
+
+# ── Output validation constants ────────────────────────────────────────────────
+
+#: Markdown link ``[text](url)`` — used for link extraction and extra-link stripping.
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\[\]]*)\]\(([^()]*)\)")
+
+#: Per-mode (min, max) word-count bounds enforced on validated model output.
+_MODE_WORD_BOUNDS: dict[str, tuple[int, int]] = {
+    "article": (200, 400),
+    "comment": (30, 80),
+}
+
+#: Control + bidi-override chars that must not appear in model output.
+#: Explicit ``\uXXXX`` Python string escapes — avoids literal-Unicode ambiguity
+#: (same principle as ``llm/client.py:_PROMPT_UNSAFE_CHARS``).
+#: Allows tab (0x09), LF (0x0a), CR (0x0d) — normal in Markdown.
+_OUTPUT_UNSAFE_RE = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u2028-\u202e\u2066-\u2069]"
+)
+
+#: Common LLM refusal substrings (lowercase, checked against ``text.lower()``).
+_REFUSAL_PHRASES: tuple[str, ...] = (
+    "i cannot", "i'm unable", "i am unable", "i'm not able",
+    "as an ai", "as a language model", "i cannot assist",
+    "i'm sorry, but i", "cannot fulfill", "cannot help with",
+    "i apologize, but i", "i must decline",
+)
 
 
 # ── Input parsing ─────────────────────────────────────────────────────────────
@@ -151,6 +180,143 @@ def _make_rejected(rec: dict, reason: str) -> dict:
 
 
 # ── Output emission ───────────────────────────────────────────────────────────
+
+
+# ── Output validation helpers ─────────────────────────────────────────────────
+
+
+def _get_host(url: str) -> str | None:
+    """Extract hostname from a URL, guarding ``urlparse`` ValueError (malformed IPv6)."""
+    try:
+        return urlparse(url).hostname
+    except ValueError:
+        return None
+
+
+def _count_words(text: str) -> int:
+    """Count words in generated Markdown text, stripping link/formatting syntax.
+
+    For Latin scripts: space-separated tokens.
+    For CJK scripts (Chinese/Korean): each 2 characters \u2248 1 word
+    (conventional CJK readability estimate; Chinese words average 2 chars).
+    Mixed text uses whichever count is larger so a short English comment with
+    a few CJK characters is still measured by space-split.
+    """
+    clean = _MARKDOWN_LINK_RE.sub(r"\1", text)
+    clean = re.sub(r"[*_`#]+", "", clean)
+    latin_words = len(clean.split())
+    # CJK Unified Ideographs + Hangul Syllables
+    cjk_chars = sum(
+        1 for c in clean
+        if "\u4e00" <= c <= "\u9fff" or "\uac00" <= c <= "\ud7af"
+    )
+    if cjk_chars > 5:
+        return max(latin_words, cjk_chars // 2)
+    return latin_words
+
+
+def _is_refusal(text: str) -> bool:
+    """Return True if the text contains a common LLM refusal phrase."""
+    lower = text.lower()
+    return any(phrase in lower for phrase in _REFUSAL_PHRASES)
+
+
+def _validate_generated_text(
+    text: str,
+    *,
+    target_url: str,
+    anchor_text: str,
+    mode: str,
+    language: str = "",
+) -> dict:
+    """Validate LLM-generated Markdown text deterministically. Never raises.
+
+    Check order:
+    1. Refusal phrasing → ``"llm_refusal"``
+    2. Control/bidi chars in output → ``"unsafe_chars"``
+    3. Extract and canonicalize Markdown links from the text.
+    4. Strip extra-domain links (host ≠ ``target_url`` host, incl. userinfo
+       confusion like ``target.com@evil.com`` and protocol-relative
+       ``//evil.com``); record stripped count as advisory flag.
+    5. No link to ``target_url`` host remains → ``"missing_link"``
+    6. ``anchor_text`` not in surviving link text (case/whitespace-normalized)
+       → ``"missing_anchor"``
+    7. Per-mode word count outside bounds → ``"length_out_of_bounds"``
+    8. Language advisory (never rejects): mismatch → ``language_flag`` set.
+
+    Returns:
+        ``{"ok": True, "text": cleaned_text, "stripped_extra_links": int,
+          "language_flag": str | None}``
+        or
+        ``{"ok": False, "reason": "<rejection_reason>"}``
+    """
+    # 1. Refusal detection.
+    if _is_refusal(text):
+        return {"ok": False, "reason": "llm_refusal"}
+
+    # 2. Unsafe chars in output.
+    if _OUTPUT_UNSAFE_RE.search(text):
+        return {"ok": False, "reason": "unsafe_chars"}
+
+    # 3. Parse all Markdown links from the text.
+    all_links = _MARKDOWN_LINK_RE.findall(text)  # list of (link_text, url)
+
+    # 4. Strip extra-domain links; canonicalize hosts via urlparse.hostname.
+    #    urlparse.hostname correctly demotes userinfo:
+    #      urlparse("https://target.com@evil.com/p").hostname == "evil.com"
+    #    and returns "evil.com" for "//evil.com/p" (scheme='', netloc='evil.com').
+    target_host = _get_host(target_url)
+    target_links: list[tuple[str, str]] = []
+    cleaned_text = text
+    stripped_count = 0
+
+    for link_text, link_url in all_links:
+        link_host = _get_host(link_url)
+        if link_host is None or link_host != target_host:
+            # Replace the full Markdown link with just its visible text.
+            full_link = f"[{link_text}]({link_url})"
+            cleaned_text = cleaned_text.replace(full_link, link_text, 1)
+            stripped_count += 1
+        else:
+            target_links.append((link_text, link_url))
+
+    # 5. Target link presence.
+    if not target_links:
+        return {"ok": False, "reason": "missing_link"}
+
+    # 6. Anchor text check (case/whitespace-normalized substring match).
+    norm_anchor = " ".join(anchor_text.lower().split())
+    link_has_anchor = any(
+        norm_anchor in " ".join(lt.lower().split())
+        for lt, _ in target_links
+    )
+    if not link_has_anchor:
+        return {"ok": False, "reason": "missing_anchor"}
+
+    # 7. Per-mode word count (after extra-link stripping).
+    if mode in _MODE_WORD_BOUNDS:
+        lo, hi = _MODE_WORD_BOUNDS[mode]
+        wc = _count_words(cleaned_text)
+        if not lo <= wc <= hi:
+            return {"ok": False, "reason": "length_out_of_bounds"}
+
+    # 8. Language advisory — never rejects.
+    language_flag: str | None = None
+    if language:
+        from backlink_publisher.linkcheck.language import (
+            detect_language_from_markdown,
+            language_matches,
+        )
+        detected = detect_language_from_markdown(cleaned_text)
+        if not language_matches(detected, language):
+            language_flag = detected
+
+    return {
+        "ok": True,
+        "text": cleaned_text,
+        "stripped_extra_links": stripped_count,
+        "language_flag": language_flag,
+    }
 
 
 def _emit_records(
@@ -497,16 +663,15 @@ def _run_dry_run(validated: list[dict], args) -> list[dict]:
 
 
 def _run_generate(validated: list[dict], args) -> list[dict]:
-    """Resolve config, guard endpoint, and generate text for each candidate.
+    """Resolve config, guard endpoint, generate and validate text per candidate.
 
     Endpoint resolution + SSRF/allowlist guard run once before any HTTP call
     (Unit 3).  DependencyError from the guard propagates to ``main()`` → exit 3.
 
-    Per-record errors (ExternalServiceError, unsupported mode) produce a
-    ``rejected`` row — the batch continues (R4b).
+    Per-record errors (ExternalServiceError, unsupported mode, validation failure)
+    produce a ``rejected`` row — the batch continues (R4b).
 
-    Unit 4 will add deterministic validation + record assembly.
-    Unit 5 will add the corrective re-prompt loop.
+    Unit 5 will add the corrective re-prompt loop before validation rejection.
     """
     from backlink_publisher._util.errors import ExternalServiceError
     from backlink_publisher.llm.client import SUPPORTED_MODES, generate_link_text
@@ -541,17 +706,38 @@ def _run_generate(validated: list[dict], args) -> list[dict]:
             output.append(_make_rejected(rec, "llm_error"))
             continue
 
-        # Unit 4 will add deterministic validation + richer record assembly.
-        # Unit 3: emit minimal ok record with raw generated text.
-        output.append(
-            {
-                "status": "ok",
-                "target_url": rec["target_url"],
-                "anchor_text": rec["anchor_text"],
-                "mode": mode,
-                "generated_text": generated_text,
-            }
+        # Unit 4: deterministic validation of generated text.
+        vresult = _validate_generated_text(
+            generated_text,
+            target_url=rec["target_url"],
+            anchor_text=rec["anchor_text"],
+            mode=mode,
+            language=rec.get("language", ""),
         )
+
+        if not vresult["ok"]:
+            # Unit 5 will add a corrective re-prompt before this final rejection.
+            output.append(_make_rejected(rec, vresult["reason"]))
+            continue
+
+        # Assemble ok record.  Only candidate fields are emitted — never
+        # endpoint / key / env-var-name (R16, no-credentials-in-output).
+        ok_rec: dict[str, Any] = {
+            "status": "ok",
+            "target_url": rec["target_url"],    # full validated URL, not truncated
+            "anchor_text": rec["anchor_text"],
+            "mode": mode,
+            "generated_text": vresult["text"],  # extra-link-stripped text
+        }
+        if vresult["stripped_extra_links"]:
+            ok_rec["stripped_extra_links"] = vresult["stripped_extra_links"]
+        if vresult["language_flag"] is not None:
+            ok_rec["language_flag"] = vresult["language_flag"]
+        # Pass through any extra operator-supplied fields (e.g. "language").
+        for k, v in rec.items():
+            if k not in {"target_url", "anchor_text", "mode", "status"}:
+                ok_rec.setdefault(k, v)
+        output.append(ok_rec)
     return output
 
 
