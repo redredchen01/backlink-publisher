@@ -48,6 +48,17 @@ def strip_cli_diagnostic_banner(stderr: str) -> str:
     """
     if not stderr:
         return stderr
+    # Drop the machine-readable typed-error envelope line(s) first. They are parsed
+    # separately into PipeResult.error_class / describe_cli_error and must never
+    # reach a human view — including the QUARANTINE fallback (a malformed envelope
+    # that parse() rejected) and the scheduler's failure path, both of which clean
+    # stderr through here. Removed in place (line + its newline) so the banner's
+    # own newline structure survives for _BANNER_RE below.
+    from backlink_publisher._util.error_envelope import SENTINEL
+
+    stderr = re.sub(
+        rf"^[ \t]*{re.escape(SENTINEL)}.*\n?", "", stderr, flags=re.MULTILINE
+    )
     cleaned, n = _BANNER_RE.subn("", stderr, count=1)
     cleaned = cleaned.lstrip("\n").rstrip()
     if n and not cleaned:
@@ -116,7 +127,7 @@ def _rewrite_cli_cmd(cmd):
 _MAX_SURFACED_ERROR = 4000
 
 
-def surface_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
+def surface_cli_error(stderr: str | None, *, limit: int = _MAX_SURFACED_ERROR) -> str:
     """Banner-stripped, length-bounded CLI error text for operator display.
 
     Replaces the old ``stderr[:200]`` truncation: strips the config_echo banner
@@ -129,7 +140,27 @@ def surface_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
     return cleaned
 
 
-def run_pipe_capture(cmd, stdin):
+def describe_cli_error(stderr, *, limit=_MAX_SURFACED_ERROR):
+    """Operator-facing description of a failed CLI's stderr, envelope-aware.
+
+    Prefers the Unit 1 typed-error envelope (rendered ``[<error_class>] <message>``)
+    when the CLI emitted one — the in-scope CLIs now do for every fatal exit. Falls
+    back to :func:`surface_cli_error` (the full banner-stripped text) when no
+    envelope is present: an argparse usage error, a crash, or any uninstrumented
+    exit. Either way the result is full (never the old ``[:200]`` truncation) and
+    length-bounded. The string form, for callers that don't need the structured
+    ``error_class``/``exit_code`` fields (the checkpoint route).
+    """
+    from backlink_publisher._util.error_envelope import parse
+
+    env = parse(stderr or "")
+    if env is not None:
+        msg = f"[{env.error_class}] {env.message}"
+        return msg if len(msg) <= limit else msg[:limit].rstrip() + " …(truncated)"
+    return surface_cli_error(stderr, limit=limit)
+
+
+def run_pipe_capture(cmd, stdin) -> dict[str, str | int]:
     """Run a pipeline command and return ``{stdout, stderr, returncode}``.
 
     The non-raising sibling of :func:`run_pipe`. Callers that must branch on the

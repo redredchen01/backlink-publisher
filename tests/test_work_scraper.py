@@ -239,6 +239,16 @@ class TestFetchWorkMetadataSecuritySSRF:
                     fetch_work_metadata("https://target.example.com/work/1")
                 mock_get.assert_not_called()
 
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_block_if_private_malformed_raises_input_validation_not_value_error(self, bad):
+        """The requests-backend SSRF guard must reject a malformed-IPv6 URL with
+        the intended InputValidationError (fail-closed), never a bare ValueError,
+        and never reach DNS resolution (Plan 2026-05-27-006 R3)."""
+        with patch.object(scraper_http, "_resolve_addresses") as mock_resolve:
+            with pytest.raises(InputValidationError):
+                scraper_http._block_if_private(bad)
+            mock_resolve.assert_not_called()
+
 
 class TestFetchWorkMetadataSecuritySize:
     """Body size guards: header pre-check AND streamed total."""
@@ -545,6 +555,33 @@ class TestFetchUrlsHtmlFallback:
             )
         assert result == ["https://target.example.com/work/1"]
 
+    def test_malformed_href_skipped_not_fatal(self):
+        # A single malformed-IPv6 href must NOT abort discovery — the valid
+        # links survive (Plan 2026-05-27-006 R9). Before the fix, absolutize ->
+        # urljoin raised ValueError on the malformed href and crashed the scrape.
+        html = (
+            b"<html><body>"
+            b"<a href='https://target.example.com/work/1'>ok</a>"
+            b"<a href='http://[invalid/work/bad'>malformed</a>"
+            b"<a href='https://target.example.com/work/2'>ok2</a>"
+            b"</body></html>"
+        )
+
+        def _side_effect(url, **_kw):
+            if url.endswith("/sitemap.xml") or url.endswith("/sitemap_index.xml"):
+                return _make_response(status=404, body=b"")
+            return _html_resp(html)
+
+        with patch("backlink_publisher.content._http.http_get", side_effect=_side_effect):
+            result = fetch_work_urls_from_list(
+                "https://target.example.com/list",
+                main_url="https://target.example.com/",
+            )
+        assert result == [
+            "https://target.example.com/work/1",
+            "https://target.example.com/work/2",
+        ]
+
     def test_custom_blocklist_overrides_default(self):
         html = (
             b"<html><body>"
@@ -647,3 +684,13 @@ class TestFetchUrlsSecurity:
                         main_url="https://internal.example.com/",
                     )
                 mock_get.assert_not_called()
+
+    @pytest.mark.parametrize("bad", ["http://[invalid", "http://[::1", "http://["])
+    def test_malformed_list_url_fails_loudly_not_value_error(self, bad):
+        """A malformed list_url must raise the intended InputValidationError
+        (operator config error — loud), never a bare ValueError, and never make
+        a network call (Plan 2026-05-27-006 R5)."""
+        with patch("backlink_publisher.content._http.http_get") as mock_get:
+            with pytest.raises(InputValidationError, match="list_url"):
+                fetch_work_urls_from_list(bad, main_url="https://target.example.com/")
+            mock_get.assert_not_called()

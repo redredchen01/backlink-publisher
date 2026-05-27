@@ -68,9 +68,71 @@ def ce_health():
             )
         return projection, health
 
+    def _canary_rows():
+        """Read-side join of canary health (Plan 2026-05-27-001 Unit 4, R16).
+
+        Reads ``canary_health_store.list_all()`` directly — NEVER writes canary
+        state into ``channel_status_store`` (bind-scoped). Surfaces only
+        non-sensitive fields (platform name, verdict, debounce counts,
+        timestamps); no credentials/URLs. Fail-open: any read error → empty
+        list so the dashboard never 500s on canary."""
+        try:
+            from backlink_publisher.canary.store import list_all
+
+            rows = []
+            for platform, rec in sorted((list_all() or {}).items()):
+                rows.append({
+                    "platform": platform,
+                    "status": rec.get("status"),
+                    "consecutive_failures": rec.get("consecutive_failures", 0),
+                    "consecutive_oks": rec.get("consecutive_oks", 0),
+                    "quarantined": bool(rec.get("quarantined", False)),
+                    "last_ok_at": rec.get("last_ok_at"),
+                    "last_drift_at": rec.get("last_drift_at"),
+                })
+            return rows
+        except Exception as exc:  # noqa: BLE001 — never 500 the page on canary
+            _log.warning("health: canary read failed: %s", exc)
+            return []
+
+    def _forward_path_rows():
+        """Forward-path drift rows for the publish-path canary card.
+
+        Reads ``list_publish_path_all()`` (Plan 2026-05-27-006 Unit 4) —
+        the ``_publish_path`` sibling stream in ``canary-health.json``,
+        disjoint from the evergreen ``_canary_rows()`` records.
+        Advisory-only in v1: ``degraded`` flag shown but no gate.
+        Fail-open: any read error → empty list."""
+        try:
+            from backlink_publisher.canary.store import list_publish_path_all
+
+            rows = []
+            for platform, rec in sorted((list_publish_path_all() or {}).items()):
+                rows.append({
+                    "platform": platform,
+                    "status": rec.get("status"),
+                    "consecutive_failures": rec.get("consecutive_failures", 0),
+                    "consecutive_oks": rec.get("consecutive_oks", 0),
+                    "degraded": bool(rec.get("degraded", False)),
+                    "last_ok_at": rec.get("last_ok_at"),
+                    "last_drift_at": rec.get("last_drift_at"),
+                })
+            return rows
+        except Exception as exc:  # noqa: BLE001 — never 500 the page
+            _log.warning("health: forward-path read failed: %s", exc)
+            return []
+
     try:
         projection, health = _g_cache("health_agg", _build)
-        return _render("health.html", health=health, projection=projection)
+        canary = _g_cache("canary_health", _canary_rows)
+        forward_path = _g_cache("forward_path_health", _forward_path_rows)
+        return _render(
+            "health.html",
+            health=health,
+            projection=projection,
+            canary=canary,
+            forward_path=forward_path,
+        )
     except Exception as exc:  # noqa: BLE001 — R5: even a render/context error must not 500
         _log.error("health: dashboard render failed, serving minimal fallback: %s", exc)
         return _FALLBACK_HTML, 200

@@ -275,6 +275,17 @@ client_secret = "your-client-secret"
 # model = "gpt-4o-mini"
 # timeout_s = 30
 
+# ── generate-backlink-text (opt-in content-drafting tool) ──────────────────
+# The `generate-backlink-text` CLI verb is an opt-in content-drafting tool
+# that drafts backlink text via an OpenAI-compatible LLM.  It is NOT part of
+# the default pipeline (seeds → plan → validate → publish) and does NOT
+# auto-publish.  It reuses [llm.anchor_provider] if configured; you can also
+# pass --endpoint / --model / --api-key-env flags directly.
+#
+# The LLM API key is NEVER required in this file — supply it via the env var
+# (default: BACKLINK_LLM_API_KEY).  Use --dry-run to preview prompts offline
+# with no key or endpoint configured.
+
 # ────────────────────────────────────────────────────────────
 # [ghpages] — GitHub Pages adapter (Phase 3 Unit 7)
 # ────────────────────────────────────────────────────────────
@@ -335,3 +346,69 @@ client_secret = "your-client-secret"
 #
 # [mastodon]
 # instance_url = "https://mastodon.social"
+
+# ─── Blast-radius cells (Plan 2026-05-27-003, R7-minimal) ──────────────────
+#
+# OPERATOR-EDIT-ONLY — do not add this root to any save_config() call.
+# The section is preserved verbatim across every save.
+#
+# Containment: map each money-site (main_domain) to the subset of
+# publishing channels it is allowed to use. plan-backlinks will DROP any
+# row whose (main_domain, platform) violates the declared cell and emit a
+# recon-level warning.
+#
+# Opt-in: money sites NOT listed here are UNRESTRICTED (full mesh,
+# default behaviour). Enroll sites one at a time; a misconfigured cell
+# drops rows for that site only and never halts the batch.
+#
+# Validation at load time (fail-loud):
+#   - unknown channel name → InputValidationError (typo guard)
+#   - same channel in two cells → InputValidationError (overlap defeats containment)
+#
+# Channel names must match registered_platforms() exactly.
+# Run `cull-channels` to see the full list with dofollow grading.
+#
+# Example (uncomment and edit — replace example.com with your money site):
+#
+# [cells."https://example.com"]
+# channels = ["telegraph", "rentry", "blogger"]
+#
+# [cells."https://another-site.org"]
+# channels = ["medium", "velog", "wordpresscom"]
+
+# ────────────────────────────────────────────────────────────
+# Adapter Contract Canary (Plan 2026-05-27-001)
+# ────────────────────────────────────────────────────────────
+# Per-platform evergreen canary: the `canary-targets` verb re-fetches a
+# long-lived "canary post" on each dofollow platform and asserts that
+# YOUR target backlink's own anchor is still present and still dofollow.
+# This catches platforms that retroactively rewrite rel/noindex on
+# existing pages. It is NOT an indexability oracle and does NOT cover
+# forward publish-path drift (see the plan's threat matrix).
+#
+# Seed one canary post per platform via the real adapter publish path
+# (NOT a hand-pasted UI post), then record its live URL + the expected
+# target backlink here. Platform key = the registry platform name
+# (e.g. blogger / medium / telegraph / velog / ghpages / livejournal).
+#
+#   post_url        — the live canary post URL to re-fetch
+#   expected_target — the target backlink href the canary post links to
+#   marker          — a PRIVATE sentinel string embedded in the seeded post
+#                     (e.g. an invisible high-entropy token). REQUIRED for
+#                     drift detection: the canary only ever reports
+#                     `drift-confirmed` when this marker is present on the
+#                     fetched page (proving it really is your canary post),
+#                     so a soft-404 / generic page cannot masquerade as a
+#                     stripped backlink. Keep it private and vary it per
+#                     post so it does not become a cross-page footprint.
+#                     Without a marker the canary can only report
+#                     link-alive / advisory, never drift-confirmed.
+#   hard_skip       — opt-in; when true, a confirmed-drift platform is
+#                     quarantined out of publish payloads (Unit 4).
+#                     Default false = advisory only (loud WARNING, no skip).
+#
+# [canary.blogger]
+# post_url = "https://your-canary-blog.blogspot.com/2026/05/canary.html"
+# expected_target = "https://your-site.com/"
+# marker = "cnry-7f3a9c2e-do-not-reuse"
+# hard_skip = false

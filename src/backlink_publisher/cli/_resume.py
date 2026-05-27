@@ -31,8 +31,10 @@ from ._publish_helpers import (
     _error_class,
     _load_throttle_config,
     _make_banner_emit,
+    _record_publish_path,
     _sleep_with_throttle,
 )
+from ._dedup_gate import gate, record_done, record_failure
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
@@ -69,10 +71,14 @@ def _record_resume_failure(
     exc: Exception,
     err_class: str,
     err_msg: str,
+    platform: str = "",
 ) -> None:
     from .. import checkpoint
 
     checkpoint.update_item(run_id, item["id"], "failed", error=err_msg, error_class=err_class)
+    # Observe-only dedup terminal (U2): map this failure to failed/uncertain using the
+    # loop-resolved platform so the key matches the record_intent write.
+    record_failure(item.get("payload") or {}, platform, error_class=err_class, run_id=run_id)
     publish_logger.error(
         f"publish failed: {exc}",
         extra={"id": item["id"], "platform": item.get("platform", "")},
@@ -93,6 +99,11 @@ def _run_resume(args: Any) -> None:
 
     config = load_config()
     banner_emit = _make_banner_emit()
+
+    # R19b: enforce refuses to resume until the dedup store covers the
+    # back-catalogue (no-op in observe). Before acquiring any lease.
+    from ._dedup_gate import enforce_precondition_or_exit
+    enforce_precondition_or_exit()
 
     platforms_in_ckpt = {item["platform"] for item in ckpt["items"] if item.get("platform")}
     _acquire_publish_leases(platforms_in_ckpt, getattr(args, "dry_run", False))
@@ -190,6 +201,8 @@ def _run_resume(args: Any) -> None:
     first_medium_in_resume = True
     last_medium_success_idx = -1
     unverified_ids: set[str] = set()
+    dedup_skip_count = 0
+    dedup_hold_count = 0
 
     from backlink_publisher.config import snapshot_token_revs
     initial_token_revs = snapshot_token_revs()
@@ -212,8 +225,38 @@ def _run_resume(args: Any) -> None:
             extra={"id": item["id"], "platform": platform},
         )
 
+        # Token-drift check BEFORE the gate claim (see fresh seam): avoids
+        # stranding a just-claimed `attempting` row when revocation raises SystemExit.
+        _check_token_drift(initial_token_revs)
+
+        # Dedup gate (U2 observe / U7 enforce) — R17: resume consults the dedup
+        # record like a fresh run. skip -> mark the item done from the recorded
+        # live_url; hold -> leave the item for adjudication; dispatch -> publish.
+        verdict, drec = gate(row, platform, run_id=run_id)
+        if verdict == "skip":
+            dedup_skip_count += 1
+            from .. import checkpoint as _ckpt
+            _ckpt.update_item(
+                run_id, item["id"], "done",
+                published_url=(drec.live_url if drec else None),
+                adapter=platform,
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                verified=True,
+            )
+            publish_logger.info(
+                f"dedup skip (already published): {platform} id={item['id']}",
+                extra={"id": item["id"], "platform": platform},
+            )
+            continue
+        if verdict == "hold":
+            dedup_hold_count += 1
+            publish_logger.warn(
+                f"dedup hold (uncertain/in-flight): {platform} id={item['id']}",
+                extra={"id": item["id"], "platform": platform},
+            )
+            continue
+
         try:
-            _check_token_drift(initial_token_revs)
             result = adapter_publish(
                 payload={**row, "platform": platform},
                 mode=mode,
@@ -222,6 +265,7 @@ def _run_resume(args: Any) -> None:
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
+            record_failure(row, platform, error_class="auth_expired", run_id=run_id)
             try:
                 from webui_store.channel_status import mark_expired
                 mark_expired(exc.channel)
@@ -242,37 +286,61 @@ def _run_resume(args: Any) -> None:
                 f"auth expired: {exc}",
                 extra={"id": item["id"], "platform": platform},
             )
-            emit_error(str(exc), exit_code=3)
+            # Surface the real class (AuthExpiredError), not exit-3's "DependencyError".
+            emit_error(str(exc), exit_code=3, error_class=type(exc).__name__)
             return
         except BannerUploadError as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                "banner_upload", f"banner upload failed: {exc}",
+                "banner_upload", f"banner upload failed: {exc}", platform,
             )
             continue
         except DependencyError as exc:
+            record_failure(row, platform, error_class="dependency", run_id=run_id)
             emit_error(str(exc), exit_code=3)
             return
         except ExternalServiceError as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                _error_class(exc), f"service error: {exc}",
+                _error_class(exc), f"service error: {exc}", platform,
             )
             continue
         except Exception as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                "unexpected", f"unexpected error: {exc}",
+                "unexpected", f"unexpected error: {exc}", platform,
+            )
+            continue
+
+        if result.error:
+            # In-band adapter failure (returned, not raised) — record terminal so
+            # the row doesn't strand as `done`, mark the checkpoint item failed,
+            # and do NOT record done. Parity with the fresh seam (publish_backlinks
+            # has the same guard); without it a returned-error result would seed a
+            # `done` dedup row and enforce would permanently skip a post that never
+            # landed.
+            record_failure(row, platform, error_class=None, run_id=run_id)
+            from .. import checkpoint as _ckpt
+            _ckpt.update_item(
+                run_id, item["id"], "failed",
+                error=str(result.error), error_class="unexpected",
+            )
+            publish_logger.error(
+                f"publish failed (in-band): {result.error}",
+                extra={"id": item["id"], "platform": platform},
             )
             continue
 
         completed_at = datetime.now(timezone.utc).isoformat()
+        # U3: advisory forward-path drift recording (Plan 2026-05-27-006).
+        # Must run on both fresh and resume paths (R7). Never gating.
+        _record_publish_path(platform, result, row)
+
         # Verify before the checkpoint write so the `done` record carries the
         # verification verdict (Plan 005 / D5). Previously verification ran
         # after the write and only updated the transient `unverified_ids` set,
         # so the projector could never tell a verified `done` from an
         # unverified one — and counted unverified publishes as successes.
-        row = item["payload"]
         verify_ok, verify_reason = _do_verify(
             getattr(args, "no_verify", False), False, result, row
         )
@@ -282,6 +350,15 @@ def _run_resume(args: Any) -> None:
                 f"verification failed: id={item['id']} reason={verify_reason}",
                 extra={"id": item["id"], "adapter": result.adapter},
             )
+
+        # Observe-only dedup terminal (U2): record done + verify flag (parity with
+        # the fresh seam). verify_ok is orthogonal to dedup identity.
+        record_done(
+            row, platform,
+            live_url=result.published_url or result.draft_url,
+            verify_ok=verify_ok,
+            run_id=run_id,
+        )
 
         from .. import checkpoint as _ckpt
         _ckpt.update_item(
@@ -298,6 +375,15 @@ def _run_resume(args: Any) -> None:
             f"published: id={item['id']} status={result.status}",
             extra={"id": item["id"], "status": result.status},
         )
+
+    # R18/U7 dedup reconciliation line (resume seam) — counts only, no URLs.
+    dispatched = len(to_process) - dedup_skip_count - dedup_hold_count
+    publish_logger.recon(
+        "dedup_reconciliation",
+        skipped_already_published=dedup_skip_count,
+        held_uncertain=dedup_hold_count,
+        dispatched=dispatched,
+    )
 
     from .. import checkpoint as _ckpt
     updated_ckpt = _ckpt.load_checkpoint(run_id)

@@ -7,6 +7,14 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ._resume import _run_resume  # noqa: F401
+from ._dedup_gate import (
+    enforce_enabled,
+    enforce_precondition_or_exit,
+    gate_with_force,
+    record_done,
+    record_failure,
+)
+from ._dedup_ops import _handle_dedup_ops, load_force_manifest
 
 from backlink_publisher.config import load_config
 from backlink_publisher._util.errors import (
@@ -28,11 +36,13 @@ from ._publish_helpers import (
     _acquire_publish_leases,
     _build_failure_row,
     _build_parser,
+    _canary_gate,
     _check_row_reachability,
     _check_token_drift,
     _do_verify,
     _error_class,
     _handle_auth_expired,
+    _build_skip_row,
     _handle_checkpoint_ops,
     _load_throttle_config,
     _make_banner_emit,
@@ -40,6 +50,7 @@ from ._publish_helpers import (
     _medium_throttle_sleep,
     _publish_epilogue,
     _record_publish_failure,
+    _record_publish_path,
 )
 
 
@@ -51,6 +62,7 @@ def main(argv: list[str] | None = None) -> None:
     set_log_level(args.log_level)
 
     _handle_checkpoint_ops(args)
+    _handle_dedup_ops(args)
 
     if args.resume:
         _run_resume(args)
@@ -88,7 +100,30 @@ def main(argv: list[str] | None = None) -> None:
                 "InputValidationError", 2, f"row {idx}: payload validation failed"
             )
 
+    if args.preview_manifest:
+        # Read-only dedup preview over the validated planned rows. Emits verdicts
+        # and exits 0 before any lease/checkpoint/dispatch side effect (U3).
+        from .preview_manifest import emit_manifest
+        emit_manifest(rows, args.platform)
+        raise SystemExit(0)
+
+    forced_keys: set = set()
     if not args.dry_run:
+        # R19b: enforce refuses to run until the dedup store covers the
+        # back-catalogue (no-op in observe). Checked before acquiring leases so a
+        # not-ready run fails fast without holding a platform lease.
+        enforce_precondition_or_exit()
+        if args.force_manifest:
+            # U7c: honor force-flags from a preview manifest (enforce only).
+            if not enforce_enabled():
+                emit_error(
+                    "error: --force-manifest requires "
+                    "BACKLINK_PUBLISHER_DEDUP_ENFORCE=1",
+                    exit_code=1,
+                )
+            forced_keys = load_force_manifest(
+                args.force_manifest, confirm=args.confirm, reason=args.reason
+            )
         platforms_in_use = {
             args.platform or row.get("platform", "") for row in rows
         }
@@ -125,6 +160,11 @@ def main(argv: list[str] | None = None) -> None:
     fail_count = 0
     banner_emit = _make_banner_emit()
     skipped_unreachable_count = 0
+    skipped_quarantined_count = 0
+    publish_path_drift_count = 0
+    canary_warned: set[str] = set()  # dedup advisory WARNINGs per platform per run
+    dedup_skip_count = 0
+    dedup_hold_count = 0
     last_medium_success_idx: int = -1
 
     throttle_min, throttle_max = _load_throttle_config()
@@ -142,6 +182,27 @@ def main(argv: list[str] | None = None) -> None:
 
         platform = args.platform or row.get("platform", "")
         mode = args.mode or row.get("publish_mode", "draft")
+
+        # Canary health gate (Plan 2026-05-27-001 Unit 4): advisory WARNING is
+        # the dominant path; opt-in (hard_skip=true) + quarantined → filter the
+        # row out of the payload. Fail-open: no canary health → proceeds.
+        canary_skip, canary_reason = _canary_gate(
+            platform, warned=canary_warned
+        )
+        if canary_skip:
+            # Opt-in hard-skip is a deliberate advisory filter, NOT a publish
+            # failure: the row is dropped from the payload (never published) but
+            # must not be appended to ``outputs`` with an error — that would let
+            # ``_publish_epilogue`` count it as failed and exit 4 on every run
+            # for a platform the operator intentionally quarantined. Surface it
+            # as a stderr WARNING + recon count instead.
+            row_id = row.get("id", "")
+            publish_logger.warn(
+                f"[publish-backlinks] row_id={row_id} platform={platform} "
+                f"status=skipped_quarantined — {canary_reason}"
+            )
+            skipped_quarantined_count += 1
+            continue
 
         if not args.dry_run and not args.skip_publish_time_check:
             ok, failing_url = _check_row_reachability(row)
@@ -201,8 +262,39 @@ def main(argv: list[str] | None = None) -> None:
             extra={"id": row.get("id"), "platform": platform, "mode": mode},
         )
 
+        # Dedup gate (U2 observe / U7 enforce). Observe: records intent, always
+        # dispatch. Enforce: done->skip, uncertain/live-attempting->hold,
+        # absent/failed/stale-attempting->claim+dispatch (fail-closed). A manifest
+        # force-flag (U7c) overrides a hold; a force on a done key conflicts (exit 1).
+        # Token-drift check BEFORE the gate claim: in enforce mode gate_with_force
+        # claims the row (-> attempting), and _check_token_drift raises SystemExit
+        # on revocation — running it first avoids stranding a just-claimed row in
+        # `attempting` (a BaseException bypasses the per-row except arms). Token
+        # revs are a run-level snapshot, so checking before the gate is equivalent.
+        _check_token_drift(initial_token_revs)
+
+        verdict, drec = gate_with_force(
+            row, platform, run_id=run_id, forced_keys=forced_keys, reason=args.reason
+        )
+        if verdict == "skip":
+            outputs.append(_build_skip_row(
+                row, platform, drec.live_url if drec else None, ts
+            ))
+            dedup_skip_count += 1
+            publish_logger.info(
+                f"dedup skip (already published): {platform} id={row.get('id', '')}",
+                extra={"id": row.get("id"), "platform": platform},
+            )
+            continue
+        if verdict == "hold":
+            dedup_hold_count += 1
+            publish_logger.warn(
+                f"dedup hold (uncertain/in-flight): {platform} id={row.get('id', '')}",
+                extra={"id": row.get("id"), "platform": platform},
+            )
+            continue
+
         try:
-            _check_token_drift(initial_token_revs)
             result = adapter_publish(
                 payload={**row, "platform": platform},
                 mode=mode,
@@ -211,6 +303,7 @@ def main(argv: list[str] | None = None) -> None:
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
+            record_failure(row, platform, error_class="auth_expired", run_id=run_id)
             _handle_auth_expired(exc, run_id, row, publish_logger)
             return
         except BannerUploadError as exc:
@@ -228,6 +321,7 @@ def main(argv: list[str] | None = None) -> None:
             )
             continue
         except DependencyError as exc:
+            record_failure(row, platform, error_class="dependency", run_id=run_id)
             emit_error(str(exc), exit_code=3)
             return
         except ExternalServiceError as exc:
@@ -248,10 +342,17 @@ def main(argv: list[str] | None = None) -> None:
         outputs.append(result.to_publish_output(row, ts))
         if result.error:
             fail_count += 1
+            # In-band adapter failure (returned, not raised): record terminal so the
+            # attempting row does not orphan. No exception => not http_5xx => failed.
+            record_failure(row, platform, error_class=None, run_id=run_id)
         else:
             success_count += 1
             if result.post_publish_delay_seconds > 0:
                 last_medium_success_idx = row_idx
+
+            # U3: advisory forward-path drift recording (Plan 2026-05-27-006).
+            # Never gating — only records to canary-health.json + WARN on drift.
+            publish_path_drift_count += _record_publish_path(platform, result, row)
 
             verify_ok, verify_reason = _do_verify(
                 args.no_verify, args.dry_run, result, row
@@ -262,6 +363,15 @@ def main(argv: list[str] | None = None) -> None:
                     f"verification failed: id={row.get('id', '')} reason={verify_reason}",
                     extra={"id": row.get("id"), "adapter": result.adapter},
                 )
+
+            # Observe-only dedup terminal (U2): record done + verify flag. verify_ok is
+            # orthogonal to dedup identity — a verify flake leaves the key done.
+            record_done(
+                row, platform,
+                live_url=result.published_url or result.draft_url,
+                verify_ok=verify_ok,
+                run_id=run_id,
+            )
 
             if run_id is not None:
                 try:
@@ -289,6 +399,10 @@ def main(argv: list[str] | None = None) -> None:
         success_count,
         fail_count,
         skipped_unreachable_count,
+        skipped_quarantined_count,
+        publish_path_drift_count,
+        dedup_skip_count,
+        dedup_hold_count,
     )
 
 

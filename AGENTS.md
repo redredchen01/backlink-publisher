@@ -37,7 +37,7 @@ Flask app at `webui_app/` (20 route modules, `create_app()` factory). State pers
 
 App-level CSRF guard `_global_csrf_guard` (PR #143, `webui_app/__init__.py`) enforces a token on every POST/PUT/PATCH/DELETE. Tests opt out via `app.config['CSRF_ENABLED'] = False` (or the legacy `WTF_CSRF_ENABLED` flag — both honored). The `_check_csrf_or_abort` helper has a single production call site inside the global guard; PR #148 removed all inline per-route calls.
 
-### CLI entrypoints (7)
+### CLI entrypoints
 
 ```bash
 cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode draft
@@ -45,13 +45,26 @@ cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode
 
 | Command | Source | Role |
 |---|---|---|
-| `plan-backlinks` | `cli/plan_backlinks.py` | Generate articles from seed JSONL |
+| `plan-backlinks` | `cli/plan_backlinks/` | Generate articles from seed JSONL |
 | `validate-backlinks` | `cli/validate_backlinks.py` | Validate + enrich |
 | `publish-backlinks` | `cli/publish_backlinks.py` | Publish via platform adapters |
 | `report-anchors` | `cli/report_anchors.py` | Post-hoc anchor profile |
 | `equity-ledger` | `cli/equity_ledger.py` | Per-target backlink scorecard (read-only JSONL) |
 | `footprint` | `cli/footprint.py` | Link footprint analysis |
 | `phase0-seal` | `cli/phase0_seal.py` | Phase0 seal operations |
+| `audit-state` | `cli/audit_state.py` | Dual-state divergence auditor (read-only) |
+| `preflight-targets` | `cli/preflight_targets.py` | Destination-page health check before publish |
+| `cull-channels` | `cli/cull_channels.py` | Read-only channel-quality cull advisory (Blast-radius R9) |
+| `canary-targets` | `cli/canary_targets.py` | Read-only adapter-contract canary: re-fetch dofollow-tier canary posts, assert target backlink still dofollow (advisory; config-driven; exit 0). Runbook: `docs/runbooks/2026-05-27-canary-targets-operations.md` |
+
+### Publish-path forward-path drift (Plan 2026-05-27-006)
+
+After each publish (fresh **and** `--resume`), `publish-backlinks` records a per-platform forward-path verdict in `canary-health.json` under the `_publish_path` sibling key (disjoint from the `canary-targets` evergreen records). This is a **distinct signal** from the evergreen decay detected by `canary-targets`:
+
+- **Evergreen decay** (`canary-targets`): the *old* seeded canary post is re-fetched to check whether its links are still dofollow. Detects that a platform *retroactively changed* live posts.
+- **Forward-path drift** (publish-path canary): checks whether *newly published* posts carry the required backlinks as dofollow anchors. Detects that the current publish adapter is *already injecting nofollow* or stripping links on new posts.
+
+In v1 both are **advisory-only** — never gate publishing, never change exit codes. The forward-path verdict is visible as a distinct "Publish-path drift monitor" card on `/ce:health`. Gating (suppress nofollow posts) and coverage for blogger/ghpages/telegraph (which need extra fetch/SSRF handling) are deferred to a follow-up plan.
 
 ### Output contract
 
@@ -122,7 +135,7 @@ NOTE: A stale copy exists at workspace root `./.github/workflows/ci.yml` (refere
 
 | Var | Purpose |
 |---|---|
-| `BACKLINK_PUBLISHER_CONFIG_DIR` | Override config dir (default `~/.config/backlink-publisher/`) |
+| `BACKLINK_PUBLISHER_CONFIG_DIR` | Override config dir (default `~/.config/backlink-publisher/`). Also holds `[canary.<platform>]` config (`post_url`/`expected_target`/`marker`/`hard_skip`) and the `canary-targets` health store `canary-health.json` (0o600) |
 | `BACKLINK_PUBLISHER_CACHE_DIR` | Override cache dir (default `~/.cache/backlink-publisher/`) |
 | `BACKLINK_LLM_API_KEY` | LLM API key for anchor generation |
 | `BACKLINK_NO_FETCH_VERIFY` | Skip content fetch verification |

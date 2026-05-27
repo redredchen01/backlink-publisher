@@ -28,9 +28,13 @@ def test_inject_platforms_returns_non_empty_on_cold_boot():
     """
     script = textwrap.dedent(
         """
-        import os, sys, json
-        # Ensure no other code path has registered adapters.
-        os.environ.pop("BACKLINK_PUBLISHER_CONFIG_DIR", None)
+        import os, sys, json, tempfile
+        # Use a fresh, empty sandbox config dir so the test sees a cold-boot
+        # state (no pre-populated adapters from the parent config) while still
+        # satisfying the fail-closed resolver (sentinel requires an override).
+        # Previously this used os.environ.pop(...) but that triggers the
+        # fail-closed branch when BACKLINK_PUBLISHER_TEST_SANDBOX is set.
+        os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = tempfile.mkdtemp()
         from webui_app import create_app
         app = create_app()
         with app.app_context(), app.test_request_context("/"):

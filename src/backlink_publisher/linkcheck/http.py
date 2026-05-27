@@ -5,12 +5,11 @@ from __future__ import annotations
 import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from backlink_publisher._util.errors import ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger
-from backlink_publisher._util.url import normalize_url_for_fetch
+from backlink_publisher._util.url import normalize_url_for_fetch, safe_urlparse
 
 REQUEST_TIMEOUT = 10  # seconds
 MAX_CONCURRENT = 10
@@ -30,8 +29,8 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 def _check_url_once(url: str) -> tuple[bool, str | None]:
     """Single attempt to check a URL. Returns (reachable, error_message)."""
-    parsed = urlparse(url)
-    if not parsed.scheme or not parsed.netloc:
+    parsed = safe_urlparse(url)
+    if parsed is None or not parsed.scheme or not parsed.netloc:
         return False, f"invalid URL: {url}"
 
     # Defend the request-line ASCII encoder against legitimately non-ASCII

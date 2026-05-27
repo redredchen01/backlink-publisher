@@ -25,6 +25,7 @@ else:
 
 from .parsers.alarm import _parse_anchor_alarm
 from .parsers.anchor import _parse_anchor_proportions
+from .parsers.cells import _parse_cell_assignments
 from .parsers.image_gen import _parse_image_gen
 from .parsers.llm import _parse_llm_anchor_provider
 from .parsers.target import (
@@ -50,6 +51,16 @@ def _resolve_config_dir():
 _log = logging.getLogger(__name__)
 
 
+_SANDBOX_SENTINEL = "BACKLINK_PUBLISHER_TEST_SANDBOX"
+_FAIL_CLOSED_MSG = (
+    "{override_key} is unset but {sentinel} is set — the test harness "
+    "is active without a sandboxed {desc} directory. "
+    "This usually means a subprocess was spawned without propagating the "
+    "override env var. Fix: pass {override_key} to the child process, or "
+    "unset {sentinel} if you are not running the test suite."
+)
+
+
 def _config_dir() -> Path:
     """Resolve the config directory.
 
@@ -57,10 +68,26 @@ def _config_dir() -> Path:
     containers can point at an isolated directory without touching the
     operator's real ``~/.config/backlink-publisher/``. Falls back to
     platform defaults otherwise.
+
+    **Test-only fail-closed branch:** if the sentinel
+    ``BACKLINK_PUBLISHER_TEST_SANDBOX`` is set but no override is configured,
+    the call raises ``RuntimeError`` rather than silently resolving to the
+    operator's real home. This catches subprocess spawns inside the test
+    suite that forgot to propagate ``BACKLINK_PUBLISHER_CONFIG_DIR``.
+    Production code is unaffected (the sentinel is never set outside tests).
     """
     override = os.environ.get("BACKLINK_PUBLISHER_CONFIG_DIR")
     if override:
         return Path(override)
+    # Fail-closed in test-sandbox mode: no override + sentinel set → raise.
+    if os.environ.get(_SANDBOX_SENTINEL):
+        raise RuntimeError(
+            _FAIL_CLOSED_MSG.format(
+                override_key="BACKLINK_PUBLISHER_CONFIG_DIR",
+                sentinel=_SANDBOX_SENTINEL,
+                desc="config",
+            )
+        )
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA", Path.home()))
     else:
@@ -74,10 +101,22 @@ def _cache_dir() -> Path:
     Honors ``BACKLINK_PUBLISHER_CACHE_DIR`` for the same reasons as
     ``_config_dir`` — keeps ``~/.cache/backlink-publisher/`` (checkpoints,
     anchor profiles) untouched during tests.
+
+    **Test-only fail-closed branch:** mirrors ``_config_dir()`` — raises when
+    the sentinel is set but no cache override is configured.
     """
     override = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
     if override:
         return Path(override)
+    # Fail-closed in test-sandbox mode.
+    if os.environ.get(_SANDBOX_SENTINEL):
+        raise RuntimeError(
+            _FAIL_CLOSED_MSG.format(
+                override_key="BACKLINK_PUBLISHER_CACHE_DIR",
+                sentinel=_SANDBOX_SENTINEL,
+                desc="cache",
+            )
+        )
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
     else:
@@ -187,6 +226,8 @@ def load_config(path: Path | None = None) -> Config:
 
     image_gen = _parse_image_gen(data.get("image_gen"))
 
+    cell_assignments = _parse_cell_assignments(data.get("cells"))
+
     return Config(
         blogger_blog_ids=blog_ids,
         blogger_oauth=blogger_oauth,
@@ -204,6 +245,7 @@ def load_config(path: Path | None = None) -> Config:
         ghpages=ghpages,
         mastodon=mastodon,
         image_gen=image_gen,
+        cell_assignments=cell_assignments,
     )
 
 

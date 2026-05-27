@@ -44,6 +44,30 @@ The constraint is a project-design choice that cascades to several downstream in
 
 Designing LLM-free from the start produces structurally different solutions than designing LLM-first and removing the LLM later. The constraint shapes architecture (sliding-window pool sizing for anchor selection, deterministic templated content generation, config-driven URL synthesis) — see related learnings.
 
+## Authorized Exceptions
+
+The owner may authorize a specific **opt-in, development/operator-time tool** that
+calls an LLM, provided it preserves every shipped-product invariant above. Such a
+tool is permitted only under all of these guardrails:
+
+- It is an explicitly operator-invoked verb — never on any default/cron/`--replay`
+  path, never imported by publish/plan/validate.
+- The product remains installable and runnable with no LLM credential; the LLM
+  key is never a required env var. Absent config → the verb errors clearly, the
+  rest of the tool is unaffected.
+- Its output is a **human-reviewed artifact**, not auto-published content. A human
+  curates before anything reaches a publish path (preserves footprint resistance).
+- It reuses the existing opt-in OpenAI-compatible primitives + allowlist + redaction;
+  it does not make the LLM load-bearing for any *shipped pipeline* feature.
+
+**Authorized exceptions:**
+
+- 2026-05-27 — `generate-backlink-text` CLI verb (origin:
+  `docs/brainstorms/2026-05-27-llm-backlink-text-generation-requirements.md`,
+  plan: `docs/plans/2026-05-27-006-feat-generate-backlink-text-plan.md`). Owner
+  authorized as an opt-in, human-reviewed content-drafting tool decoupled from the
+  shipped pipeline. Do not re-flag this verb as a P0 no-runtime-LLM violation.
+
 ## Related Issues
 
 - `feedback_llm-free-pool-sizing.md` (auto memory [claude], first encountered 2026-05-13) — concrete pool-sizing formula for sliding-window selectors that the LLM-free constraint forced into being.

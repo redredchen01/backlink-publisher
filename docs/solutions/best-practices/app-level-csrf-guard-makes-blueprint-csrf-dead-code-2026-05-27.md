@@ -78,8 +78,12 @@ The fix has two parts:
 - **False-green is worse than red.** A route whose every POST 403s before
   reaching its handler has *zero effective coverage*, yet CI is green — so a real
   regression in that route ships unnoticed. The green only holds as long as some
-  unrelated sibling keeps leaking `WTF_CSRF_ENABLED=False` in the right order
-  (and CI runs `pytest-randomly`, so order is not guaranteed).
+  unrelated sibling keeps leaking `WTF_CSRF_ENABLED=False` in the right order.
+  (Correction 2026-05-27: this repo does **not** run `pytest-randomly` — it is
+  absent from dev-deps and `ci.yml`; order is deterministic under
+  `PYTHONHASHSEED=0`, which makes the false-green *stably* wrong rather than
+  flaky. The structural fix is the autouse containment net + AST gate added in
+  Plan 2026-05-27-003.)
 - **Retiring without compensation can downgrade security.** Removing the bespoke
   layer left three browser-spawning / credential-deleting POSTs protected by CSRF
   alone — *weaker* than the sibling `bind` routes, which also carry an origin

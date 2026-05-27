@@ -319,8 +319,8 @@ class EventStore:
 
     def query(
         self, sql: str, params: tuple[Any, ...] = ()
-    ) -> list[sqlite3.Row]:
-        """Thin SELECT wrapper for CLI consumers. Returns all rows eagerly.
+    ) -> Iterator[sqlite3.Row]:
+        """Thin SELECT wrapper for CLI consumers. Returns rows as a generator.
 
         Enforces a SELECT-only contract at runtime — refuses any
         statement that doesn't start with ``SELECT`` so a downstream CLI
@@ -334,10 +334,10 @@ class EventStore:
                 "EventStore.query() is SELECT-only; use connect() for DML."
             )
 
-        def _op() -> list[sqlite3.Row]:
+        def _op() -> Iterator[sqlite3.Row]:
             with self.connect() as conn:
                 conn.row_factory = sqlite3.Row
-                return list(conn.execute(sql, params))
+                yield from conn.execute(sql, params)
 
         return _retry_sqlite(_op, sleep_fn=self._sleep_fn)
 

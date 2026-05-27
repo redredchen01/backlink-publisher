@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from backlink_publisher.cli._bind import chrome_backend as chrome
-from backlink_publisher.config import Config
+from backlink_publisher.config import Config, _config_dir as _bp_config_dir
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.registry import Publisher
@@ -76,7 +76,7 @@ class _ChromeSession:
                 )
             profile = Path(os.environ.get(
                 "BACKLINK_PUBLISHER_REAL_CHROME_PROFILE_DIR",
-                str(Path.home() / ".config" / "backlink-publisher" / "real-chrome-profile" / f"instant-web-{self.port}"),
+                str(_bp_config_dir() / "real-chrome-profile" / f"instant-web-{self.port}"),
             )).expanduser()
             profile.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.proc = subprocess.Popen(

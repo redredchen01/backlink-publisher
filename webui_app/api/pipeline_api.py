@@ -13,7 +13,15 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from ..helpers.cli_runner import run_pipe, strip_cli_diagnostic_banner
+from backlink_publisher._util.error_envelope import parse as _parse_envelope
+
+from ..helpers.cli_runner import (
+    _MAX_SURFACED_ERROR,
+    run_pipe,
+    run_pipe_capture,
+    strip_cli_diagnostic_banner,
+    surface_cli_error,
+)
 
 
 # ── structured result ──────────────────────────────────────────────────────
@@ -25,12 +33,21 @@ class PipeResult:
 
     Callers interact with ``.success`` / ``.error`` / ``.rows`` instead of
     raw stdout / stderr strings.
+
+    On failure, ``.error`` is the full operator-facing message (never the old
+    ``stderr[:200]`` truncation), and ``.error_class`` / ``.exit_code`` carry the
+    typed-error envelope's fields when the CLI emitted one (Unit 1/2). When no
+    envelope is present (argparse usage error, crash, uninstrumented exit), the
+    QUARANTINE branch sets ``error_class="unrecognized"`` and ``.error`` to the
+    full banner-stripped stderr — loud, never empty (silent-drop lesson).
     """
 
     stdout: str = ""
     stderr: str = ""
     success: bool = True
     error: str | None = None
+    error_class: str | None = None
+    exit_code: int | None = None
 
     # ── derived helpers ──────────────────────────────────────────────────
 
@@ -60,7 +77,64 @@ class PipeResult:
         return result
 
 
+def _typed_error_result(stderr: str, fallback_label: str) -> PipeResult:
+    """Build a failed ``PipeResult``, parsing the typed-error envelope if present.
+
+    Envelope present → ``error_class``/``exit_code``/``error`` from the CLI's own
+    taxonomy (e.g. ``AuthExpiredError``/3). Envelope absent → QUARANTINE:
+    ``error_class="unrecognized"`` and ``error`` = the full banner-stripped stderr
+    (never truncated), so a usage error / crash / uninstrumented exit still
+    surfaces in full.
+    """
+    env = _parse_envelope(stderr)
+    if env is not None:
+        # Bound the message the same way surface_cli_error bounds QUARANTINE text:
+        # an envelope message can be large (validate aggregate) or carry untrusted
+        # content (a target URL / fetched snippet), and it flows verbatim into logs
+        # and the persisted history JSON. Cap it so it can't flood either.
+        message = env.message
+        if len(message) > _MAX_SURFACED_ERROR:
+            message = message[:_MAX_SURFACED_ERROR].rstrip() + " …(truncated)"
+        return PipeResult(
+            stderr=stderr,
+            success=False,
+            error=message,
+            error_class=env.error_class,
+            exit_code=env.exit_code,
+        )
+    return PipeResult(
+        stderr=stderr,
+        success=False,
+        error=surface_cli_error(stderr) or fallback_label,
+        error_class="unrecognized",
+    )
+
+
 # ── helpers used by both PipelineAPI and external callers (scheduler) ──────
+
+
+def _parse_jsonl_rows(jsonl_str: str) -> list[dict[str, Any]]:
+    """Parse a JSONL **string** into dict rows for in-process engine calls.
+
+    Used by the in-process ``validate`` path: the engine takes ``list[dict]``,
+    not a stream, and we must NOT use ``_util.jsonl.read_jsonl`` here because it
+    reads ``sys.stdin`` and ``SystemExit``s on malformed/empty input — both wrong
+    inside the long-lived Flask process. Mirrors ``PipeResult.rows``: blank lines
+    skipped, non-dict / non-JSON lines dropped (the engine's per-row gates surface
+    the real validation errors).
+    """
+    rows: list[dict[str, Any]] = []
+    for line in (jsonl_str or "").strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
 
 
 def parse_publish_results(jsonl_str: str) -> list[dict[str, Any]]:
@@ -130,24 +204,70 @@ class PipelineAPI:
             plans = result.rows
     """
 
-    # ── plan ─────────────────────────────────────────────────────────────
+    # ── shared invocation ──────────────────────────────────────────────────
 
-    def plan(self, seed_json: str) -> PipeResult:
-        """Run ``plan-backlinks`` with the given JSONL seed data."""
+    def _invoke(self, cmd: list[str], stdin: str, label: str) -> PipeResult:
+        """Run one pipeline CLI; success → rows, failure → typed error.
+
+        ``run_pipe`` raises with the CLI's full stderr (banner + envelope) on any
+        non-zero exit or silent failure; :func:`_typed_error_result` turns that
+        into a typed/QUARANTINE ``PipeResult``.
+        """
         try:
-            raw = run_pipe(["plan-backlinks"], seed_json)
+            raw = run_pipe(cmd, stdin)
             return PipeResult(
                 stdout=raw["stdout"],
                 stderr=raw.get("stderr", ""),
                 success=True,
             )
         except Exception as exc:
-            stderr = str(exc)
-            return PipeResult(
-                stderr=stderr,
-                success=False,
-                error=strip_cli_diagnostic_banner(stderr) or "plan-backlinks failed",
-            )
+            return _typed_error_result(str(exc), label)
+
+    def _invoke_capture(self, cmd: list[str], stdin: str, label: str) -> PipeResult:
+        """Run one pipeline CLI, **preserving stdout on non-zero exit**.
+
+        The non-raising sibling of :meth:`_invoke`. ``run_pipe`` discards stdout
+        by raising on any non-zero exit; some CLIs carry meaningful stdout *with*
+        a non-zero code — ``report-anchors`` exit-6 (alarm raised, but the report
+        document is on stdout) and ``publish-backlinks`` exit-4 (partial success:
+        some rows published). Those callers branch on ``exit_code`` and still need
+        the rows, so they use this path.
+
+        On success ``exit_code`` is set to ``0`` (not ``None``) so callers like
+        ``checkpoint.py`` can branch 0 / 4 / else uniformly. Carries the same
+        silent-failure guard as ``run_pipe``: a 0-exit with empty stdout *and*
+        stderr on non-empty stdin is almost always a broken entry-point.
+        """
+        captured = run_pipe_capture(cmd, stdin)
+        rc = captured["returncode"]
+        stdout = captured["stdout"]
+        stderr = captured.get("stderr", "")
+        if rc == 0:
+            if stdin and not stdout.strip() and not stderr.strip():
+                return PipeResult(
+                    success=False,
+                    error=f"{label}: CLI produced no output (exit 0, stdout/stderr "
+                    "empty) — likely a broken entry-point.",
+                    error_class="unrecognized",
+                    exit_code=0,
+                )
+            return PipeResult(stdout=stdout, stderr=stderr, success=True, exit_code=0)
+        # Non-zero: keep stdout, attach the typed error, and ensure exit_code
+        # reflects the real code (the envelope's exit_code wins when present).
+        result = _typed_error_result(stderr, label)
+        result.stdout = stdout
+        if result.exit_code is None:
+            result.exit_code = rc
+        return result
+
+    # ── plan ─────────────────────────────────────────────────────────────
+
+    def plan(self, seed_json: str, *, work_count: int | None = None) -> PipeResult:
+        """Run ``plan-backlinks`` with the given JSONL seed data."""
+        cmd = ["plan-backlinks"]
+        if work_count is not None:
+            cmd += ["--work-count", str(work_count)]
+        return self._invoke(cmd, seed_json, "plan-backlinks failed")
 
     # ── validate ─────────────────────────────────────────────────────────
 
@@ -157,24 +277,69 @@ class PipelineAPI:
         *,
         no_check_urls: bool = True,
     ) -> PipeResult:
-        """Run ``validate-backlinks`` with optional ``--no-check-urls``."""
-        cmd = ["validate-backlinks"]
-        if no_check_urls:
-            cmd.append("--no-check-urls")
+        """Validate planned-backlink JSONL **in-process** (thin-WebUI Phase 2 U6).
+
+        Replaces the old ``validate-backlinks`` subprocess with a direct call to
+        the pure :func:`validate.engine.validate_rows`. Output data + typed error
+        match the Unit 5 subprocess golden by construction (shared engine).
+
+        Hazard handling (audit ``2026-05-27-inprocess-global-state-audit``):
+        - H1: we do NOT call ``set_log_level`` — the engine never touches it and
+          the shell's call is intentionally not replicated, so this in-process
+          path runs at ambient verbosity and can't flip the scheduler thread's
+          logger level.
+        - H3: the engine never writes ``sys.stdout``/``sys.stderr``; we build the
+          stdout JSONL ourselves from ``outcome.outputs``.
+
+        Config is loaded with the SAME fail-soft tolerance as the CLI shell via
+        the shared ``load_config_tolerant`` helper (engine stays pure — config is
+        passed in). ``no_check_urls`` mirrors the CLI flag: True → skip URL checks.
+        """
+        import io
+
+        from backlink_publisher._util.errors import ExternalServiceError
+        from backlink_publisher._util.jsonl import write_jsonl
+        from backlink_publisher.validate.engine import (
+            load_config_tolerant,
+            validate_rows,
+        )
+
+        rows = _parse_jsonl_rows(plans_jsonl)
+        config = load_config_tolerant()
+
+        def _jsonl(outputs: list[dict[str, Any]]) -> str:
+            buf = io.StringIO()
+            write_jsonl(outputs, buf)
+            return buf.getvalue()
+
         try:
-            raw = run_pipe(cmd, plans_jsonl)
+            outcome = validate_rows(rows, config, check_urls=not no_check_urls)
+        except ExternalServiceError as exc:
             return PipeResult(
-                stdout=raw["stdout"],
-                stderr=raw.get("stderr", ""),
-                success=True,
-            )
-        except Exception as exc:
-            stderr = str(exc)
-            return PipeResult(
-                stderr=stderr,
                 success=False,
-                error=strip_cli_diagnostic_banner(stderr) or "validate-backlinks failed",
+                error=f"URL check failed: {exc}",
+                error_class="ExternalServiceError",
+                exit_code=4,
             )
+
+        if outcome.errors:
+            message = (
+                f"validation failed: {len(outcome.errors)} errors "
+                f"({len(outcome.outputs)} passed, {outcome.failed_count} failed)"
+            )
+            return PipeResult(
+                stdout=_jsonl(outcome.outputs),
+                success=False,
+                error=message,
+                error_class="InputValidationError",
+                exit_code=2,
+            )
+
+        return PipeResult(
+            stdout=_jsonl(outcome.outputs),
+            success=True,
+            exit_code=0,
+        )
 
     # ── publish ──────────────────────────────────────────────────────────
 
@@ -186,17 +351,47 @@ class PipelineAPI:
     ) -> PipeResult:
         """Run ``publish-backlinks --platform <p> --mode <m>``."""
         cmd = ["publish-backlinks", "--platform", platform, "--mode", mode]
-        try:
-            raw = run_pipe(cmd, plans_jsonl)
-            return PipeResult(
-                stdout=raw["stdout"],
-                stderr=raw.get("stderr", ""),
-                success=True,
-            )
-        except Exception as exc:
-            stderr = str(exc)
-            return PipeResult(
-                stderr=stderr,
-                success=False,
-                error=strip_cli_diagnostic_banner(stderr) or "publish-backlinks failed",
-            )
+        return self._invoke(cmd, plans_jsonl, "publish-backlinks failed")
+
+    def publish_seed(self, seed_jsonl: str) -> PipeResult:
+        """Run bare ``publish-backlinks`` (platform/mode carried in the seed row).
+
+        The queue processor (``scheduler._process_queue_job``) builds a self-
+        describing seed where ``platform``/``publish_mode`` live in the payload,
+        so it invokes the CLI with no flags. Capture-based so a partial-success
+        exit still carries the published rows and the typed error/exit-code reach
+        the 429-backoff branch.
+        """
+        return self._invoke_capture(
+            ["publish-backlinks"], seed_jsonl, "publish-backlinks failed"
+        )
+
+    # ── resume ───────────────────────────────────────────────────────────
+
+    def resume(self, run_id: str) -> PipeResult:
+        """Run ``publish-backlinks --resume <run_id>`` for checkpoint recovery.
+
+        Capture-based: ``checkpoint.py`` distinguishes exit 0 (full) / 4 (partial,
+        rows still on stdout) / else (failed) via ``PipeResult.exit_code`` — so the
+        exit code must survive and stdout must not be discarded on exit-4.
+        """
+        return self._invoke_capture(
+            ["publish-backlinks", "--resume", run_id], "", "publish resume failed"
+        )
+
+    # ── report-anchors ─────────────────────────────────────────────────────
+
+    def report_anchors(self, profile: str, *, as_json: bool = True) -> PipeResult:
+        """Run ``report-anchors --from-profile <profile>`` (default ``--json``).
+
+        Capture-based because ``report-anchors`` emits a single JSON/markdown
+        **document** (not JSONL rows) and exits 6 when the anchor-distribution
+        alarm fires — but the document is still on stdout. ``run_pipe`` would
+        discard it; this keeps it, with the alarm surfaced as ``error_class``/
+        ``exit_code`` (advisory) while ``stdout`` stays parseable. Read the
+        document via ``result.stdout`` (``.rows`` cannot parse a single document).
+        """
+        cmd = ["report-anchors", "--from-profile", profile]
+        if as_json:
+            cmd.append("--json")
+        return self._invoke_capture(cmd, "", "report-anchors failed")

@@ -17,6 +17,7 @@ from flask import Blueprint, request, session
 from ..api import PipelineAPI
 from ..api.pipeline_api import publish_state_summary
 
+from ..helpers.cli_runner import surface_cli_error
 from ..helpers.contexts import _persist_three_tier_config, _render, _get_velog_status
 from ..helpers.history import (
     _push_history_per_row,
@@ -270,17 +271,24 @@ def ce_publish():
     result = _api.publish(plans, platform, publish_mode)
 
     if not result.success:
+        # ``result.error`` is the full typed message (or banner-stripped stderr on
+        # QUARANTINE) — no truncation. Tag the typed class for the operator.
         msg = result.error or "发布失败"
+        display = (
+            f"[{result.error_class}] {msg}"
+            if result.error_class and result.error_class != "unrecognized"
+            else msg
+        )
         _push_history_single_failure(
-            target_url=target_url, platform=platform, language=language, error=msg,
+            target_url=target_url, platform=platform, language=language, error=display,
         )
         plan_logger.warn(
             "webui_publish_result",
             state="all_failed", platform=platform, publish_mode=publish_mode,
-            n_ok=0, n_failed=0, stderr_preview=msg[:500],
+            n_ok=0, n_failed=0, error_class=result.error_class, stderr_preview=msg,
         )
         return _render('index.html',
-            publish_state='all_failed', publish_error=f"发布失败: {msg}",
+            publish_state='all_failed', publish_error=f"发布失败: {display}",
             config=config, history_active=True)
 
     published = result.stdout
@@ -288,7 +296,7 @@ def ce_publish():
     publish_results = result.rows
 
     if not publish_results:
-        diagnostic = result.stderr_cleaned or "publish-backlinks returned no parseable rows"
+        diagnostic = surface_cli_error(result.stderr) or "publish-backlinks returned no parseable rows"
         _push_history_single_failure(
             target_url=target_url, platform=platform, language=language,
             error=diagnostic,
@@ -296,7 +304,7 @@ def ce_publish():
         plan_logger.warn(
             "webui_publish_result",
             state="all_failed", platform=platform, publish_mode=publish_mode,
-            n_ok=0, n_failed=0, stderr_preview=diagnostic[:500],
+            n_ok=0, n_failed=0, stderr_preview=diagnostic,
         )
         return _render('index.html',
             publish_state='all_failed', publish_error=diagnostic,
@@ -319,7 +327,7 @@ def ce_publish():
     log_fn(
         "webui_publish_result",
         state=publish_state, platform=platform, publish_mode=publish_mode,
-        n_ok=n_ok, n_failed=n_failed, stderr_preview=stderr[:200],
+        n_ok=n_ok, n_failed=n_failed, stderr_preview=surface_cli_error(stderr),
     )
 
     return _render('index.html', published=published,

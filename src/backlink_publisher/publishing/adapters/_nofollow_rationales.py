@@ -89,16 +89,7 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "that strips link equity — server-side and unavoidable per account. "
         "No PageRank transfer; kept for referral traffic and dev-topical "
         "relevance on a high-DA Chinese developer community. Same "
-        "link.<domain> redirect-interstitial family as csdn/jianshu."
-    ),
-    "jianshu": (
-        "Jianshu (简书) routes outbound body links through a "
-        "https://link.jianshu.com/go?to= redirect interstitial (the same "
-        "equity-stripping pattern as juejin/csdn), so external <a> elements "
-        "pass no PageRank. Retained for referral traffic and topical signal "
-        "from an established high-DA Chinese blogging platform. Mechanism "
-        "corroborated by redirect-skipper userscripts targeting "
-        "link.jianshu.com rather than a single authoritative platform doc."
+        "link.<domain> redirect-interstitial family as csdn."
     ),
     "csdn": (
         "CSDN (blog.csdn.net) rewrites outbound body links to a "
@@ -106,7 +97,7 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "link equity server-side for all accounts, so no PageRank transfers. "
         "Retained for referral traffic and dev-topical relevance from a very "
         "high-DA Chinese developer blog. Same link.<domain> redirect-"
-        "interstitial family as juejin/jianshu."
+        "interstitial family as juejin."
     ),
     "note": (
         "note.com auto-applies rel=\"nofollow\" to ALL links — profile, post "

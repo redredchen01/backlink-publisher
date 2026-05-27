@@ -14,12 +14,12 @@
 # plan_backlinks.py was decomposed into a package (plan_backlinks/) in 2026-05-19.
 # Monitoring the largest sub-file (core.py) post-split.
 [files."src/backlink_publisher/cli/plan_backlinks/core.py"]
-ceiling = 380
-rationale = "_generate_payload (210 lines) + _resolve_article_anchors (14 lines) extracted to _payload.py (2026-05-22). core.py dropped from 538 to 347 SLOC — holds _dispatch_row, _scheduler_enabled_for, and main() only. Ceiling 380 = round_up_to_10(347+30)."
+ceiling = 400
+rationale = "Blast-radius Phase 1 (2026-05-27) added _cell_gate_drop + cell_gate_summary helpers for the opt-in cell admission gate (R7-minimal), growing core.py from 347 to 392 SLOC. Ceiling 400 = round_up_to_10(392+5)."
 
 [files."src/backlink_publisher/cli/publish_backlinks.py"]
-ceiling = 290
-rationale = "Post-loop epilogue (reconciliation stats, JSONL dump, exit-code dispatch) extracted to _publish_epilogue in _publish_helpers.py (2026-05-26). publish_backlinks.py dropped from 280 to 258 SLOC — holds main() and the per-row publish loop only. Ceiling 290 = round_up_to_10(258+30)."
+ceiling = 370
+rationale = "Two independent per-row loop gates now coexist here: the canary health gate (Plan 2026-05-27-001 U4 — advisory WARN + opt-in hard-skip) and the cross-run idempotency enforce gate (Plan 2026-05-27-005 U7 — skip-duplicate row, held-uncertain branch, counters, reconciliation precondition + force-manifest load). Both are intrinsic per-row publish-loop wiring; the gate decisions and audit live in cli/_dedup_gate.py (gate_with_force) + idempotency/store.py.gate_and_claim + canary/store.py. At 335 SLOC; ceiling 370 = round_up_to_10(335+30), 35 headroom."
 
 [files."src/backlink_publisher/content/fetch.py"]
 ceiling = 250
@@ -50,9 +50,17 @@ ceiling = 260
 rationale = "Three-tier decomposition (2026-05-26): schema (frontmatter/claims/filename-date-lock) moved to _plan_check_schema.py (166 SLOC), git resolution (fetch freshness, path/sha checks, stderr classification) to _plan_check_git.py (148 SLOC), output formatting (JSON/human/RECON lines) to _plan_check_format.py (76 SLOC). plan_check.py now holds main() + re-exports only at 227 SLOC. Ceiling 260 = round_up_to_10(227+30) per policy."
 
 [files."src/backlink_publisher/cli/validate_backlinks.py"]
-ceiling = 200
-rationale = "_enhance_payload (101 lines) + its exclusive helpers (_HrefCollector, _extract_hrefs_from_html, _check_main_domain_in_html, _resolve_branded_pool, _nfc_normalize_in_place, _detect_row_body_language) extracted to _validate_payload.py (2026-05-22). validate_backlinks.py dropped from 323 to 168 SLOC — holds _row_field_text, re-exports from _validate_payload, and main() only. Ceiling 200 = round_up_to_10(168+30)."
+ceiling = 150
+rationale = "thin-WebUI Phase 2 Unit 6 (2026-05-27): the pure validation kernel (URL-collection + check_urls_strict + the per-row loop) extracted to validate/engine.py so the in-process PipelineAPI.validate path shares it. validate_backlinks.py dropped from 168 to 116 SLOC — now argparse + set_log_level + load_config_tolerant + config_echo banner + read_jsonl + a single validate_rows call + recon/emit_envelope_and_exit shell only. Ceiling 150 = round_up_to_10(116+30)."
 
 [files."src/backlink_publisher/cli/report_anchors.py"]
 ceiling = 130
 rationale = "Formatting helpers (_markdown_table, _json_output, _build_report, _build_profile_report, _format_alarm_markdown, _format_profile_report_markdown, _format_profile_report_json) and _compute_alarm extracted to _report_format.py (2026-05-22). report_anchors.py dropped from 353 to 94 SLOC — holds main() only plus re-export imports. Ceiling 130 = round_up_to_10(94+30) with headroom for argparse additions."
+
+[files."src/backlink_publisher/cli/_publish_helpers.py"]
+ceiling = 540
+rationale = "Canary Phase 2 Unit 3 (2026-05-27) added _record_publish_path (advisory forward-path drift recording, ~50 SLOC) and a publish_path_drift_count param to _publish_epilogue. _publish_helpers.py grew from ~450 to 507 SLOC. Ceiling 540 = round_up_to_10(507+30) per policy; future extraction candidate is the lease/throttle cluster."
+
+[files."src/backlink_publisher/cli/generate_backlink_text.py"]
+ceiling = 560
+rationale = "New opt-in content-drafting CLI (Plan 2026-05-27-006): _read_candidates, _validate_candidate, _make_rejected, _validate_generated_text (refusal/unsafe/link/anchor/wordcount/language), _count_words (CJK-aware), _make_correction_hint, _run_dry_run, _resolve_client (endpoint/key/model resolution + SSRF/allowlist guard + userinfo rejection), _run_generate (corrective re-prompt loop). 541 SLOC measured 2026-05-27. Ceiling 560 = round_up_to_10(541+10) — minimal headroom; extraction candidate if it grows."

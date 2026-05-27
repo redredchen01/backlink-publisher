@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 
+import backlink_publisher.publishing.adapters  # noqa: F401  populate registry before config load
 from .. import config_echo
 from backlink_publisher._util.errors import emit_error
 from backlink_publisher._util.jsonl import write_jsonl

@@ -174,3 +174,110 @@ def test_dashboard_redirects_to_health(client):
     resp = client.get("/ce:dashboard")
     assert resp.status_code == 302
     assert resp.headers["Location"].endswith("/ce:health")
+
+
+# ── Forward-path drift card (Plan 2026-05-27-006 U4) ─────────────────────────
+
+
+def test_forward_path_drift_card_shows_when_data_present(client, monkeypatch):
+    """Platform with forward-path drift record renders a distinct badge."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR",
+                       client.application.config.get("BACKLINK_PUBLISHER_CONFIG_DIR",
+                                                      "/tmp"))
+    from backlink_publisher.canary import store as cstore
+    cstore.canary_health_store.reset()
+
+    cstore.record_publish_path_verdict("medium", cstore.STATUS_DRIFT_CONFIRMED)
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Publish-path drift monitor" in html
+    assert "drift" in html
+    cstore.canary_health_store.reset()
+
+
+def test_forward_path_card_absent_when_no_data(client, monkeypatch):
+    """No forward-path data → card is not rendered (no crash on missing key)."""
+    from backlink_publisher.canary import store as cstore
+    cstore.canary_health_store.reset()
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    # No forward-path data → card is suppressed
+    assert "Publish-path drift monitor" not in html
+    cstore.canary_health_store.reset()
+
+
+def test_forward_path_link_alive_shows_badge(client, monkeypatch):
+    """link-alive forward-path record renders success badge, no 'drift' class."""
+    from backlink_publisher.canary import store as cstore
+    cstore.canary_health_store.reset()
+
+    cstore.record_publish_path_verdict("medium", cstore.STATUS_LINK_ALIVE)
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Publish-path drift monitor" in html
+    assert "link-alive" in html
+    cstore.canary_health_store.reset()
+
+
+def test_forward_path_distinct_from_evergreen_canary(client, monkeypatch):
+    """Forward-path and evergreen canary data are shown in DISTINCT cards."""
+    from backlink_publisher.canary import store as cstore
+    cstore.canary_health_store.reset()
+
+    # Write evergreen canary data
+    cstore.record_verdict("medium", cstore.STATUS_DRIFT_CONFIRMED)
+    # Write forward-path data
+    cstore.record_publish_path_verdict("medium", cstore.STATUS_LINK_ALIVE)
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    # Both cards present
+    assert "Canary contract health" in html
+    assert "Publish-path drift monitor" in html
+    # Forward-path shows 'link-alive', evergreen shows 'drift-confirmed'
+    assert "link-alive" in html
+    assert "drift-confirmed" in html
+    cstore.canary_health_store.reset()
+
+
+def test_forward_path_error_does_not_500(client, monkeypatch):
+    """R5: forward-path read error → empty list, dashboard still renders 200."""
+    import webui_app.routes.health as health_mod
+
+    original = health_mod.bp
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("forward-path exploded")
+
+    monkeypatch.setattr(
+        "backlink_publisher.canary.store.list_publish_path_all", _boom
+    )
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+
+
+def test_forward_path_degraded_badge_renders(client):
+    """degraded=True (>= QUARANTINE_AFTER_N consecutive drifts) shows degraded badge."""
+    from backlink_publisher.canary import store as cstore
+    from backlink_publisher.canary.store import QUARANTINE_AFTER_N
+
+    cstore.canary_health_store.reset()
+
+    for _ in range(QUARANTINE_AFTER_N):
+        cstore.record_publish_path_verdict("medium", cstore.STATUS_DRIFT_CONFIRMED)
+
+    assert cstore.get_publish_path_health("medium")["degraded"] is True
+
+    resp = client.get("/ce:health")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Publish-path drift monitor" in html
+    assert "degraded" in html
+    cstore.canary_health_store.reset()

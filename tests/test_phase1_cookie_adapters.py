@@ -24,7 +24,6 @@ from backlink_publisher._util.errors import DependencyError, ExternalServiceErro
 # (slug, adapter class name)
 COOKIE_ADAPTERS = [
     ("juejin", "JuejinAPIAdapter"),
-    ("jianshu", "JianshuAPIAdapter"),
     ("csdn", "CSDNAPIAdapter"),
     ("note", "NoteAPIAdapter"),
 ]
