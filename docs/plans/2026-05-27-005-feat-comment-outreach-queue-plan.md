@@ -449,7 +449,7 @@ URLs survive.
 
 ### Phase 2 — Discovery
 
-- [ ] **Unit 4: SSRF-safe body fetch + comment-region detection**
+- [x] **Unit 4: SSRF-safe body fetch + comment-region detection**
 
 **Goal:** Provide a body-returning, never-raises fetch wrapper and a comment-region
 detector that sets tri-state `comment_open`.
