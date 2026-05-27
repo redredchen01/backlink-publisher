@@ -323,6 +323,10 @@ def _record_publish_failure(
 ) -> str | None:
     outputs.append(_build_failure_row("failed", row, platform, err_msg, ts, adapter=platform))
     new_run_id = _try_update_ckpt_failed(run_id, row.get("id", ""), err_msg, err_class)
+    # Observe-only dedup record (U2): map this failure to failed/uncertain. Never
+    # gates publish; a store error is swallowed inside the gate helper.
+    from backlink_publisher.cli._dedup_gate import record_failure
+    record_failure(row, platform, error_class=err_class, run_id=run_id)
     publish_logger.error(
         f"publish failed: {exc}",
         extra={"id": row.get("id"), "platform": platform},

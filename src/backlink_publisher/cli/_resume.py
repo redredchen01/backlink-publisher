@@ -34,6 +34,7 @@ from ._publish_helpers import (
     _record_publish_path,
     _sleep_with_throttle,
 )
+from ._dedup_gate import record_done, record_failure, record_intent
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
@@ -70,10 +71,14 @@ def _record_resume_failure(
     exc: Exception,
     err_class: str,
     err_msg: str,
+    platform: str = "",
 ) -> None:
     from .. import checkpoint
 
     checkpoint.update_item(run_id, item["id"], "failed", error=err_msg, error_class=err_class)
+    # Observe-only dedup terminal (U2): map this failure to failed/uncertain using the
+    # loop-resolved platform so the key matches the record_intent write.
+    record_failure(item.get("payload") or {}, platform, error_class=err_class, run_id=run_id)
     publish_logger.error(
         f"publish failed: {exc}",
         extra={"id": item["id"], "platform": item.get("platform", "")},
@@ -213,6 +218,9 @@ def _run_resume(args: Any) -> None:
             extra={"id": item["id"], "platform": platform},
         )
 
+        # Observe-only dedup intent (U2): absent -> attempting before dispatch.
+        record_intent(row, platform, run_id=run_id)
+
         try:
             _check_token_drift(initial_token_revs)
             result = adapter_publish(
@@ -223,6 +231,7 @@ def _run_resume(args: Any) -> None:
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
+            record_failure(row, platform, error_class="auth_expired", run_id=run_id)
             try:
                 from webui_store.channel_status import mark_expired
                 mark_expired(exc.channel)
@@ -249,22 +258,23 @@ def _run_resume(args: Any) -> None:
         except BannerUploadError as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                "banner_upload", f"banner upload failed: {exc}",
+                "banner_upload", f"banner upload failed: {exc}", platform,
             )
             continue
         except DependencyError as exc:
+            record_failure(row, platform, error_class="dependency", run_id=run_id)
             emit_error(str(exc), exit_code=3)
             return
         except ExternalServiceError as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                _error_class(exc), f"service error: {exc}",
+                _error_class(exc), f"service error: {exc}", platform,
             )
             continue
         except Exception as exc:
             _record_resume_failure(
                 run_id, item, exc,
-                "unexpected", f"unexpected error: {exc}",
+                "unexpected", f"unexpected error: {exc}", platform,
             )
             continue
 
@@ -287,6 +297,15 @@ def _run_resume(args: Any) -> None:
                 f"verification failed: id={item['id']} reason={verify_reason}",
                 extra={"id": item["id"], "adapter": result.adapter},
             )
+
+        # Observe-only dedup terminal (U2): record done + verify flag (parity with
+        # the fresh seam). verify_ok is orthogonal to dedup identity.
+        record_done(
+            row, platform,
+            live_url=result.published_url or result.draft_url,
+            verify_ok=verify_ok,
+            run_id=run_id,
+        )
 
         from .. import checkpoint as _ckpt
         _ckpt.update_item(

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ._resume import _run_resume  # noqa: F401
+from ._dedup_gate import record_done, record_failure, record_intent
 
 from backlink_publisher.config import load_config
 from backlink_publisher._util.errors import (
@@ -227,6 +228,10 @@ def main(argv: list[str] | None = None) -> None:
             extra={"id": row.get("id"), "platform": platform, "mode": mode},
         )
 
+        # Observe-only dedup intent (U2): absent -> attempting before dispatch so a
+        # crash mid-publish leaves an attempting row. Never gates; failures swallowed.
+        record_intent(row, platform, run_id=run_id)
+
         try:
             _check_token_drift(initial_token_revs)
             result = adapter_publish(
@@ -237,6 +242,7 @@ def main(argv: list[str] | None = None) -> None:
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
+            record_failure(row, platform, error_class="auth_expired", run_id=run_id)
             _handle_auth_expired(exc, run_id, row, publish_logger)
             return
         except BannerUploadError as exc:
@@ -254,6 +260,7 @@ def main(argv: list[str] | None = None) -> None:
             )
             continue
         except DependencyError as exc:
+            record_failure(row, platform, error_class="dependency", run_id=run_id)
             emit_error(str(exc), exit_code=3)
             return
         except ExternalServiceError as exc:
@@ -274,6 +281,9 @@ def main(argv: list[str] | None = None) -> None:
         outputs.append(result.to_publish_output(row, ts))
         if result.error:
             fail_count += 1
+            # In-band adapter failure (returned, not raised): record terminal so the
+            # attempting row does not orphan. No exception => not http_5xx => failed.
+            record_failure(row, platform, error_class=None, run_id=run_id)
         else:
             success_count += 1
             if result.post_publish_delay_seconds > 0:
@@ -292,6 +302,15 @@ def main(argv: list[str] | None = None) -> None:
                     f"verification failed: id={row.get('id', '')} reason={verify_reason}",
                     extra={"id": row.get("id"), "adapter": result.adapter},
                 )
+
+            # Observe-only dedup terminal (U2): record done + verify flag. verify_ok is
+            # orthogonal to dedup identity — a verify flake leaves the key done.
+            record_done(
+                row, platform,
+                live_url=result.published_url or result.draft_url,
+                verify_ok=verify_ok,
+                run_id=run_id,
+            )
 
             if run_id is not None:
                 try:
