@@ -371,7 +371,7 @@ tests prove no registry/posting/browser coupling and no events.db file for the n
 verbs. (The lazy/local import in Unit 7's brief handler keeps this invariant holding for the
 other four verbs even after brief is wired.)
 
-- [ ] **Unit 2: Entity schemas + validation**
+- [x] **Unit 2: Entity schemas + validation**
 
 **Goal:** Define and validate `CommentTarget`, `QualificationResult`, `CommentBrief`,
 `ReviewStatus` following `schema.py` conventions, in an isolated module.
