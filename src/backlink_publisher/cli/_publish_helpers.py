@@ -417,31 +417,8 @@ def _build_parser() -> Any:
             "No publish, no lease, no checkpoint."
         ),
     )
-    parser.add_argument(
-        "--forget",
-        nargs=2,
-        default=None,
-        metavar=("PLATFORM", "TARGET_URL"),
-        help=(
-            "Clear one dedup key (single key only — no globs/bulk) so it becomes "
-            "re-publishable, and exit 0. Requires --reason. Records an audit entry."
-        ),
-    )
-    parser.add_argument(
-        "--list-uncertain",
-        action="store_true",
-        default=False,
-        help=(
-            "List held (uncertain) dedup rows awaiting adjudication and exit 0. "
-            "Optional --platform filter."
-        ),
-    )
-    parser.add_argument(
-        "--reason",
-        default=None,
-        metavar="TEXT",
-        help="Operator reason recorded in the dedup audit log (--forget/--adjudicate).",
-    )
+    from ._dedup_ops import add_dedup_arguments
+    add_dedup_arguments(parser)
     parser.add_argument(
         "--no-verify",
         action="store_true",
@@ -470,12 +447,14 @@ def _handle_checkpoint_ops(args: Any) -> None:
         args.resume, args.list_runs, args.cleanup, args.cleanup_all,
         getattr(args, "preview_manifest", False),
         getattr(args, "forget", None), getattr(args, "list_uncertain", False),
+        getattr(args, "adjudicate_uncertain", None),
+        getattr(args, "adjudicate_bulk", False),
     ]
     if sum(bool(x) for x in exclusive) > 1:
         emit_error(
             "error: --resume, --list-runs, --cleanup, --cleanup-all, "
-            "--preview-manifest, --forget, and --list-uncertain are mutually "
-            "exclusive",
+            "--preview-manifest, --forget, --list-uncertain, "
+            "--adjudicate-uncertain, and --adjudicate-bulk are mutually exclusive",
             exit_code=2,
         )
 
