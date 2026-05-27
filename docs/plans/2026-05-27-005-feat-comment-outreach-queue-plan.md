@@ -314,7 +314,7 @@ assembled in U5), so the top-risk detection spike can run in parallel with U2.*
 
 ### Phase 1 — Boundary & Data
 
-- [ ] **Unit 1: Package scaffold, CLI skeleton, isolation guard**
+- [x] **Unit 1: Package scaffold, CLI skeleton, isolation guard**
 
 **Goal:** Establish `comment_outreach/` package + thin `cli/comment.py` with all five
 subparsers dispatching to stubs (exit 0), wire the console_script, and lock the
