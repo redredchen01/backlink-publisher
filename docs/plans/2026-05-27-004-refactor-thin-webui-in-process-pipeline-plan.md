@@ -530,7 +530,7 @@ doing but is not the dominant source of perceived latency — Phase 1 (error
 fidelity) already delivered the primary value. Start with the Unit 6 `validate`
 pilot; `plan-backlinks` (heaviest import, ~281ms) has the largest payoff.
 
-- [ ] **Unit 5: Global-state audit + characterization lock (gates in-process)**
+- [x] **Unit 5: Global-state audit + characterization lock (gates in-process)**
 
 **Goal:** Enumerate every process-lifetime side effect the in-scope CLIs mutate,
 decide per-call isolation, and capture a golden/characterization corpus of current
@@ -543,7 +543,7 @@ subprocess output so the in-process swap is provably behavior-neutral.
 **Files:**
 - Create: `tests/test_pipeline_inprocess_characterization.py` (golden corpus:
   representative + error-path inputs for validate/plan/report-anchors, captured
-  from the subprocess path), `docs/plans/notes/inprocess-global-state-audit.md`
+  from the subprocess path), `docs/spike-notes/2026-05-27-inprocess-global-state-audit.md`
   (audit findings + per-surface decision)
 - Modify (if audit requires per-call reset): `webui_app/api/pipeline_api.py`
   (lazy `load_config()` per call), and document handling for `_util/logger.py`
