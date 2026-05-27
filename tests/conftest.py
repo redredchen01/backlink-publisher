@@ -9,7 +9,12 @@ not mass-migrate them.
 
 from __future__ import annotations
 
+import atexit
 import os
+import pwd
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -59,14 +64,96 @@ GRANDFATHERED_EXPANDUSER_SITES: frozenset[tuple[str, int]] = frozenset(
     }
 )
 
-# Real operator state roots — populated by Unit 3's HOME redirect (before the
-# redirect fires) and consumed by Unit 7's tripwire.  ``None`` until Unit 3
-# initialises them; the tripwire asserts they are non-None before use.
+# ── Layer 2: Pre-import HOME/override redirect (Plan 2026-05-27-005 Unit 3) ──
 #
-# Using module-level variables (not constants) because conftest.py is not a
-# package and the fixtures below must mutate these in place.
-REAL_CONFIG_ROOT: Path | None = None
-REAL_CACHE_ROOT: Path | None = None
+# MUST run as module-level code, before any backlink_publisher import.
+# pytest_configure is too late — the conftest body imports
+# publishing.registry/adapters.base at module load, which transitively
+# can freeze a raw Path.home() constant against the real HOME.
+#
+# Step 1: Capture the real operator roots via the OS (not $HOME, which we're
+# about to overwrite). Use pwd.getpwuid to bypass any existing $HOME mutation.
+# These are stored in REAL_CONFIG_ROOT / REAL_CACHE_ROOT so the tripwire
+# (Unit 7) can watch the operator's actual files — post-redirect Path.home()
+# and _config_dir() both resolve to the sandbox.
+_real_pw_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+# Honour a pre-existing operator-exported CONFIG/CACHE override (rare, but
+# possible in CI). If set, that IS the real root.
+_pre_existing_config = os.environ.get("BACKLINK_PUBLISHER_CONFIG_DIR")
+_pre_existing_cache = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
+REAL_CONFIG_ROOT: Path = (
+    Path(_pre_existing_config)
+    if _pre_existing_config
+    else _real_pw_home / ".config" / "backlink-publisher"
+)
+REAL_CACHE_ROOT: Path = (
+    Path(_pre_existing_cache)
+    if _pre_existing_cache
+    else _real_pw_home / ".cache" / "backlink-publisher"
+)
+
+# Step 2: Create a sandbox home and redirect env vars BEFORE imports.
+_sandbox_home_dir = Path(tempfile.mkdtemp(prefix="bp-sandbox-home-"))
+
+# Snapshot every env var we are about to clobber (pop-or-reassign pattern).
+_prev_env_home = os.environ.get("HOME")
+_prev_env_config = os.environ.get("BACKLINK_PUBLISHER_CONFIG_DIR")
+_prev_env_cache = os.environ.get("BACKLINK_PUBLISHER_CACHE_DIR")
+_prev_env_sentinel = os.environ.get(SANDBOX_SENTINEL)
+_prev_env_xdg_cfg = os.environ.get("XDG_CONFIG_HOME")
+_prev_env_xdg_cache = os.environ.get("XDG_CACHE_HOME")
+
+# Redirect.
+os.environ["HOME"] = str(_sandbox_home_dir)
+# Sandbox sub-dirs for the two overrides — _isolate_user_dirs will later
+# replace these with its own mktemp dirs, but the sentinel and HOME must
+# be set from this earliest point so any module-level import that calls
+# _config_dir() already lands in the sandbox.
+_sandbox_config_dir = _sandbox_home_dir / ".config" / "backlink-publisher"
+_sandbox_cache_dir = _sandbox_home_dir / ".cache" / "backlink-publisher"
+_sandbox_config_dir.mkdir(parents=True, exist_ok=True)
+_sandbox_cache_dir.mkdir(parents=True, exist_ok=True)
+os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(_sandbox_config_dir)
+os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(_sandbox_cache_dir)
+os.environ[SANDBOX_SENTINEL] = "1"
+# XDG dirs — redirect so platformdirs-aware libraries also land in sandbox.
+os.environ["XDG_CONFIG_HOME"] = str(_sandbox_home_dir / ".config")
+os.environ["XDG_CACHE_HOME"] = str(_sandbox_home_dir / ".cache")
+
+# Step 3: Blast-radius containment (R4a) — point git/coverage caches at
+# sandbox subdirs so redirecting HOME doesn't break git-subprocess tests.
+_sandbox_git_config = _sandbox_home_dir / ".gitconfig"
+if not _sandbox_git_config.exists():
+    _sandbox_git_config.write_text(
+        "[user]\n\tname = Test User\n\temail = test@example.com\n",
+        encoding="utf-8",
+    )
+
+# Step 4: Register atexit cleanup — restore env vars and remove the sandbox.
+def _restore_home_redirect() -> None:  # noqa: E302 (inside module body)
+    """Restore HOME and related env vars; delete the sandbox tmpdir."""
+    for key, prev in [
+        ("HOME", _prev_env_home),
+        ("BACKLINK_PUBLISHER_CONFIG_DIR", _prev_env_config),
+        ("BACKLINK_PUBLISHER_CACHE_DIR", _prev_env_cache),
+        (SANDBOX_SENTINEL, _prev_env_sentinel),
+        ("XDG_CONFIG_HOME", _prev_env_xdg_cfg),
+        ("XDG_CACHE_HOME", _prev_env_xdg_cache),
+    ]:
+        if prev is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = prev
+    shutil.rmtree(str(_sandbox_home_dir), ignore_errors=True)
+
+
+atexit.register(_restore_home_redirect)
+
+# Real operator state roots — populated above (before the redirect fired).
+# REAL_CONFIG_ROOT and REAL_CACHE_ROOT now hold the REAL paths.
+# (Declared above; re-annotated here for readability.)
+# REAL_CONFIG_ROOT: Path  ← already set
+# REAL_CACHE_ROOT: Path   ← already set
 
 # ── Test global-state pollution guardrail (Plan 2026-05-27-003) ─────────────
 # Single source of truth for the security-relevant keys, shared by the

@@ -329,10 +329,19 @@ def test_config_dir_falls_back_when_env_var_unset(tmp_path, monkeypatch):
 
     Defends against a regression where empty-string env var would resolve
     to ``Path("")``, silently writing into the CWD.
+
+    The sentinel (``BACKLINK_PUBLISHER_TEST_SANDBOX``) is cleared here so
+    the test exercises the *production* fallback path.  When the sentinel IS
+    set (normal test-suite mode), the resolver instead raises a RuntimeError
+    to catch subprocess spawns that forgot to propagate the override —
+    see ``test_fail_closed_resolver.py``.
     """
     from backlink_publisher.config import _config_dir
 
+    # Exercise production fallback (sentinel absent → resolver falls through
+    # to Path.home() default).
     monkeypatch.delenv("BACKLINK_PUBLISHER_CONFIG_DIR", raising=False)
+    monkeypatch.delenv("BACKLINK_PUBLISHER_TEST_SANDBOX", raising=False)
     assert _config_dir().name == "backlink-publisher"
     assert "backlink-publisher" in str(_config_dir())
 
