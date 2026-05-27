@@ -4,6 +4,7 @@ type: feat
 status: active
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-comment-outreach-queue-requirements.md
+claims: {}
 ---
 
 # feat: Comment Outreach Queue (comment_outreach module)
