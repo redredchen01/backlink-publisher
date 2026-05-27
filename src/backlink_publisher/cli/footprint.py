@@ -20,30 +20,20 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Any
 
 from ..footprint import (
     FootprintReport,
-    _top_by_count_then_lex,
     analyze_corpus,
     format_report_markdown,
 )
-from ..footprint_corpus import CORPUS_NAMES, compute_fixture_set_id, make_corpus
+from ..footprint_corpus import CORPUS_NAMES
 
 # ---------------------------------------------------------------------------
 # Re-export from _footprint_baseline (backward compatibility)
 # ---------------------------------------------------------------------------
 from ._footprint_baseline import (
-    _REASON_RUBBER_STAMP_RE,
-    _baseline_path,
-    _compute_baseline_record,
-    _print_diff_summary,
-    _read_existing_baseline,
-    _require_pythonhashseed_zero,
     _run_regenerate,
-    _serialize_baseline,
-    _validate_reason,
 )
 
 

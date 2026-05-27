@@ -1,7 +1,7 @@
 ---
 title: "refactor: remove dead _impl orphan adapter files (N1)"
 type: refactor
-status: active
+status: shipped
 date: 2026-05-26
 claims:
   paths:

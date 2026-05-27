@@ -66,6 +66,55 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
         os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = previous_cache
 
 
+# ── B2 R5: function-scoped config isolation re-assert ────────────────────────
+#
+# The session-scoped fixture above sets env vars with bare ``os.environ``.
+# Any test that ``pop``s the env var mid-session will cause subsequent tests
+# to resolve ``_config_dir()`` to the operator's real ``~/.config/`` path.
+# This function-scoped fixture re-asserts the isolation before every test,
+# making order-dependent leaks impossible (B2 R5).
+#
+# Plan 2026-05-27 B2 R5 / R6 — see docs/brainstorms/2026-05-27-channel-
+# binding-bug-sweep-requirements.md.
+
+_B2_REAL_CONFIG = os.path.expanduser("~/.config/backlink-publisher")
+
+
+@pytest.fixture(autouse=True)
+def _reassert_config_isolation():
+    """Re-assert config dir isolation lost by mid-session env pop.
+
+    R5: If a test popped ``BACKLINK_PUBLISHER_CONFIG_DIR`` without
+    restoring, create a fresh temp dir so the next test still runs
+    isolated — order dependence is eliminated regardless of polluter.
+
+    R6: After re-asserting, verify that the resolved config dir does
+    NOT point to the operator's real ``~/.config/backlink-publisher``.
+    If it does, loudly fail — this catches any test that touches real
+    operator data and makes the test suite a hard safety net.
+    """
+    if "BACKLINK_PUBLISHER_CONFIG_DIR" not in os.environ:
+        import tempfile
+        os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(
+            tempfile.mkdtemp(prefix="bp-config-reassert-")
+        )
+    if "BACKLINK_PUBLISHER_CACHE_DIR" not in os.environ:
+        import tempfile
+        os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(
+            tempfile.mkdtemp(prefix="bp-cache-reassert-")
+        )
+
+    from backlink_publisher.config.loader import _resolve_config_dir
+    resolved = str(_resolve_config_dir())
+    if resolved == _B2_REAL_CONFIG or resolved.startswith(_B2_REAL_CONFIG + "/"):
+        raise RuntimeError(
+            f"B2 R6 isolation FAILED: _resolve_config_dir() returned real "
+            f"operator config path {resolved!r}. A test fixture must have "
+            f"failed to restore BACKLINK_PUBLISHER_CONFIG_DIR. Fix the "
+            f"polluter, don't silence this check."
+        )
+
+
 @pytest.fixture(autouse=True)
 def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ``publish_backlinks.check_url`` at the consumer reference.

@@ -9,18 +9,17 @@ from __future__ import annotations
 
 import datetime as _dt
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Re-export from sub-modules (backward compatibility)
 # ---------------------------------------------------------------------------
 from ._plan_check_schema import (
-    SCHEMA_VERSION,
     PlanClaimsFilenameDateMismatch,
     PlanClaimsFrontmatterSchemaError,
     PlanClaimsGlobUnsupported,
     PlanClaimsMissingOnPostCutoff,
-    ClaimsBlock,
+    SCHEMA_VERSION,
     _check_filename_date_lock,
     _grandfathered,
     _parse_frontmatter,
@@ -33,8 +32,6 @@ from ._plan_check_git import (
     FetchOutcome,
     _classify_fetch_stderr,
     _fetch_head_age_seconds,
-    _git_env,
-    _last_git_error,
     _maybe_fetch_origin_main,
     _path_exists_on_main,
     _sha_reachable_from_main,
@@ -45,7 +42,6 @@ from ._plan_check_format import (
     _emit_json,
     _emit_recon_line,
     _format_human_drift,
-    _now_iso,
 )
 
 

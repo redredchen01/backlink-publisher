@@ -40,19 +40,7 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "instance_url; security policy: use a throwaway account only, "
         "never a personal Mastodon identity."
     ),
-    "livejournal": (
-        "Registered dofollow=\"uncertain\" pending the R4 canary loop "
-        "(Plan 2026-05-25-001 Unit 6): Phase 0 probe found post-body links "
-        "render rel=\"noopener noreferrer\" with NO nofollow token (= dofollow), "
-        "but the definitive status is confirmed only by publishing a canary and "
-        "reading verify_link_attributes on the live page, then amending this "
-        "register() to dofollow=True. referral_value=\"high\" reflects "
-        "LiveJournal's established DA + referral traffic should it turn out "
-        "nofollow. Security: XML-RPC challenge-response only (no OAuth/app "
-        "password), so credentials are password-equivalent at rest — use a "
-        "throwaway account; the secret cannot be revoked except by changing "
-        "the password."
-    ),
+
     "tumblr": (
         "Tumblr rewrites all outbound <a> href via t.umblr.com/redirect "
         "which strips link equity — server-side and compulsory for all "
@@ -178,5 +166,14 @@ NOFOLLOW_RATIONALES: dict[str, str] = {
         "reading verify_link_attributes, then amend to dofollow=True. "
         "referral_value=\"low\": anonymous markdown paste with low DA and "
         "frequent noindex, so equity is weak even if dofollow holds."
+    ),
+    "livejournal": (
+        "Registered dofollow=\"uncertain\" pending an OUR-pipeline canary. A "
+        "2026-05 third-party live check of a published LiveJournal post found "
+        "external body <a> carry no rel attribute (= dofollow), but a "
+        "third-party spot-check does not discharge the canary burden "
+        "(livejournal/txtfyi precedent). Confirm by publishing a canary and "
+        "reading verify_link_attributes on the live post, then amend to "
+        "dofollow=True. referral_value=\"high\": high-DA blogging platform."
     ),
 }
