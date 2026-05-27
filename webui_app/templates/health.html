@@ -134,6 +134,50 @@
     {% endif %}
   </div>
 
+  {# ── 3b. Canary health (Plan 2026-05-27-001 U4, read-side join) ───────── #}
+  {% set canary_rows = canary | default([]) %}
+  {% if canary_rows %}
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold">
+      Canary contract health
+      <span class="text-muted small fw-normal">(dofollow link-alive monitor; advisory unless opted into hard-skip)</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Platform</th>
+            <th>Verdict</th>
+            <th class="text-end">Drift streak</th>
+            <th class="text-end">OK streak</th>
+            <th>Quarantined</th>
+            <th>Last OK</th>
+            <th>Last drift</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in canary_rows %}
+          <tr class="{% if c.status == 'drift-confirmed' or c.quarantined %}row-worst{% endif %}">
+            <td class="target-cell">{{ c.platform }}</td>
+            <td>
+              {% if c.status == 'link-alive' %}<span class="badge text-bg-success">link-alive</span>
+              {% elif c.status == 'drift-confirmed' %}<span class="badge text-bg-danger">drift-confirmed</span>
+              {% elif c.status == 'advisory' %}<span class="badge text-bg-warning">advisory</span>
+              {% else %}<span class="badge text-bg-secondary">{{ c.status or 'not-configured' }}</span>{% endif %}
+            </td>
+            <td class="text-end">{{ c.consecutive_failures }}</td>
+            <td class="text-end">{{ c.consecutive_oks }}</td>
+            <td>{% if c.quarantined %}<span class="badge text-bg-danger">quarantined</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+            <td class="text-muted small">{{ c.last_ok_at or '—' }}</td>
+            <td class="text-muted small">{{ c.last_drift_at or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   {# ── 4. Error distribution (R8) ───────────────────────────────────────── #}
   <div class="card shadow-sm mb-4">
     <div class="card-header bg-white fw-semibold">Failure breakdown</div>

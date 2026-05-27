@@ -15,11 +15,15 @@ go through ``JsonStore.save`` → ``persistence.safe_write.atomic_write``
 (0o600), and ``update(fn)`` serialises read-modify-write under a
 per-instance ``threading.Lock``.
 
-**v1 MINIMAL fields only** (advisory-default debounce):
-``{status, consecutive_failures, last_ok_at, last_drift_at}``.
-``quarantined`` / ``consecutive_oks`` / re-arm machinery land in Unit 4
-alongside their consumers — deliberately NOT created here before the
-threshold-calibration step.
+**Fields** (Unit 1 minimal + Unit 4 quarantine/re-arm):
+``{status, consecutive_failures, last_ok_at, last_drift_at,
+consecutive_oks, quarantined}``. The first four are the advisory-default
+debounce set (Unit 1). ``consecutive_oks`` + ``quarantined`` and the
+re-arm machinery landed in Unit 4 alongside their consumers (the
+publish-backlinks hard-skip gate). Old minimal records written before
+Unit 4 are forward-compatible: missing ``consecutive_oks`` defaults to 0
+and missing ``quarantined`` defaults to ``False`` (treated as not
+quarantined).
 
 Status values are the verdicts Unit 3 will write:
 ``link-alive`` / ``drift-confirmed`` / ``advisory`` / ``not-configured``.
@@ -49,11 +53,23 @@ STATUS_DRIFT_CONFIRMED = "drift-confirmed"
 STATUS_ADVISORY = "advisory"
 STATUS_NOT_CONFIGURED = "not-configured"
 
+#: Quarantine threshold — consecutive confirmed drifts before a platform is
+#: flagged ``quarantined`` (debounce against a single transient drift). Only an
+#: opt-in (``hard_skip=true``) + quarantined platform is ever hard-skipped at
+#: publish time; degraded platforms otherwise stay advisory-only.
+QUARANTINE_AFTER_N = 2
+
+#: Re-arm threshold — consecutive ``link-alive`` runs required to clear an
+#: existing quarantine (anti-flap; a single green does not un-quarantine).
+REARM_AFTER_M = 2
+
 _HEALTH_DEFAULT: dict[str, Any] = {
     "status": STATUS_NOT_CONFIGURED,
     "consecutive_failures": 0,
     "last_ok_at": None,
     "last_drift_at": None,
+    "consecutive_oks": 0,
+    "quarantined": False,
 }
 
 
@@ -87,14 +103,22 @@ def list_all() -> dict[str, dict[str, Any]]:
 def record_verdict(platform: str, status: str) -> dict[str, Any]:
     """Record a canary verdict for ``platform`` and return the new record.
 
-    Debounce semantics (v1 minimal):
+    Debounce + quarantine/re-arm semantics:
 
     - ``link-alive``      → ``consecutive_failures`` resets to 0,
-      ``last_ok_at`` stamped.
+      ``consecutive_oks`` increments, ``last_ok_at`` stamped. On reaching
+      :data:`REARM_AFTER_M` consecutive OKs while currently quarantined,
+      ``quarantined`` clears (re-arm; anti-flap — one green is not enough).
     - ``drift-confirmed`` → ``consecutive_failures`` increments,
-      ``last_drift_at`` stamped.
+      ``consecutive_oks`` resets to 0, ``last_drift_at`` stamped. On
+      reaching :data:`QUARANTINE_AFTER_N` consecutive failures,
+      ``quarantined`` is set ``True``.
     - ``advisory`` / ``not-configured`` → counters preserved, timestamps
-      unchanged (a read failure is neither an OK nor a confirmed drift).
+      and quarantine flag unchanged (a read failure is neither an OK nor a
+      confirmed drift, and must never silently un-quarantine or quarantine).
+
+    Backward compat: old records missing ``consecutive_oks`` / ``quarantined``
+    default to 0 / ``False``.
 
     Read-modify-write runs through ``update(fn)`` under the store's
     per-instance lock; the write is atomic 0o600 via ``JsonStore.save``.
@@ -104,26 +128,56 @@ def record_verdict(platform: str, status: str) -> dict[str, Any]:
         current = dict(current)
         existing = current.get(platform) or {}
         failures = int(existing.get("consecutive_failures", 0) or 0)
+        oks = int(existing.get("consecutive_oks", 0) or 0)
+        quarantined = bool(existing.get("quarantined", False))
         last_ok_at = existing.get("last_ok_at")
         last_drift_at = existing.get("last_drift_at")
 
         if status == STATUS_LINK_ALIVE:
             failures = 0
+            oks += 1
             last_ok_at = _now_iso()
+            if quarantined and oks >= REARM_AFTER_M:
+                quarantined = False  # re-arm
         elif status == STATUS_DRIFT_CONFIRMED:
             failures += 1
+            oks = 0
             last_drift_at = _now_iso()
-        # advisory / not-configured: preserve counters + timestamps.
+            if failures >= QUARANTINE_AFTER_N:
+                quarantined = True
+        # advisory / not-configured: preserve counters, timestamps, quarantine.
 
         current[platform] = {
             "status": status,
             "consecutive_failures": failures,
             "last_ok_at": last_ok_at,
             "last_drift_at": last_drift_at,
+            "consecutive_oks": oks,
+            "quarantined": quarantined,
         }
         return current
 
     return canary_health_store.update(_apply)[platform]
+
+
+def is_quarantined(platform: str) -> bool:
+    """True iff ``platform`` is currently quarantined (confirmed-drift debounce
+    crossed :data:`QUARANTINE_AFTER_N` and not yet re-armed). Backward-compat:
+    records missing the ``quarantined`` key are treated as not quarantined.
+    Fail-open: unknown platforms return ``False``."""
+    return bool(get_health(platform).get("quarantined", False))
+
+
+def is_degraded(platform: str) -> bool:
+    """True iff ``platform`` warrants an advisory WARNING at publish/plan time:
+    either its last verdict is ``drift-confirmed`` or it is quarantined.
+    Fail-open: unknown / never-run platforms return ``False`` (no spurious
+    warning). ``advisory`` / ``link-alive`` / ``not-configured`` are NOT
+    degraded — an unreadable canary page is not a confirmed contract drift."""
+    rec = get_health(platform)
+    return bool(rec.get("quarantined", False)) or (
+        rec.get("status") == STATUS_DRIFT_CONFIRMED
+    )
 
 
 def _load_canary_section(config_path: Path | None = None) -> dict[str, Any]:
@@ -179,9 +233,13 @@ __all__ = [
     "STATUS_DRIFT_CONFIRMED",
     "STATUS_ADVISORY",
     "STATUS_NOT_CONFIGURED",
+    "QUARANTINE_AFTER_N",
+    "REARM_AFTER_M",
     "get_health",
     "list_all",
     "record_verdict",
     "read_canary_config",
+    "is_quarantined",
+    "is_degraded",
     "_load_canary_section",
 ]

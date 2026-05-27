@@ -55,6 +55,7 @@ cat seeds.jsonl | plan-backlinks | validate-backlinks | publish-backlinks --mode
 | `audit-state` | `cli/audit_state.py` | Dual-state divergence auditor (read-only) |
 | `preflight-targets` | `cli/preflight_targets.py` | Destination-page health check before publish |
 | `cull-channels` | `cli/cull_channels.py` | Read-only channel-quality cull advisory (Blast-radius R9) |
+| `canary-targets` | `cli/canary_targets.py` | Read-only adapter-contract canary: re-fetch dofollow-tier canary posts, assert target backlink still dofollow (advisory; config-driven; exit 0). Runbook: `docs/runbooks/2026-05-27-canary-targets-operations.md` |
 
 ### Output contract
 
@@ -125,7 +126,7 @@ NOTE: A stale copy exists at workspace root `./.github/workflows/ci.yml` (refere
 
 | Var | Purpose |
 |---|---|
-| `BACKLINK_PUBLISHER_CONFIG_DIR` | Override config dir (default `~/.config/backlink-publisher/`) |
+| `BACKLINK_PUBLISHER_CONFIG_DIR` | Override config dir (default `~/.config/backlink-publisher/`). Also holds `[canary.<platform>]` config (`post_url`/`expected_target`/`marker`/`hard_skip`) and the `canary-targets` health store `canary-health.json` (0o600) |
 | `BACKLINK_PUBLISHER_CACHE_DIR` | Override cache dir (default `~/.cache/backlink-publisher/`) |
 | `BACKLINK_LLM_API_KEY` | LLM API key for anchor generation |
 | `BACKLINK_NO_FETCH_VERIFY` | Skip content fetch verification |

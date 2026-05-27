@@ -450,3 +450,26 @@ def main(argv: list[str] | None = None) -> None:
             distinct_targets=len(distinct_targets),
             hint="run `preflight-targets` to verify destination pages before publishing",
         )
+
+    # Canary advisory nudge (Plan 2026-05-27-001 Unit 4): at plan time, surface
+    # any planned platform whose last canary verdict flagged contract drift so
+    # the operator can investigate before publishing. Advisory only — never
+    # filters rows here. RECON-level (survives the WARN gate, stripped by tests'
+    # _stderr_without_warnings). Non-sensitive fields only (platform names).
+    try:
+        from backlink_publisher.canary.store import is_degraded
+
+        planned_platforms = {
+            p.strip()
+            for row in outputs
+            if isinstance((p := row.get("platform")), str) and p.strip()
+        }
+        degraded = sorted(p for p in planned_platforms if is_degraded(p))
+        if degraded:
+            plan_logger.recon(
+                "canary_advisory_nudge",
+                degraded_platforms=",".join(degraded),
+                hint="canary 偵測到上述平台契約漂移;發布前請複查 adapter 或重新 seed canary",
+            )
+    except Exception:  # noqa: BLE001 — advisory must never break plan generation
+        pass

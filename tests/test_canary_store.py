@@ -64,20 +64,27 @@ def test_get_health_unknown_returns_minimal_default():
         "consecutive_failures": 0,
         "last_ok_at": None,
         "last_drift_at": None,
+        "consecutive_oks": 0,
+        "quarantined": False,
     }
     # Read default must not have written a file.
     assert not _health_path().exists()
 
 
-def test_health_record_only_has_v1_minimal_fields():
+def test_health_record_has_quarantine_fields():
     rec = store.record_verdict("velog", store.STATUS_DRIFT_CONFIRMED)
-    # Unit 1 must NOT introduce quarantined / consecutive_oks (Unit 4).
+    # Unit 4 adds quarantined + consecutive_oks alongside the Unit 1 minimal set.
     assert set(rec) == {
         "status",
         "consecutive_failures",
         "last_ok_at",
         "last_drift_at",
+        "consecutive_oks",
+        "quarantined",
     }
+    # A single drift is below QUARANTINE_AFTER_N → not yet quarantined.
+    assert rec["consecutive_failures"] == 1
+    assert rec["quarantined"] is False
 
 
 # ── Edge: debounce counters ──────────────────────────────────────────────
