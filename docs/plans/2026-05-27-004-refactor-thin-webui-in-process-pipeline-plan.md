@@ -283,7 +283,7 @@ graph TB
 
 Phase 1 = Units 1–3 (ship independently). Phase 2 = Units 4–8.
 
-- [ ] **Unit 1: Typed-error envelope + shared chokepoint**
+- [x] **Unit 1: Typed-error envelope + shared chokepoint**
 
 **Goal:** A dependency-free typed-error envelope (schema: `error_class`,
 `exit_code`, `message`) and an additive machine-readable emission through the
@@ -338,7 +338,7 @@ Phase 1 = Units 1–3 (ship independently). Phase 2 = Units 4–8.
 **Verification:** Round-trip and chokepoint tests pass; existing `errors.py` tests
 still green (human text preserved).
 
-- [ ] **Unit 2: Route every CLI fatal-error emit site through the chokepoint**
+- [x] **Unit 2: Route every CLI fatal-error emit site through the chokepoint**
 
 **Goal:** All fatal-error exits in the in-scope CLIs go through the Unit 1
 chokepoint so each emits the typed envelope — no direct `print(...,file=stderr)+SystemExit`.
@@ -393,7 +393,7 @@ guards in `validate_backlinks.py:108`, `publish_backlinks.py:69`.
 golden stdout unchanged; `tests/test_no_monolith_regrowth.py` still green (or
 ceiling raised in-PR with rationale).
 
-- [ ] **Unit 3: WebUI consumes typed errors; delete `stderr[:200]`**
+- [x] **Unit 3: WebUI consumes typed errors; delete `stderr[:200]`** ✅ Phase 1 complete (reconciled with f44e8f3 fidelity layer)
 
 **Goal:** `run_pipe` / `PipeResult` parse the envelope into a typed
 `PipeResult.error`; routes show the real error; QUARANTINE unknown shapes.
