@@ -168,11 +168,49 @@ class InternalError(PipelineError):
     exit_code = 5
 
 
+# exit_code → canonical class name, for emit_error() which has no exception object.
+# Mirrors the PipelineError hierarchy above.
+_EXIT_CODE_CLASS_NAME = {
+    1: "UsageError",
+    2: "InputValidationError",
+    3: "DependencyError",
+    4: "ExternalServiceError",
+    5: "InternalError",
+}
+
+
+def _emit_error_envelope(error_class: str, exit_code: int, message: str) -> None:
+    """Emit the machine-readable typed-error line to stderr (Phase 1 contract).
+
+    Additive: callers print the human-readable text first, then this line. The
+    WebUI bridge parses it into a typed ``PipeResult.error`` instead of slicing
+    ``stderr[:200]``. Best-effort — a failure here must never mask the original
+    error (the human text + ``SystemExit`` already happened / will happen).
+    """
+    import sys
+
+    try:
+        from backlink_publisher._util.error_envelope import ErrorEnvelope
+
+        print(
+            ErrorEnvelope(
+                error_class=error_class, exit_code=exit_code, message=message
+            ).serialize(),
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:  # pragma: no cover - envelope emission is best-effort
+        pass
+
+
 def emit_error(message: str, exit_code: int = 5) -> None:
     """Print diagnostic to stderr and exit."""
     import sys
 
     print(message, file=sys.stderr, flush=True)
+    _emit_error_envelope(
+        _EXIT_CODE_CLASS_NAME.get(exit_code, "PipelineError"), exit_code, message
+    )
     raise SystemExit(exit_code)
 
 
@@ -181,6 +219,11 @@ def handle_error(exc: PipelineError) -> None:
     import sys
 
     print(str(exc.message), file=sys.stderr, flush=True)
+    # error_class = the specific exception type (e.g. "AuthExpiredError",
+    # "ContentRejectedError") so the operator sees the real error, not a coarse
+    # bucket. (classify_exception's 5-value ErrorClass would collapse
+    # ContentRejectedError → "unexpected", defeating the Phase 1 success criterion.)
+    _emit_error_envelope(type(exc).__name__, exc.exit_code, str(exc.message))
     raise SystemExit(exc.exit_code)
 
 
@@ -189,4 +232,5 @@ def handle_unexpected_error(exc: Exception) -> None:
     import sys
 
     print(f"unexpected error: {exc}", file=sys.stderr, flush=True)
+    _emit_error_envelope(type(exc).__name__, 5, f"unexpected error: {exc}")
     raise SystemExit(5)
