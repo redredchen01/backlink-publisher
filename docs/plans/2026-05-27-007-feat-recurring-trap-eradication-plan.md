@@ -1,7 +1,7 @@
 ---
 title: "feat: Recurring-Trap Eradication — Audit First, Then Guard"
 type: feat
-status: active
+status: completed
 date: 2026-05-27
 origin: docs/brainstorms/2026-05-27-recurring-trap-eradication-requirements.md
 claims: {}  # opt-out: no unmerged SHAs to pin; required for plan-check on ≥2026-05-20 plans
@@ -160,7 +160,7 @@ Two corpus realities surfaced in brainstorm review reshape the approach (see ori
 > This keeps the single-document structure (the N-gate is the complexity-control valve) without
 > treating the not-yet-specifiable downstream units as settled work.
 
-- [ ] **Unit 1: Audit spike — enumerate & classify recurring traps from committed evidence**
+- [x] **Unit 1: Audit spike — enumerate & classify recurring traps from committed evidence** ✅ `docs/audits/2026-05-27-recurring-trap-eradication-audit.md` — **N=0**
 
 **Goal:** Produce a dated candidate list and the count **N** of traps that are
 *recurred ∩ mechanizable ∩ currently-unguarded*, every recurrence claim backed by a committed
@@ -199,7 +199,7 @@ candidates; it cannot decide "same root cause re-broke." No committed scanner.
 - A committed, dated audit doc exists; every `candidate`/`guarded` row cites a committed artifact;
   N is stated; the four brainstorm exemplars appear with their classifications.
 
-- [ ] **Unit 2: Artifact-shape decision gate (consume N)**
+- [x] **Unit 2: Artifact-shape decision gate (consume N)** ✅ N=0 ⇒ no register, no new docstrings; the audit doc is the whole artifact
 
 **Goal:** Decide the durable artifact from Unit 1's N before any guard or register work is committed.
 
@@ -223,7 +223,7 @@ candidates; it cannot decide "same root cause re-broke." No committed scanner.
 **Verification:**
 - The audit doc states the chosen artifact shape and why, derived from the actual N.
 
-- [ ] **Unit 3: Build first-batch guards (one honest guard per `candidate`)**
+- [x] **Unit 3: Build first-batch guards (one honest guard per `candidate`)** ✅ ∅ — N=0, no candidates to guard (the recurred∩mechanizable class was already guarded)
 
 **Goal:** For each `candidate` from Unit 1, add a CI-run guard that turns red on a faithful repro of
 the original bug and green once the fix is present.
@@ -273,7 +273,7 @@ boundary into a test rather than a judgment.
 - Each new guard demonstrably red-on-repro → green-on-main; runs under `pytest tests/`; assertion
   message names the offender. No guard lives outside `tests/`.
 
-- [ ] **Unit 4: Snapshot closure — rationales, honesty & CI verification**
+- [x] **Unit 4: Snapshot closure — rationales, honesty & CI verification** ✅ recorded in the audit doc; frozen at `7a7f216`; going-forward = AGENTS.md §Lessons capture
 
 **Goal:** Close the frozen snapshot so every Unit 1 candidate is either `guarded` or carries a
 one-line `not-mechanizable`/`backlog` rationale, and verify no new orphan/inert guard was introduced.
