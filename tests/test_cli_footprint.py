@@ -21,7 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from backlink_publisher.cli.footprint import _validate_reason, main
+from backlink_publisher.cli.footprint import main
+from backlink_publisher.cli._footprint_baseline import _validate_reason
 from backlink_publisher.footprint import SCHEMA_VERSION
 from backlink_publisher.footprint_corpus import CORPUS_NAMES, compute_fixture_set_id
 

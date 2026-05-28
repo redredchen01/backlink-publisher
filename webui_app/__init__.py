@@ -7,6 +7,7 @@ draft jobs restored from the queue.
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import timedelta
@@ -25,9 +26,16 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
     """
     template_dir = Path(__file__).parent / "templates"
     app = Flask(__name__, template_folder=str(template_dir))
-    app.secret_key = os.environ.get(
-        'SECRET_KEY', 'backlink-publisher-secret-' + str(uuid.uuid4()),
-    )
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        secret_key = 'backlink-publisher-secret-' + str(uuid.uuid4())
+        if os.environ.get('FLASK_ENV') != 'development':
+            logging.getLogger(__name__).warning(
+                "SECRET_KEY not set in environment; using a random key. "
+                "This will invalidate all sessions and CSRF tokens on restart. "
+                "Set SECRET_KEY for production use."
+            )
+    app.secret_key = secret_key
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=15)
     # Plan 2026-05-21-006 Unit 3.5 — SESSION_COOKIE_SECURE was unconditional
     # `True`, which contradicts the loopback-HTTP framing: under HTTP the
@@ -196,7 +204,9 @@ def create_app(*, start_scheduler: bool | None = None) -> Flask:
         # Plan 2026-05-19-001 Unit 4: real-runtime startup hooks. Gated by
         # ``start_scheduler`` so pytest never fires them. Wrapped because a
         # disk read failure must not crash ``create_app``.
-        import logging
+        # NB: logging is module-level (imported at line 10) — no local import
+        # here to avoid UnboundLocalError from Python's compile-time scope
+        # analysis.
         _log = logging.getLogger(__name__)
         try:
             from webui_store.channel_status import reconcile_on_load

@@ -15,13 +15,6 @@ from backlink_publisher.publishing.registry import (
     Publisher,
     _REGISTRY,
     _REJECTED_PLATFORMS,
-    _DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
-    _UI_META_BY_PLATFORM,
-    _BIND_BY_PLATFORM,
-    _POLICY_BY_PLATFORM,
-    _VISIBILITY_BY_PLATFORM,
     dofollow_rationale,
     dofollow_status,
     referral_value,
@@ -49,53 +42,30 @@ RATIONALE_PAD = "x" * 80
 
 @pytest.fixture(autouse=True)
 def _snapshot_registry():
-    """Snapshot + restore all three registry dicts around each test.
+    """Snapshot + restore registry state around each test.
 
-    The conftest ``fake_platform_registered`` fixture only saves the
-    ``"fake"`` key of ``_REGISTRY``. U2 introduces two new dicts; tests
-    that exercise validation must restore all three to avoid leaking
-    state into the rest of the suite.
+    U2 stores dofollow/rationale/referral_value as fields in RegistryEntry
+    within _REGISTRY, so only _REGISTRY and _REJECTED_PLATFORMS need
+    snapshotting to prevent state leakage between tests.
     """
-    reg_snap = {k: list(v) for k, v in _REGISTRY.items()}
-    df_snap = dict(_DOFOLLOW_BY_PLATFORM)
-    rat_snap = dict(_RATIONALE_BY_PLATFORM)
-    ref_snap = dict(_REFERRAL_VALUE_BY_PLATFORM)
+    reg_snap = dict(_REGISTRY)
     rej_snap = dict(_REJECTED_PLATFORMS)
-    # Plan 2026-05-25-002 Unit 1 — snapshot manifest dicts.
-    ui_snap = dict(_UI_META_BY_PLATFORM)
-    bind_snap = dict(_BIND_BY_PLATFORM)
-    pol_snap = dict(_POLICY_BY_PLATFORM)
-    vis_snap = dict(_VISIBILITY_BY_PLATFORM)
     try:
         yield
     finally:
         _REGISTRY.clear()
         _REGISTRY.update(reg_snap)
-        _DOFOLLOW_BY_PLATFORM.clear()
-        _DOFOLLOW_BY_PLATFORM.update(df_snap)
-        _RATIONALE_BY_PLATFORM.clear()
-        _RATIONALE_BY_PLATFORM.update(rat_snap)
-        _REFERRAL_VALUE_BY_PLATFORM.clear()
-        _REFERRAL_VALUE_BY_PLATFORM.update(ref_snap)
         _REJECTED_PLATFORMS.clear()
         _REJECTED_PLATFORMS.update(rej_snap)
-        _UI_META_BY_PLATFORM.clear()
-        _UI_META_BY_PLATFORM.update(ui_snap)
-        _BIND_BY_PLATFORM.clear()
-        _BIND_BY_PLATFORM.update(bind_snap)
-        _POLICY_BY_PLATFORM.clear()
-        _POLICY_BY_PLATFORM.update(pol_snap)
-        _VISIBILITY_BY_PLATFORM.clear()
-        _VISIBILITY_BY_PLATFORM.update(vis_snap)
 
 
 class TestDofollowTrue:
-    def test_register_with_dofollow_true_stores_status(self) -> None:
+    def test_dofollow_true_sets_status(self) -> None:
         register("foo_true", FakeAdapter, dofollow=True)
         assert dofollow_status("foo_true") is True
         assert dofollow_rationale("foo_true") is None
 
-    def test_dofollow_true_does_not_require_rationale(self) -> None:
+    def test_dofollow_true_allows_empty_rationale(self) -> None:
         # R4: dofollow=True may pass rationale informationally.
         register("foo_true_with_msg", FakeAdapter, dofollow=True, rationale="ignored short")
         assert dofollow_status("foo_true_with_msg") is True
@@ -103,37 +73,14 @@ class TestDofollowTrue:
         assert dofollow_rationale("foo_true_with_msg") == "ignored short"
 
 
-class TestDofollowFalseRequiresRationale:
-    def test_register_with_dofollow_false_and_long_rationale_succeeds(self) -> None:
-        register(
-            "foo_false",
-            FakeAdapter,
-            dofollow=False,
-            rationale=RATIONALE_PAD,
-            referral_value="low",
-        )
-        assert dofollow_status("foo_false") is False
-        assert dofollow_rationale("foo_false") == RATIONALE_PAD
+class TestDofollowTrueWithOptionalFields:
+    def test_dofollow_true_stores_long_rationale(self) -> None:
+        register("test", FakeAdapter, dofollow=True, rationale=RATIONALE_PAD)
+        assert dofollow_rationale("test") == RATIONALE_PAD
 
-    def test_register_with_dofollow_false_and_short_rationale_raises(self) -> None:
-        with pytest.raises(RegistryError, match="rationale"):
-            register("foo_false_short", FakeAdapter, dofollow=False, rationale="too short")
-
-    def test_register_with_dofollow_false_and_no_rationale_raises(self) -> None:
-        with pytest.raises(RegistryError, match="rationale"):
-            register("foo_false_none", FakeAdapter, dofollow=False)
-
-    def test_register_with_invalid_referral_value_raises(self) -> None:
-        # The _ReferralValue Literal is static-only; a typo must be caught
-        # at runtime, not silently stored and mis-bucketed downstream.
-        with pytest.raises(RegistryError, match="referral_value must be"):
-            register(
-                "foo_bad_referral",
-                FakeAdapter,
-                dofollow=False,
-                rationale=RATIONALE_PAD,
-                referral_value="HIGH",  # type: ignore[arg-type]
-            )
+    def test_dofollow_true_accepts_referral_value(self) -> None:
+        register("test", FakeAdapter, dofollow=True, referral_value="high")
+        assert referral_value("test") == "high"
 
     def test_register_dofollow_true_rejects_invalid_referral_value(self) -> None:
         # Even when referral_value is optional (dofollow=True), a provided
@@ -147,8 +94,32 @@ class TestDofollowFalseRequiresRationale:
             )
 
 
+class TestDofollowFalseRequiresRationale:
+    @pytest.mark.parametrize("rationale,ref_value,should_pass,description", [
+        (RATIONALE_PAD, "low", True, "valid case with long rationale and low referral"),
+        ("too short", "low", False, "short rationale should fail"),
+        (RATIONALE_PAD, None, False, "missing referral_value should fail"),
+        (None, "low", False, "missing rationale should fail"),
+        (RATIONALE_PAD, "HIGH", False, "invalid referral_value should fail"),
+    ])
+    def test_dofollow_false_validation(self, rationale, ref_value, should_pass, description):
+        """Parametrized test for dofollow=False validation requirements."""
+        if should_pass:
+            register("test_platform", FakeAdapter, dofollow=False, 
+                    rationale=rationale, referral_value=ref_value)
+            assert dofollow_status("test_platform") is False
+            if rationale is not None:
+                assert dofollow_rationale("test_platform") == rationale
+            if ref_value is not None:
+                assert referral_value("test_platform") == ref_value
+        else:
+            with pytest.raises(RegistryError, match="rationale|referral_value"):
+                register("test_platform", FakeAdapter, dofollow=False,
+                        rationale=rationale, referral_value=ref_value)
+
+
 class TestDofollowUncertainRequiresRationale:
-    def test_register_with_uncertain_and_long_rationale_succeeds(self) -> None:
+    def test_dofollow_uncertain_sets_status(self) -> None:
         register(
             "foo_unc",
             FakeAdapter,
@@ -158,7 +129,7 @@ class TestDofollowUncertainRequiresRationale:
         )
         assert dofollow_status("foo_unc") == "uncertain"
 
-    def test_register_with_uncertain_and_no_rationale_raises(self) -> None:
+    def test_dofollow_uncertain_requires_rationale(self) -> None:
         with pytest.raises(RegistryError, match="rationale"):
             register("foo_unc_none", FakeAdapter, dofollow="uncertain")
 
@@ -169,7 +140,7 @@ class TestRejectedPlatform:
     # is empty.  These tests validate the rejection mechanism still works
     # by temporarily inserting a test entry.
 
-    def test_rejected_name_raises_with_temp_entry(self) -> None:
+    def test_rejected_name_raises(self) -> None:
         # Demonstrate that the rejection mechanism still fires
         # by temporarily inserting a test entry.
         _REJECTED_PLATFORMS["_test_reject"] = "rationale: at least 80 chars of padding here xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -177,7 +148,7 @@ class TestRejectedPlatform:
             register("_test_reject", FakeAdapter, dofollow=True)
         del _REJECTED_PLATFORMS["_test_reject"]
 
-    def test_error_message_cites_prior_rationale_and_instructs_deletion(self) -> None:
+    def test_error_message_includes_prior_rationale_and_deletion_instruction(self) -> None:
         # R12: failure message must include both prior rationale + the
         # un-rejection-by-deletion instruction. Use a temp entry.
         _REJECTED_PLATFORMS["_temp_reject"] = "rationale: at least 80 chars of padding here xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
@@ -203,7 +174,7 @@ class TestRejectedPlatform:
         assert dofollow_status("_tmp") is False
         assert "_tmp" not in _REJECTED_PLATFORMS
 
-    def test_wordpresscom_now_registers_successfully(self) -> None:
+    def test_wordpresscom_registers_successfully(self) -> None:
         # Phase 3: wordpresscom is fully un-rejected and registered.
         assert "wordpresscom" in _REGISTRY
         assert "wordpresscom" not in _REJECTED_PLATFORMS
@@ -217,10 +188,10 @@ class TestDofollowKwargRequired:
         with pytest.raises(TypeError, match="dofollow"):
             register("foo_no_kwarg", FakeAdapter)  # type: ignore[call-arg]
 
-    def test_register_with_last_call_wins_overwrites_parallel_dicts(self) -> None:
-        # "Last call wins" is preserved across all three dicts. A second
-        # register() call with a different dofollow value supersedes the
-        # first cleanly — no stale residue in the parallel dicts.
+    def test_register_with_last_call_wins_overwrites_fields(self) -> None:
+        # "Last call wins" overwrites all RegistryEntry fields. A second
+        # register() call with a different dofollow value replaces the
+        # first completely — no stale field values remain.
         register(
             "foo_recycle",
             FakeAdapter,
@@ -229,12 +200,14 @@ class TestDofollowKwargRequired:
             referral_value="low",
         )
         assert dofollow_status("foo_recycle") is False
+        assert dofollow_rationale("foo_recycle") == RATIONALE_PAD
+        assert referral_value("foo_recycle") == "low"
         register("foo_recycle", FakeAdapter, dofollow=True)
         assert dofollow_status("foo_recycle") is True
         # The old False-state rationale must NOT leak into the new
         # True-state registration (R4: True does not validate rationale,
         # so a stale string would be confusing). Same for referral_value
-        # (Plan 2026-05-25-001 last-call-wins across all parallel dicts).
+        # (last-call-wins across all fields in RegistryEntry).
         assert dofollow_rationale("foo_recycle") is None
         assert referral_value("foo_recycle") is None
 

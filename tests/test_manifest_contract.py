@@ -100,7 +100,8 @@ class TestPerPlatformContract:
     def test_adapter_is_publisher_subclass_or_instance(
         self, platform: str
     ) -> None:
-        chain = _REGISTRY[platform]
+        entry_obj = _REGISTRY[platform]
+        chain = entry_obj.publishers
         assert chain, f"{platform!r} has empty chain"
         for idx, entry in enumerate(chain):
             if inspect.isclass(entry):

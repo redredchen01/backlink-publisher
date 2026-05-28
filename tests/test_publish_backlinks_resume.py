@@ -477,11 +477,13 @@ def test_fresh_run_then_resume_full_flow(
         _blogger_result("r1"),
         ExternalServiceError("r2 failed"),
     ]
-    stdout, stderr, code = _run_publish(stdin_data, argv=["--mode", "draft"])
+    stdout, stderr, code = _run_publish(
+        stdin_data, argv=["--mode", "draft", "--log-level", "INFO"]
+    )
     assert code == 4
     assert "run_id=" in stderr
 
-    run_id = stderr.split("run_id=")[1].split()[0].strip()
+    run_id = stderr.split("run_id=")[1].split('"')[0].strip()
 
     # Resume: r2 now succeeds
     mock_resume_pub.side_effect = None

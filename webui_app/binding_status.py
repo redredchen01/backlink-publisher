@@ -155,9 +155,11 @@ def _publish_backend_for(name: str) -> str:
     except Exception:
         return "unknown"
 
-    chain = _REGISTRY.get(name)
-    if not chain:
+    entry = _REGISTRY.get(name)
+    if not entry:
         return "unknown"
+
+    chain = entry.publishers
 
     has_chrome = any(isinstance(e, BrowserPublishDispatcher) for e in chain)
     has_api = any(

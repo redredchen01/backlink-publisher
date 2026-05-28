@@ -140,7 +140,7 @@ class TestZeroBehaviourChange:
     def test_velog_chain_still_has_graphql_first(self) -> None:
         from backlink_publisher.publishing.registry import _REGISTRY
 
-        chain = _REGISTRY["velog"]
+        chain = _REGISTRY["velog"].publishers
         # First chain entry stays the VelogGraphQLAdapter class
         # (lazy-instantiated). The browser dispatcher remains the
         # fallback (DependencyError → next).
@@ -158,7 +158,7 @@ class TestZeroBehaviourChange:
         # Pre-Unit-3: 2 entries (VelogGraphQLAdapter +
         # BrowserPublishDispatcher.for_channel). Manifest kwargs don't
         # touch the chain.
-        assert len(_REGISTRY["velog"]) == 2
+        assert len(_REGISTRY["velog"].publishers) == 2
 
     def test_velog_dofollow_unchanged(self) -> None:
         from backlink_publisher.publishing.registry import dofollow_status

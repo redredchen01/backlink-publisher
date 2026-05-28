@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
         :root {
             --primary: #4f46e5;
             --primary-dark: #4338ca;
@@ -8,38 +10,58 @@
             --info: #3b82f6;
             --light: #f9fafb;
             --dark: #1f2937;
-            --gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --gradient: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            --glass-bg: rgba(255, 255, 255, 0.8);
+            --glass-border: rgba(255, 255, 255, 0.4);
         }
         
         body {
-            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #f3f4f6;
+            font-family: 'Outfit', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at 10% 20%, rgba(243, 244, 246, 1) 0%, rgba(229, 231, 235, 1) 90%);
             min-height: 100vh;
             padding: 20px;
+            color: #374151;
+            transition: background 0.3s ease;
         }
         
         .navbar {
-            background: var(--primary);
-            padding: 1rem 2rem;
-            border-radius: 12px;
+            background: var(--gradient);
+            padding: 1.2rem 2.4rem;
+            border-radius: 16px;
             margin-bottom: 24px;
-            box-shadow: 0 4px 16px rgba(79, 70, 229, 0.15);
+            box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.3);
+            border: 1px solid var(--glass-border);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .navbar:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 30px -5px rgba(79, 70, 229, 0.4);
         }
         
         .navbar h1 {
             color: white;
             margin: 0;
-            font-size: 1.5rem;
-            font-weight: 600;
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
         }
         
         .card {
-            background: white;
-            border: none;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            margin-bottom: 20px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.02);
+            margin-bottom: 24px;
             overflow: hidden;
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.1);
         }
         
         .card-header {

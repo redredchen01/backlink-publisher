@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import random
 import re
-import sys
 import time
 from enum import Enum
 from typing import Any, Callable, TypeVar
 
 from backlink_publisher._util.errors import DependencyError, ExternalServiceError
+from backlink_publisher._util.logger import opencli_logger as log
 
 T = TypeVar("T")
 
@@ -136,4 +136,4 @@ def _emit_retry(
         "msg": f"retrying (attempt {attempt}/{max_attempts}): {exc_name} — waiting {wait:.1f}s",
         "adapter": adapter,
     }
-    print(json.dumps(msg), file=sys.stderr, flush=True)
+    log.warn(**msg)

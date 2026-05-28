@@ -215,9 +215,9 @@ register(
 register(
     "livejournal",
     LivejournalAPIAdapter,
-    dofollow="uncertain",  # R4 canary pending; Phase 0 preliminary = dofollow
+    dofollow="uncertain",
     rationale=_R["livejournal"],
-    referral_value="high",  # established DA + referral if it turns out nofollow
+    referral_value="high",
     **LIVEJOURNAL_MANIFEST,
 )
 register(
@@ -329,7 +329,8 @@ def verify_adapter_setup(
             "Bind via browser login (set [mastodon] instance_url first)."
         )
 
-    chain = _REGISTRY.get(platform) or []
+    _entry = _REGISTRY.get(platform)
+    chain = _entry.publishers if _entry else []
     for entry in chain:
         publisher_cls = entry if isinstance(entry, type) else type(entry)
         if publisher_cls.available(config):

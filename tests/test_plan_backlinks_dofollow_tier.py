@@ -15,9 +15,6 @@ import pytest
 from backlink_publisher.cli.plan_backlinks._payload import dofollow_tier_metadata
 from backlink_publisher.publishing import adapters  # noqa: F401 — registers production platforms
 from backlink_publisher.publishing.registry import (
-    _DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
     _REGISTRY,
     register,
 )
@@ -32,21 +29,12 @@ class _FakeAdapter(Publisher):
 
 @pytest.fixture
 def _isolate_registry():
-    reg = {k: list(v) for k, v in _REGISTRY.items()}
-    df = dict(_DOFOLLOW_BY_PLATFORM)
-    rat = dict(_RATIONALE_BY_PLATFORM)
-    ref = dict(_REFERRAL_VALUE_BY_PLATFORM)
+    reg = dict(_REGISTRY)
     try:
         yield
     finally:
-        for d, snap in (
-            (_REGISTRY, reg),
-            (_DOFOLLOW_BY_PLATFORM, df),
-            (_RATIONALE_BY_PLATFORM, rat),
-            (_REFERRAL_VALUE_BY_PLATFORM, ref),
-        ):
-            d.clear()
-            d.update(snap)
+        _REGISTRY.clear()
+        _REGISTRY.update(reg)
 
 
 def test_dofollow_platform_marked_dofollow() -> None:
@@ -92,7 +80,9 @@ def test_unregistered_platform_defaults_to_nofollow_signal() -> None:
 def test_marking_is_pure_does_not_mutate_registry() -> None:
     # Observability-only: calling the mapper must not register or alter
     # any platform state.
-    before = dict(_DOFOLLOW_BY_PLATFORM)
+    before = dict(_REGISTRY)
     dofollow_tier_metadata("blogger")
     dofollow_tier_metadata("devto")
-    assert dict(_DOFOLLOW_BY_PLATFORM) == before
+    assert _REGISTRY.keys() == before.keys()
+    for k in before:
+        assert _REGISTRY[k].dofollow == before[k].dofollow

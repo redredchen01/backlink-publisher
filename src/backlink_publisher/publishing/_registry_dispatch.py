@@ -65,9 +65,10 @@ def dispatch(
             _command=f"publish to {plat} --mode {mode} (dry-run)",
         )
 
-    chain = _REGISTRY.get(plat)
-    if not chain:
+    _entry = _REGISTRY.get(plat)
+    if not _entry:
         raise ExternalServiceError(f"unsupported platform: {plat}")
+    chain = _entry.publishers
 
     banner_dict = payload.get("banner") if banner_emit is not None else None
     do_banner = banner_dict is not None and banner_dict.get("path") is not None

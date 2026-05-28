@@ -131,6 +131,10 @@ class PipelineLogger:
     def warn(self, msg: str, **extra: Any) -> None:
         self._emit("WARN", msg, extra or None)
 
+    def warning(self, msg: str, **extra: Any) -> None:
+        """Alias for :meth:`warn` — matches ``logging.Logger`` interface."""
+        self._emit("WARN", msg, extra or None)
+
     def error(self, msg: str, **extra: Any) -> None:
         self._emit("ERROR", msg, extra or None)
 

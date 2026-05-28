@@ -20,10 +20,7 @@ from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.publishing.registry import (
     Publisher,
     _BIND_BY_PLATFORM,
-    _DOFOLLOW_BY_PLATFORM,
     _POLICY_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
     _REGISTRY,
     _UI_META_BY_PLATFORM,
     _VISIBILITY_BY_PLATFORM,
@@ -41,10 +38,7 @@ class _Fake(Publisher):
 @pytest.fixture(autouse=True)
 def _snapshot():
     snaps = [
-        (_REGISTRY, {k: list(v) for k, v in _REGISTRY.items()}),
-        (_DOFOLLOW_BY_PLATFORM, dict(_DOFOLLOW_BY_PLATFORM)),
-        (_RATIONALE_BY_PLATFORM, dict(_RATIONALE_BY_PLATFORM)),
-        (_REFERRAL_VALUE_BY_PLATFORM, dict(_REFERRAL_VALUE_BY_PLATFORM)),
+        (_REGISTRY, dict(_REGISTRY)),
         (_UI_META_BY_PLATFORM, dict(_UI_META_BY_PLATFORM)),
         (_BIND_BY_PLATFORM, dict(_BIND_BY_PLATFORM)),
         (_POLICY_BY_PLATFORM, dict(_POLICY_BY_PLATFORM)),

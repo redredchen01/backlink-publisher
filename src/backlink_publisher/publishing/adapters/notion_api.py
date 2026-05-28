@@ -242,7 +242,7 @@ class NotionAPIAdapter(Publisher):
                 try:
                     err_body = resp.json()
                     msg = err_body.get("message", resp.text[:200])
-                except Exception:
+                except ValueError:
                     msg = resp.text[:200]
                 raise ExternalServiceError(
                     f"Notion API rejected request (HTTP 400): {msg}"

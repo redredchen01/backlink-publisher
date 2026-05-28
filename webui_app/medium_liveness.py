@@ -1,5 +1,10 @@
 """Plan 2026-05-19-003 Unit 5 — Medium liveness probe.
 
+Re-export shim — Wave 1 thin-WebUI refactor (2026-05-28).
+Probe logic lives at ``backlink_publisher.publishing.adapters.medium_liveness``.
+The store-coupled orchestration function (``medium_liveness_check``) stays
+here because it calls ``webui_store.channel_status``.
+
 Invoked from the webui Settings GET handler (via ``_get_medium_status``
 in helpers.py) to keep ``channel_status_store["medium"]`` reflecting
 reality without depending on the operator triggering a publish or
@@ -25,64 +30,33 @@ Design:
      short-circuits to ``NEEDS_RECHECK`` after the cache check.
 
 Outcomes:
-  - ``NEVER_BOUND`` — storage_state.json absent → re-bind needed
-  - ``EXPIRED`` — store says expired (e.g., publish-time mark_expired)
-  - ``CACHED_BOUND`` — within 5-min TTL of last_verified_at
-  - ``LOGGED_IN`` — active probe landed on ``/@<user>`` or ``/me/*``
-  - ``NEEDS_RECHECK`` — probe disabled, timed out, OR landed on a
-    challenge page; live state not mutated (don't claim false-expired
-    on Cloudflare hiccup)
+   - ``NEVER_BOUND`` — storage_state.json absent → re-bind needed
+   - ``EXPIRED`` — store says expired (e.g., publish-time mark_expired)
+   - ``CACHED_BOUND`` — within 5-min TTL of last_verified_at
+   - ``LOGGED_IN`` — active probe landed on ``/@<user>`` or ``/me/*``
+   - ``NEEDS_RECHECK`` — probe disabled, timed out, OR landed on a
+     challenge page; live state not mutated (don't claim false-expired
+     on Cloudflare hiccup)
 """
 
 from __future__ import annotations
 
 import concurrent.futures
-import enum
-import json
 import time
-from pathlib import Path
-from typing import Any
 
 from backlink_publisher._util.logger import opencli_logger as log
-from backlink_publisher.config.loader import _config_dir
-
-
-# Plan 003 Unit 5 / Unit 0 spike output: default OFF until Spike 2
-# confirms headless probe doesn't trip Cloudflare/Datadome on real
-# Medium accounts. Flip to True once spike runs report no challenges.
-#
-# Known limit (PR #83 adversarial review, P1 #5): when the probe runs
-# against medium.com, Cloudflare may issue a FRESH cf_clearance cookie
-# to the probe context. Because we use probe-copy isolation (the live
-# storage_state.json is never mutated), that fresh clearance never
-# propagates back. The IP-reputation side is implicit: the next real
-# publish from this host sends the OLD cf_clearance, which Cloudflare
-# may treat as a fingerprint mismatch and challenge. Before flipping
-# this to True, rate-limit liveness probes well below the 5-min TTL —
-# 1x/day is sufficient for "is the badge green" UX without depleting
-# the publish path's clearance budget.
-MEDIUM_LIVENESS_ACTIVE_PROBE_ENABLED: bool = False
+from backlink_publisher.publishing.adapters.medium_liveness import (
+    LivenessResult,
+    MEDIUM_LIVENESS_ACTIVE_PROBE_ENABLED,
+    _active_probe,
+    _load_storage_state_for_probe,
+    _storage_state_path,
+)
 
 
 # 5-minute cache on last_verified_at — every Settings page load within
 # this window short-circuits to CACHED_BOUND without spawning a probe.
 _LIVENESS_TTL_SECONDS = 300
-
-
-class LivenessResult(enum.Enum):
-    """Outcomes of ``medium_liveness_check``. UI maps to badge states."""
-
-    NEVER_BOUND = "never_bound"
-    EXPIRED = "expired"
-    CACHED_BOUND = "cached_bound"
-    LOGGED_IN = "logged_in"
-    NEEDS_RECHECK = "needs_recheck"
-
-
-def _storage_state_path() -> Path:
-    """Single source of truth for the bound credential. Matches the
-    constant in ``MediumBrowserAdapter`` (Plan 003 Unit 6)."""
-    return _config_dir() / "medium-storage-state.json"
 
 
 def _last_verified_age_seconds(last_verified_at: str | None) -> float:
@@ -93,7 +67,6 @@ def _last_verified_age_seconds(last_verified_at: str | None) -> float:
     try:
         from datetime import datetime
         ts = datetime.fromisoformat(last_verified_at)
-        # Datetime arithmetic is timezone-aware when both have tzinfo.
         now = datetime.fromisoformat(
             datetime.now(ts.tzinfo).isoformat(timespec="seconds")
             if ts.tzinfo
@@ -102,121 +75,6 @@ def _last_verified_age_seconds(last_verified_at: str | None) -> float:
         return (now - ts).total_seconds()
     except (ValueError, TypeError):
         return float("inf")
-
-
-def _load_storage_state_for_probe() -> dict[str, Any] | None:
-    """Read ``storage_state.json`` into memory as a dict for safe pass to
-    ``new_context(storage_state=...)``. Returns ``None`` if absent.
-
-    Single retry on JSONDecodeError covers the narrow race between
-    ``MediumBrowserAdapter._refresh_storage_state``'s atomic temp+rename
-    and a concurrent probe read. ``os.replace`` is atomic at the FS
-    level; transient read failures are unlikely but the retry adds
-    defense-in-depth at negligible cost.
-
-    Known limit (PR #83 adversarial review, P1 #2): a different race
-    survives this loader — the probe can grab the OLD file's bytes
-    *just before* a concurrent ``_refresh_storage_state`` rename, then
-    use those cookies in ``_active_probe``. If the new file contains
-    rotated session cookies, the probe will hit /m/signin with the
-    stale state and call ``mark_expired``, demoting a credential that
-    was just refreshed seconds ago. Mitigation when the probe ships:
-    re-stat after probe verdict; if mtime advanced, suppress
-    ``mark_expired`` for this tick (next Settings load reads the fresh
-    file with a fresh cache TTL and gets the correct verdict).
-    """
-    path = _storage_state_path()
-    if not path.exists():
-        return None
-    for attempt in (1, 2):
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            if attempt == 1:
-                time.sleep(0.05)
-                continue
-            log.warn(
-                "medium_liveness: storage_state.json unreadable after retry; "
-                "treating as needs_recheck"
-            )
-            return None
-        except OSError as exc:
-            log.warn(
-                f"medium_liveness: storage_state.json read error: "
-                f"{type(exc).__name__}: {exc}"
-            )
-            return None
-    return None
-
-
-def _active_probe(storage_state: dict[str, Any]) -> LivenessResult:
-    """Launch a short-lived headless Chromium, load storage_state from
-    memory, goto medium.com/me, inspect final URL.
-
-    NOT called from the Flask request thread directly — wrapped in a
-    ThreadPoolExecutor with timeout by the public ``medium_liveness_check``.
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        log.warn("medium_liveness: Playwright not installed; needs_recheck")
-        return LivenessResult.NEEDS_RECHECK
-
-    try:
-        with sync_playwright() as pw:
-            # Plan 003 Unit 5: launch (not launch_persistent_context) — the
-            # probe shares NO disk state with the headed publish; if anti-bot
-            # flags this session, the live storage_state.json is untouched.
-            browser = pw.chromium.launch(headless=True)
-            try:
-                # Pass the dict directly; Playwright accepts storage_state
-                # as path-or-dict (we use dict here for probe-copy isolation).
-                context = browser.new_context(storage_state=storage_state)
-                page = context.new_page()
-                try:
-                    page.goto("https://medium.com/me", timeout=8000)
-                except Exception as exc:  # noqa: BLE001
-                    log.warn(
-                        f"medium_liveness: goto failed: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                    return LivenessResult.NEEDS_RECHECK
-                final_url = page.url
-            finally:
-                try:
-                    browser.close()
-                except Exception:  # noqa: BLE001
-                    pass
-
-        # Outcome classification — order matters: a Cloudflare challenge URL
-        # may CONTAIN "/m/signin" as a redirect param, so check challenge
-        # first.
-        if (
-            "challenges.cloudflare.com" in final_url
-            or "__cf_chl_" in final_url
-            or "datadome" in final_url.lower()
-        ):
-            return LivenessResult.NEEDS_RECHECK
-        if "/m/signin" in final_url:
-            return LivenessResult.EXPIRED
-        # Match the Plan 001 recipe's bound-URL semantics — any medium.com
-        # URL that isn't /m/signin is treated as logged in (consistent with
-        # the bind recipe predicate).
-        if "medium.com" in final_url:
-            return LivenessResult.LOGGED_IN
-        # Unexpected landing (e.g., 503 page on a different host) — don't
-        # claim either bound or expired.
-        log.warn(
-            f"medium_liveness: probe ended on unexpected URL {final_url!r}; "
-            f"needs_recheck"
-        )
-        return LivenessResult.NEEDS_RECHECK
-    except Exception as exc:  # noqa: BLE001 — defensive
-        log.warn(
-            f"medium_liveness: active probe failed: "
-            f"{type(exc).__name__}: {exc}"
-        )
-        return LivenessResult.NEEDS_RECHECK
 
 
 def medium_liveness_check(timeout_s: float = 10.0) -> LivenessResult:
@@ -300,9 +158,6 @@ def medium_liveness_check(timeout_s: float = 10.0) -> LivenessResult:
                 f"medium_liveness: mark_expired failed: "
                 f"{type(exc).__name__}: {exc}"
             )
-    # NEEDS_RECHECK and any other outcome: do NOT mutate the store —
-    # let the cached state ride until the next probe gives a definite
-    # answer.
 
     return result
 
@@ -312,5 +167,6 @@ __all__ = [
     "MEDIUM_LIVENESS_ACTIVE_PROBE_ENABLED",
     "_active_probe",
     "_load_storage_state_for_probe",
+    "_storage_state_path",
     "medium_liveness_check",
 ]

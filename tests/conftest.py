@@ -243,6 +243,55 @@ def _isolate_user_dirs(tmp_path_factory: pytest.TempPathFactory):
         os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = previous_cache
 
 
+# ── B2 R5: function-scoped config isolation re-assert ────────────────────────
+#
+# The session-scoped fixture above sets env vars with bare ``os.environ``.
+# Any test that ``pop``s the env var mid-session will cause subsequent tests
+# to resolve ``_config_dir()`` to the operator's real ``~/.config/`` path.
+# This function-scoped fixture re-asserts the isolation before every test,
+# making order-dependent leaks impossible (B2 R5).
+#
+# Plan 2026-05-27 B2 R5 / R6 — see docs/brainstorms/2026-05-27-channel-
+# binding-bug-sweep-requirements.md.
+
+_B2_REAL_CONFIG = os.path.expanduser("~/.config/backlink-publisher")
+
+
+@pytest.fixture(autouse=True)
+def _reassert_config_isolation():
+    """Re-assert config dir isolation lost by mid-session env pop.
+
+    R5: If a test popped ``BACKLINK_PUBLISHER_CONFIG_DIR`` without
+    restoring, create a fresh temp dir so the next test still runs
+    isolated — order dependence is eliminated regardless of polluter.
+
+    R6: After re-asserting, verify that the resolved config dir does
+    NOT point to the operator's real ``~/.config/backlink-publisher``.
+    If it does, loudly fail — this catches any test that touches real
+    operator data and makes the test suite a hard safety net.
+    """
+    if "BACKLINK_PUBLISHER_CONFIG_DIR" not in os.environ:
+        import tempfile
+        os.environ["BACKLINK_PUBLISHER_CONFIG_DIR"] = str(
+            tempfile.mkdtemp(prefix="bp-config-reassert-")
+        )
+    if "BACKLINK_PUBLISHER_CACHE_DIR" not in os.environ:
+        import tempfile
+        os.environ["BACKLINK_PUBLISHER_CACHE_DIR"] = str(
+            tempfile.mkdtemp(prefix="bp-cache-reassert-")
+        )
+
+    from backlink_publisher.config.loader import _resolve_config_dir
+    resolved = str(_resolve_config_dir())
+    if resolved == _B2_REAL_CONFIG or resolved.startswith(_B2_REAL_CONFIG + "/"):
+        raise RuntimeError(
+            f"B2 R6 isolation FAILED: _resolve_config_dir() returned real "
+            f"operator config path {resolved!r}. A test fixture must have "
+            f"failed to restore BACKLINK_PUBLISHER_CONFIG_DIR. Fix the "
+            f"polluter, don't silence this check."
+        )
+
+
 @pytest.fixture(autouse=True)
 def _mock_publish_check_url(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch ``publish_backlinks.check_url`` at the consumer reference.
@@ -464,13 +513,6 @@ from backlink_publisher.publishing.registry import (  # noqa: E402
     Publisher as _Publisher,
     register as _register,
     _REGISTRY as __REGISTRY,
-    _DOFOLLOW_BY_PLATFORM as __DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM as __RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM as __REFERRAL_VALUE_BY_PLATFORM,
-    _UI_META_BY_PLATFORM as __UI_META_BY_PLATFORM,
-    _BIND_BY_PLATFORM as __BIND_BY_PLATFORM,
-    _POLICY_BY_PLATFORM as __POLICY_BY_PLATFORM,
-    _VISIBILITY_BY_PLATFORM as __VISIBILITY_BY_PLATFORM,
 )
 
 
@@ -502,16 +544,6 @@ def fake_platform_registered():
     pattern stays internally consistent across all three registry maps.
     """
     previous = __REGISTRY.get("fake")
-    previous_dofollow = __DOFOLLOW_BY_PLATFORM.get("fake")
-    previous_rationale = __RATIONALE_BY_PLATFORM.get("fake")
-    previous_referral = __REFERRAL_VALUE_BY_PLATFORM.get("fake")
-    # Plan 2026-05-25-002 Unit 1 — snapshot manifest dicts alongside the
-    # existing four. Same per-key fixture pattern; missing snapshot would
-    # leak manifest state across tests.
-    previous_ui = __UI_META_BY_PLATFORM.get("fake")
-    previous_bind = __BIND_BY_PLATFORM.get("fake")
-    previous_policy = __POLICY_BY_PLATFORM.get("fake")
-    previous_visibility = __VISIBILITY_BY_PLATFORM.get("fake")
     _register("fake", FakeAdapter, dofollow=True)
     try:
         yield
@@ -520,34 +552,6 @@ def fake_platform_registered():
             __REGISTRY.pop("fake", None)
         else:
             __REGISTRY["fake"] = previous
-        if previous_dofollow is None:
-            __DOFOLLOW_BY_PLATFORM.pop("fake", None)
-        else:
-            __DOFOLLOW_BY_PLATFORM["fake"] = previous_dofollow
-        if previous_rationale is None:
-            __RATIONALE_BY_PLATFORM.pop("fake", None)
-        else:
-            __RATIONALE_BY_PLATFORM["fake"] = previous_rationale
-        if previous_referral is None:
-            __REFERRAL_VALUE_BY_PLATFORM.pop("fake", None)
-        else:
-            __REFERRAL_VALUE_BY_PLATFORM["fake"] = previous_referral
-        if previous_ui is None:
-            __UI_META_BY_PLATFORM.pop("fake", None)
-        else:
-            __UI_META_BY_PLATFORM["fake"] = previous_ui
-        if previous_bind is None:
-            __BIND_BY_PLATFORM.pop("fake", None)
-        else:
-            __BIND_BY_PLATFORM["fake"] = previous_bind
-        if previous_policy is None:
-            __POLICY_BY_PLATFORM.pop("fake", None)
-        else:
-            __POLICY_BY_PLATFORM["fake"] = previous_policy
-        if previous_visibility is None:
-            __VISIBILITY_BY_PLATFORM.pop("fake", None)
-        else:
-            __VISIBILITY_BY_PLATFORM["fake"] = previous_visibility
 
 
 # ── Layer 3: Credential tripwire (Plan 2026-05-27-005 Unit 7) ───────────────

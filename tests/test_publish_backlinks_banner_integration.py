@@ -112,21 +112,10 @@ def _register_test_platform():
     `fake_platform_registered` fixture); each dict gets its own
     snapshot tuple and a paired clear()+update() on teardown.
     """
-    from backlink_publisher.publishing.registry import (
-        _DOFOLLOW_BY_PLATFORM,
-        _RATIONALE_BY_PLATFORM,
-    )
-
-    snapshot = {k: list(v) for k, v in _REGISTRY.items()}
-    dofollow_snapshot = dict(_DOFOLLOW_BY_PLATFORM)
-    rationale_snapshot = dict(_RATIONALE_BY_PLATFORM)
+    snapshot = dict(_REGISTRY)
     yield
     _REGISTRY.clear()
     _REGISTRY.update(snapshot)
-    _DOFOLLOW_BY_PLATFORM.clear()
-    _DOFOLLOW_BY_PLATFORM.update(dofollow_snapshot)
-    _RATIONALE_BY_PLATFORM.clear()
-    _RATIONALE_BY_PLATFORM.update(rationale_snapshot)
 
 
 @pytest.fixture

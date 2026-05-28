@@ -27,16 +27,17 @@ from webui_app.medium_liveness import (
     LivenessResult,
     _active_probe,
     _load_storage_state_for_probe,
+    _storage_state_path,
     medium_liveness_check,
 )
 
 
 @pytest.fixture(autouse=True)
 def _reset_channel_status(monkeypatch):
-    """Fresh channel-status.json + medium-storage-state.json per test."""
+    """Fresh channel-status.json + medium-cookies.json per test."""
     cfg = _config_dir()
     cfg.mkdir(parents=True, exist_ok=True)
-    for name in ("channel-status.json", "medium-storage-state.json"):
+    for name in ("channel-status.json", "medium-cookies.json"):
         p = cfg / name
         if p.exists():
             p.unlink()
@@ -47,8 +48,9 @@ def _reset_channel_status(monkeypatch):
 
 
 def _write_storage_state(payload: dict | None = None) -> Path:
-    target = _config_dir() / "medium-storage-state.json"
-    target.write_text(json.dumps(payload or {"cookies": [], "origins": []}))
+    """Post-Plan 005: medium-cookies.json is the canonical credential."""
+    target = _config_dir() / "medium-cookies.json"
+    target.write_text(json.dumps(payload or {"cookies": []}))
     return target
 
 
@@ -222,14 +224,14 @@ class TestProbeTimeout:
 class TestStorageStateReadRetry:
     def test_jsondecodeerror_retries_then_returns_none(self, monkeypatch):
         # Write garbage so json.loads fails
-        target = _config_dir() / "medium-storage-state.json"
+        target = _config_dir() / "medium-cookies.json"
         target.write_text("{ corrupt")
 
         # _load_storage_state_for_probe retries once then gives up → None
         assert _load_storage_state_for_probe() is None
 
     def test_valid_json_loads_without_retry(self):
-        _write_storage_state({"cookies": [{"name": "x"}], "origins": []})
+        _write_storage_state({"cookies": [{"name": "x"}]})
         result = _load_storage_state_for_probe()
         assert result is not None
         assert result["cookies"][0]["name"] == "x"

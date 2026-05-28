@@ -23,13 +23,6 @@ from backlink_publisher._util.errors import RegistryError
 from backlink_publisher.publishing import adapters  # noqa: F401 — import side effect: registers all 7 production platforms
 from backlink_publisher.publishing.registry import (
     Publisher,
-    _DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
-    _UI_META_BY_PLATFORM,
-    _BIND_BY_PLATFORM,
-    _POLICY_BY_PLATFORM,
-    _VISIBILITY_BY_PLATFORM,
     _REGISTRY,
     _REJECTED_PLATFORMS,
     dofollow_rationale,
@@ -133,39 +126,22 @@ class _FakeAdapter(Publisher):
 
 @pytest.fixture
 def _isolate_registry():
-    """Snapshot+restore all three registry dicts so red-path violations
-    don't bleed into other tests in the run."""
-    reg_snap = {k: list(v) for k, v in _REGISTRY.items()}
-    df_snap = dict(_DOFOLLOW_BY_PLATFORM)
-    rat_snap = dict(_RATIONALE_BY_PLATFORM)
-    ref_snap = dict(_REFERRAL_VALUE_BY_PLATFORM)
+    """Snapshot+restore all registry dicts so red-path violations
+    don't bleed into other tests in the run.
+    
+    Note: Manifest fields (ui, bind, policy, visibility) and dofollow/rationale/referral_value
+    are now stored as fields in RegistryEntry within _REGISTRY, so only _REGISTRY and 
+    _REJECTED_PLATFORMS need to be snapshotted.
+    """
+    reg_snap = dict(_REGISTRY)
     rej_snap = dict(_REJECTED_PLATFORMS)
-    # Plan 2026-05-25-002 Unit 1 — snapshot manifest dicts.
-    ui_snap = dict(_UI_META_BY_PLATFORM)
-    bind_snap = dict(_BIND_BY_PLATFORM)
-    pol_snap = dict(_POLICY_BY_PLATFORM)
-    vis_snap = dict(_VISIBILITY_BY_PLATFORM)
     try:
         yield
     finally:
         _REGISTRY.clear()
         _REGISTRY.update(reg_snap)
-        _DOFOLLOW_BY_PLATFORM.clear()
-        _DOFOLLOW_BY_PLATFORM.update(df_snap)
-        _RATIONALE_BY_PLATFORM.clear()
-        _RATIONALE_BY_PLATFORM.update(rat_snap)
-        _REFERRAL_VALUE_BY_PLATFORM.clear()
-        _REFERRAL_VALUE_BY_PLATFORM.update(ref_snap)
         _REJECTED_PLATFORMS.clear()
         _REJECTED_PLATFORMS.update(rej_snap)
-        _UI_META_BY_PLATFORM.clear()
-        _UI_META_BY_PLATFORM.update(ui_snap)
-        _BIND_BY_PLATFORM.clear()
-        _BIND_BY_PLATFORM.update(bind_snap)
-        _POLICY_BY_PLATFORM.clear()
-        _POLICY_BY_PLATFORM.update(pol_snap)
-        _VISIBILITY_BY_PLATFORM.clear()
-        _VISIBILITY_BY_PLATFORM.update(vis_snap)
 
 
 class TestSyntheticRedPaths:

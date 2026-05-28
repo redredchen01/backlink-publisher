@@ -1,7 +1,7 @@
 ---
 title: "refactor: decompose validate_output_payload (N2, CC F(43)→low)"
 type: refactor
-status: active
+status: shipped
 date: 2026-05-26
 claims:
   # Only paths that exist on origin/main — the drift gate verifies reachability.

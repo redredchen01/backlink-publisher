@@ -9,6 +9,7 @@ import requests
 from backlink_publisher.http import get as http_get, post as http_post
 
 from backlink_publisher.config import Config
+from backlink_publisher.config.types import MEDIUM_API_BASE, MEDIUM_API_TIMEOUT
 from backlink_publisher._util.errors import (
     AuthExpiredError,
     DependencyError,
@@ -21,8 +22,8 @@ from .base import AdapterResult
 from .link_attr_verifier import required_link_urls, verify_link_attributes
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
-_API_BASE = "https://api.medium.com/v1"
-_TIMEOUT = 30  # seconds
+_API_BASE = MEDIUM_API_BASE
+_TIMEOUT = MEDIUM_API_TIMEOUT
 
 
 class _TransientHTTPError(Exception):

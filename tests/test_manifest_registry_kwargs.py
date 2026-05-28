@@ -30,10 +30,7 @@ from backlink_publisher.publishing.adapters.base import AdapterResult
 from backlink_publisher.publishing.registry import (
     Publisher,
     _BIND_BY_PLATFORM,
-    _DOFOLLOW_BY_PLATFORM,
     _POLICY_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
     _REGISTRY,
     _REJECTED_PLATFORMS,
     _UI_META_BY_PLATFORM,
@@ -66,30 +63,21 @@ class _FakeAdapter(Publisher):
 
 @pytest.fixture(autouse=True)
 def _snapshot_registry():
-    """Snapshot+restore all 8 registry dicts so red-path tests don't
-    bleed into the rest of the suite."""
-    reg = {k: list(v) for k, v in _REGISTRY.items()}
-    df = dict(_DOFOLLOW_BY_PLATFORM)
-    rat = dict(_RATIONALE_BY_PLATFORM)
-    ref = dict(_REFERRAL_VALUE_BY_PLATFORM)
+    """Snapshot+restore registry state so red-path tests don't
+    bleed into the rest of the suite.
+    
+    Note: Manifest fields (ui, bind, policy, visibility) are now stored
+    as fields in RegistryEntry within _REGISTRY, so only _REGISTRY and 
+    _REJECTED_PLATFORMS need to be snapshotted.
+    """
+    reg = dict(_REGISTRY)
     rej = dict(_REJECTED_PLATFORMS)
-    ui = dict(_UI_META_BY_PLATFORM)
-    bind = dict(_BIND_BY_PLATFORM)
-    pol = dict(_POLICY_BY_PLATFORM)
-    vis = dict(_VISIBILITY_BY_PLATFORM)
     try:
         yield
     finally:
         for store, snap in (
             (_REGISTRY, reg),
-            (_DOFOLLOW_BY_PLATFORM, df),
-            (_RATIONALE_BY_PLATFORM, rat),
-            (_REFERRAL_VALUE_BY_PLATFORM, ref),
             (_REJECTED_PLATFORMS, rej),
-            (_UI_META_BY_PLATFORM, ui),
-            (_BIND_BY_PLATFORM, bind),
-            (_POLICY_BY_PLATFORM, pol),
-            (_VISIBILITY_BY_PLATFORM, vis),
         ):
             store.clear()
             store.update(snap)

@@ -1,13 +1,12 @@
 ---
 title: "refactor: remove dead _impl orphan adapter files (N1)"
 type: refactor
-status: active
+status: shipped
 date: 2026-05-26
 claims:
-  paths:
-    - src/backlink_publisher/publishing/adapters/_telegraph_api_impl.py
-    - src/backlink_publisher/publishing/adapters/_velog_graphql_impl.py
-  shas: []
+  paths: []
+  shas:
+    - "b888d919"
 ---
 
 # refactor: remove dead `_impl` orphan adapter files (N1)

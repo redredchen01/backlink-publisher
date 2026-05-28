@@ -2,12 +2,12 @@
 
 A *recipe* is a value (frozen dataclass) declaring three things per channel:
 
-  - ``login_url``: HTTPS URL the headed browser opens
-  - ``bound_predicate``: callable(page) that blocks until login is detected
-  - ``cookie_host_filter``: pure host-match predicate used by the driver to
-    decide which cookies/origins from storage_state should be persisted
+   - ``login_url``: HTTPS URL the headed browser opens
+   - ``bound_predicate``: callable(page) that blocks until login is detected
+   - ``cookie_host_filter``: pure host-match predicate used by the driver to
+     decide which cookies/origins from storage_state should be persisted
 
-Recipes are values, **not** subclasses. Choreography (form-filling, multi-step
+Recipes are values, **not** subclasses. Choreography (form-fitting, multi-step
 navigation) belongs in ``bound_predicate``'s body, run inside the headed
 session driven by the operator. The driver is the only writer of disk state.
 
@@ -66,9 +66,10 @@ class ChannelRecipe:
 # ───────── public registry — keys must == CHANNELS exactly ─────────
 
 
-from .velog import RECIPE as _VELOG_RECIPE
-from .medium import RECIPE as _MEDIUM_RECIPE
-from .blogger import RECIPE as _BLOGGER_RECIPE
+# Import recipes at the bottom to avoid circular imports
+from .velog import RECIPE as _VELOG_RECIPE  # noqa: E402
+from .medium import RECIPE as _MEDIUM_RECIPE  # noqa: E402
+from .blogger import RECIPE as _BLOGGER_RECIPE  # noqa: E402
 
 
 RECIPES: dict[str, ChannelRecipe] = {

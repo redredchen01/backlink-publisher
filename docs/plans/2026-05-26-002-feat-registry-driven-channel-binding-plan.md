@@ -1,7 +1,7 @@
 ---
 title: "feat: Registry-driven, auth-type-templated channel binding surface"
 type: feat
-status: active
+status: shipped
 date: 2026-05-26
 deepened: 2026-05-26
 origin: docs/brainstorms/2026-05-26-overview-inline-channel-binding-requirements.md

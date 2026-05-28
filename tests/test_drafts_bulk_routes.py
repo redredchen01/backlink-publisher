@@ -169,7 +169,7 @@ class TestDraftJobRemovalHonesty:
         resp = client.post("/ce:draft/cancel", data={"id": "a"})
         assert resp.status_code == 302
         assert "flash_type=warning" in resp.location
-        assert "排程任务可能仍会触发" in unquote(resp.location)
+        assert "取消排程失敗" in unquote(resp.location)
         # store still mutated (operator intent honored) ...
         assert isolated_drafts.load()[0]["status"] == "pending"
         # ... but the genuine failure was logged with the exception class.
@@ -212,7 +212,7 @@ class TestDraftJobRemovalHonesty:
         assert resp.status_code == 302
         loc = unquote(resp.location)
         assert "flash_type=warning" in resp.location
-        assert "1 项的排程任务可能仍会触发" in loc
+        assert "已中止操作" in loc
 
     def test_bulk_delete_reports_genuine_failure_count(self, client,
                                                        isolated_drafts, monkeypatch):
@@ -242,5 +242,5 @@ class TestDraftJobRemovalHonesty:
         assert resp.status_code == 302
         loc = unquote(resp.location)
         assert "flash_type=warning" in resp.location
-        assert "1 项的排程任务可能仍会触发" in loc
+        assert "1 項失敗" in loc
         assert isolated_drafts.load() == []  # both still deleted from store

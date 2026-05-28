@@ -238,7 +238,10 @@ class PipelineAPI:
         silent-failure guard as ``run_pipe``: a 0-exit with empty stdout *and*
         stderr on non-empty stdin is almost always a broken entry-point.
         """
-        captured = run_pipe_capture(cmd, stdin)
+        try:
+            captured = run_pipe_capture(cmd, stdin)
+        except Exception as exc:
+            return _typed_error_result(str(exc), label)
         rc = captured["returncode"]
         stdout = captured["stdout"]
         stderr = captured.get("stderr", "")
@@ -403,7 +406,7 @@ class PipelineAPI:
     ) -> PipeResult:
         """Run ``publish-backlinks --platform <p> --mode <m>``."""
         cmd = ["publish-backlinks", "--platform", platform, "--mode", mode]
-        return self._invoke(cmd, plans_jsonl, "publish-backlinks failed")
+        return self._invoke_capture(cmd, plans_jsonl, "publish-backlinks failed")
 
     def publish_seed(self, seed_jsonl: str) -> PipeResult:
         """Run bare ``publish-backlinks`` (platform/mode carried in the seed row).

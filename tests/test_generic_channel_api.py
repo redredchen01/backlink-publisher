@@ -1,8 +1,9 @@
-"""Unit 4 — generic /api/<channel>/{status,verify} routes.
+"""Unit 4 — generic /api/<channel>/{status,verify,dry-run} routes.
 
-Two contracts:
-  - ``GET  /api/<channel>/status``   → JSON status (offline check, cheap)
-  - ``POST /api/<channel>/verify``   → JSON VerifyResult (live API ping)
+Three contracts:
+  - ``GET  /api/<channel>/status``    → JSON status (offline check, cheap)
+  - ``POST /api/<channel>/verify``    → JSON VerifyResult (live API ping)
+  - ``POST /api/<channel>/dry-run``   → JSON VerifyResult (no real HTTP sent)
 
 The dispatcher routes by channel name and 404s on unregistered platforms.
 Drift between registry and dashboard is enforced by ``test_dashboard_drift.py``.
@@ -95,6 +96,51 @@ class TestVerifyEndpoint:
         )
         assert resp.status_code == 404
 
+
+
+# ── POST /api/<channel>/dry-run ───────────────────────────────────────────────
+
+
+class TestDryRunEndpoint:
+    """Dry-run publish — validates adapter + payload, emits zero real HTTP."""
+
+    def test_dry_run_requires_csrf(self, client):
+        resp = client.post("/api/blogger/dry-run")
+        assert resp.status_code == 403
+
+    def test_dry_run_returns_verify_result_shape(self, client):
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "t"
+        resp = client.post(
+            "/api/blogger/dry-run",
+            headers={"X-CSRFToken": "t"},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert "ok" in body
+        assert "last_verify_result" in body
+        assert "blockers" in body
+
+    def test_dry_run_unknown_channel_returns_404(self, client):
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "t"
+        resp = client.post(
+            "/api/notachannel/dry-run",
+            headers={"X-CSRFToken": "t"},
+        )
+        assert resp.status_code == 404
+
+    def test_dry_run_telegraph_returns_ok(self, client):
+        """Telegraph (anon/no-auth) dry-run should succeed — no blockers."""
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "t"
+        resp = client.post(
+            "/api/telegraph/dry-run",
+            headers={"X-CSRFToken": "t"},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert isinstance(body["blockers"], list)
 
 
 # ── CSRF header extension (Unit 4 sub-deliverable) ────────────────────────────

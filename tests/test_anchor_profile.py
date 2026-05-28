@@ -391,7 +391,6 @@ def test_filename_safe_for_special_chars(profile_cache):
 # ── file mode 0600 ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.skipif(False, reason="POSIX file mode check")
 def test_record_writes_file_mode_0600(profile_cache):
     main_domain = "https://perm.example"
     record_article(main_domain, [_main("x")])
