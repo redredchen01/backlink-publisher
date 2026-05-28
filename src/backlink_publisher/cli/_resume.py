@@ -22,6 +22,7 @@ from backlink_publisher._util.jsonl import write_jsonl
 from backlink_publisher._util.logger import publish_logger
 from backlink_publisher.publishing.adapters import publish as adapter_publish, verify_adapter_setup
 from backlink_publisher.publishing.adapters.base import carry_link_attr_verification
+from backlink_publisher.publishing.reliability import publish_with_policy
 from ..schema import supported_platforms
 
 from ._publish_helpers import (
@@ -257,11 +258,11 @@ def _run_resume(args: Any) -> None:
             continue
 
         try:
-            result = adapter_publish(
-                payload={**row, "platform": platform},
-                mode=mode,
+            result = publish_with_policy(
+                platform,
+                payload=row,
                 config=config,
-                dry_run=False,
+                mode=mode,
                 banner_emit=banner_emit,
             )
         except AuthExpiredError as exc:
