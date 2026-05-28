@@ -4,6 +4,7 @@ sequence: "003"
 type: fix
 status: active
 origin: docs/brainstorms/2026-05-28-dedup-failed-to-done-invariant-requirements.md
+claims: {}
 ---
 
 # fix: Enforce `failed→done` ratchet in dedup `record_done`
