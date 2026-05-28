@@ -685,6 +685,7 @@ def _publish_epilogue(
     publish_path_drift_count: int = 0,
     dedup_skip_count: int = 0,
     dedup_hold_count: int = 0,
+    checkpoint_disabled: bool = False,
 ) -> None:
     # Phase 1: projection.
     if run_id is not None:
@@ -705,12 +706,16 @@ def _publish_epilogue(
         skipped_already_published=dedup_skip_count,
         held_uncertain=dedup_hold_count,
         dispatched=dispatched,
+        skipped_canary=skipped_quarantined_count,
     )
 
     successful = [r for r in outputs if r.get("error") is None]
     failed = [r for r in outputs if r.get("error") is not None]
     unverified = [s for s in successful if s.get("status", "").endswith("_unverified")]
 
+    recon_extra: dict[str, Any] = {}
+    if checkpoint_disabled:
+        recon_extra["checkpoint_disabled"] = True
     publish_logger.recon(
         "publish_reconciliation",
         input_payloads=len(rows),
@@ -724,6 +729,7 @@ def _publish_epilogue(
             "failed": [r.get("id", "") for r in failed],
             "unverified": [r.get("id", "") for r in unverified],
         },
+        **recon_extra,
     )
 
     if successful:
