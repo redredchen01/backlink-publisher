@@ -379,3 +379,93 @@ def test_resume_inband_error_records_failed_not_done(mock_pub, mock_cache, _ms, 
     rec = _record("blogger")
     assert rec is not None
     assert rec.state == "failed"
+
+
+# --------------------------------------------------------------------------- #
+# Dedup ratchet: failed→done invariant (Plan 2026-05-28-003)
+# --------------------------------------------------------------------------- #
+def test_failed_key_advances_to_done_on_record_done():
+    """Core regression (a): a key left at 'failed' by a policy-skip MUST be
+    advanced to 'done' when record_done is subsequently called.
+    FAILS before the _record_terminal guard fix, PASSES after."""
+    from backlink_publisher.cli._dedup_gate import record_done
+
+    store = DedupStore()
+    key = DedupKey(platform="medium", target_url=_TARGET)
+    store.intent_write(key)
+    store.transition(key, "failed")
+
+    row = {"id": "x", "target_url": _TARGET}
+    live = "https://medium.com/p/abc"
+    record_done(row, "medium", live_url=live, verify_ok=True, run_id="r1")
+
+    rec = store.get(key)
+    assert rec.state == "done"
+    assert rec.live_url == live
+
+
+def test_observe_gate_then_record_done_advances_failed_to_done():
+    """Full seam variant (b): seed at 'failed', call gate() in observe mode, then
+    record_done.  gate() must dispatch (not skip/hold) and record_done must
+    produce 'done'.  FAILS before the fix, PASSES after."""
+    from backlink_publisher.cli._dedup_gate import gate, record_done
+
+    store = DedupStore()
+    key = DedupKey(platform="medium", target_url=_TARGET)
+    store.intent_write(key)
+    store.transition(key, "failed")
+
+    row = {"id": "x", "target_url": _TARGET}
+    verdict, _ = gate(row, "medium", run_id="r2")
+    assert verdict == "dispatch"
+
+    # key must still be 'failed' after gate (intent_write is INSERT OR IGNORE)
+    assert store.get(key).state == "failed"
+
+    live = "https://medium.com/p/xyz"
+    record_done(row, "medium", live_url=live, verify_ok=True, run_id="r2")
+    assert store.get(key).state == "done"
+
+
+def test_done_key_immutable_on_second_record_done():
+    """Immutability guard (c): calling record_done a second time on an already-done
+    key must be a no-op — state stays 'done', no exception propagated.
+    PASSES both before and after the fix (stability check)."""
+    from backlink_publisher.cli._dedup_gate import record_done
+
+    store = DedupStore()
+    key = DedupKey(platform="medium", target_url=_TARGET)
+    store.intent_write(key)
+
+    row = {"id": "x", "target_url": _TARGET}
+    live = "https://medium.com/p/first"
+    # First call: advances key to done
+    record_done(row, "medium", live_url=live, verify_ok=True, run_id="r3")
+    assert store.get(key).state == "done"
+
+    # Second call: must not raise, must leave key at done
+    record_done(row, "medium", live_url="https://medium.com/p/second", verify_ok=False, run_id="r3")
+    rec = store.get(key)
+    assert rec.state == "done"
+    # live_url should not be overwritten by the no-op second call
+    assert rec.live_url == live
+
+
+def test_uncertain_upgrade_to_done_still_works():
+    """Uncertain upgrade (d): record_failure is a no-op on 'uncertain' (never
+    downgrade), then record_done successfully advances to 'done'.
+    PASSES both before and after the fix (stability check)."""
+    from backlink_publisher.cli._dedup_gate import record_done, record_failure
+
+    store = DedupStore()
+    key = DedupKey(platform="medium", target_url=_TARGET)
+    store.intent_write(key)
+    store.transition(key, "uncertain")
+
+    row = {"id": "x", "target_url": _TARGET}
+    record_failure(row, "medium", error_class=None, run_id="r4")
+    assert store.get(key).state == "uncertain"  # no downgrade
+
+    live = "https://medium.com/p/settled"
+    record_done(row, "medium", live_url=live, verify_ok=True, run_id="r4")
+    assert store.get(key).state == "done"
