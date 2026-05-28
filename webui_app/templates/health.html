@@ -54,6 +54,16 @@
     </span>
   </div>
   {% endif %}
+  {% if reconciliation_gaps and (reconciliation_gaps.pending_checkpoints or reconciliation_gaps.quarantine_gaps) %}
+  <div class="alert alert-warning py-2 small d-flex align-items-center gap-2" role="alert">
+    <i class="bi bi-exclamation-diamond-fill"></i>
+    <span>
+      Reconciler gaps detected —
+      {% if reconciliation_gaps.pending_checkpoints %}{{ reconciliation_gaps.pending_checkpoints }} pending checkpoint{{ '' if reconciliation_gaps.pending_checkpoints == 1 else 's' }}{% endif %}{% if reconciliation_gaps.pending_checkpoints and reconciliation_gaps.quarantine_gaps %}, {% endif %}{% if reconciliation_gaps.quarantine_gaps %}{{ reconciliation_gaps.quarantine_gaps }} unresolved quarantine gap{{ '' if reconciliation_gaps.quarantine_gaps == 1 else 's' }}{% endif %}.
+      Run <code>publish-backlinks --reconcile-all</code> to diagnose.
+    </span>
+  </div>
+  {% endif %}
 
   {# ── 1. Hero success rate (R6, R10) ───────────────────────────────────── #}
   <div class="card shadow-sm mb-4">

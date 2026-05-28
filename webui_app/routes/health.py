@@ -122,16 +122,39 @@ def ce_health():
             _log.warning("health: forward-path read failed: %s", exc)
             return []
 
+    def _reconciliation_gaps():
+        """Read-only count of reconciler gaps for the dashboard gap banner (R7).
+
+        Returns {'pending_checkpoints': int, 'quarantine_gaps': int} on success.
+        Returns empty dict on any error — never raises, never 500s."""
+        try:
+            from backlink_publisher.checkpoint import list_failed_items
+            from backlink_publisher.events.store import EventStore
+
+            pending = len(list_failed_items())
+            store = EventStore()
+            rows = store.query(
+                "SELECT COUNT(*) FROM quarantine_log WHERE failure_type = ?",
+                ("reconcile_gap",),
+            )
+            gaps = rows[0][0] if rows else 0
+            return {"pending_checkpoints": pending, "quarantine_gaps": gaps}
+        except Exception as exc:  # noqa: BLE001 — never 500 the page
+            _log.warning("health: reconciliation gap check failed: %s", exc)
+            return {}
+
     try:
         projection, health = _g_cache("health_agg", _build)
         canary = _g_cache("canary_health", _canary_rows)
         forward_path = _g_cache("forward_path_health", _forward_path_rows)
+        reconciliation_gaps = _g_cache("reconciliation_gaps", _reconciliation_gaps)
         return _render(
             "health.html",
             health=health,
             projection=projection,
             canary=canary,
             forward_path=forward_path,
+            reconciliation_gaps=reconciliation_gaps,
         )
     except Exception as exc:  # noqa: BLE001 — R5: even a render/context error must not 500
         _log.error("health: dashboard render failed, serving minimal fallback: %s", exc)

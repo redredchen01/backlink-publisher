@@ -5,7 +5,7 @@
 #   make scaffold PLATFORM=devto [LOGIN_URL=https://dev.to/enter]
 #   make diagnose CHANNEL=velog
 
-.PHONY: scaffold diagnose
+.PHONY: scaffold diagnose reconcile-check
 
 scaffold:
 ifndef PLATFORM
@@ -22,3 +22,7 @@ endif
 	@python -c "import webwright" 2>/dev/null || \
 		(echo "Error: webwright not installed. Run: pip install -e '.[dev-webwright]'" && exit 1)
 	@python scripts/webwright_diagnose.py
+
+reconcile-check:
+	@python -c "from backlink_publisher.events.reconciler import reconcile_all; reconcile_all()" \
+		&& echo "RECONCILE OK" || (echo "RECONCILE FAILED" && exit 1)

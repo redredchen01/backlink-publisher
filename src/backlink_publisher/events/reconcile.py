@@ -211,12 +211,20 @@ def _open_quarantine_count(store: EventStore) -> int:
     return int(rows[0]["n"]) if rows else 0
 
 
-def _quarantine(store: EventStore, source: str, reason: str) -> None:
-    """Park an unprojectable source. De-duped by source so retries don't pile up.
+def _quarantine(
+    store: EventStore,
+    source: str,
+    reason: str,
+    *,
+    row_id: str | None = None,
+    run_id: str | None = None,
+    dedup_key: str | None = None,
+) -> None:
+    """Park an unprojectable source or a reconciler gap.
 
-    Best-effort: a write failure here (locked DB) must not escape and abort the
-    rest of the projection — the source stays unprojected and will be retried on
-    the next load.
+    De-duped by ``source`` so retries don't pile up (projector path) and
+    by ``dedup_key`` UNIQUE index (reconciler path). Best-effort: a write
+    failure must not escape and abort the rest of the pipeline.
     """
     now = datetime.now(timezone.utc).isoformat()
     try:
@@ -227,9 +235,9 @@ def _quarantine(store: EventStore, source: str, reason: str) -> None:
             if existing is None:
                 conn.execute(
                     "INSERT INTO quarantine_log "
-                    "(ts_utc, source, run_id, reason, raw_payload_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (now, source, None, reason, None),
+                    "(ts_utc, source, run_id, reason, raw_payload_json, dedup_key, row_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (now, source, run_id, reason, None, dedup_key, row_id),
                 )
     except Exception as exc:  # noqa: BLE001 — quarantine bookkeeping is non-critical
         _log.warning("health: could not quarantine %s: %s", source, exc)
@@ -243,3 +251,35 @@ def _clear_quarantine(store: EventStore, source: str) -> None:
             conn.execute("DELETE FROM quarantine_log WHERE source = ?", (source,))
     except Exception as exc:  # noqa: BLE001 — clear is non-critical
         _log.warning("health: could not clear quarantine for %s: %s", source, exc)
+
+
+def _clear_quarantine_by_dedup_key(store: EventStore, dedup_key: str) -> None:
+    """Clear a reconciler-gap quarantine entry by ``dedup_key`` (R8 auto-clear).
+
+    Best-effort: a failure here must not abort the reconciler pass.
+    """
+    try:
+        with store.connect_immediate() as conn:
+            conn.execute(
+                "DELETE FROM quarantine_log WHERE dedup_key = ?", (dedup_key,)
+            )
+    except Exception as exc:  # noqa: BLE001 — clear is non-critical
+        _log.warning("health: could not clear quarantine by dedup_key %s: %s", dedup_key, exc)
+
+
+def _get_reconciler_quarantine_set(store: EventStore) -> set[str]:
+    """Return the set of ``dedup_key`` values for open reconciler-gap entries.
+
+    Used by the reconciler to skip items already quarantined (R10).
+    Best-effort: returns empty set on failure.
+    """
+    try:
+        with store.connect_immediate() as conn:
+            rows = conn.execute(
+                "SELECT dedup_key FROM quarantine_log "
+                "WHERE dedup_key IS NOT NULL AND dedup_key != ''"
+            ).fetchall()
+            return {r[0] for r in rows if r[0]}
+    except Exception as exc:  # noqa: BLE001 — skip-set is advisory
+        _log.warning("health: could not read reconciler quarantine set: %s", exc)
+        return set()
