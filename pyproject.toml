@@ -27,6 +27,9 @@ dependencies = [
 # must be deterministic across CI matrix rows; bumping radon requires re-measuring all
 # 5 monolith ceilings in the same PR. See docs/plans/2026-05-18-006-feat-monolith-sloc-ceiling-plan.md.
 dev = ["pytest>=7", "pytest-mock", "pytest-timeout", "pytest-socket", "pytest-env>=1.1", "requests", "pytest-asyncio>=0.23", "hypothesis>=6.0", "radon==6.0.1"]
+# webwright is pinned to exact version — upstream is a 3-week-old project in rapid iteration;
+# loose constraints risk silent breaking changes. Upgrade manually after evaluating changelog.
+dev-webwright = ["webwright==0.0.7"]
 
 [project.scripts]
 plan-backlinks = "backlink_publisher.cli.plan_backlinks:main"

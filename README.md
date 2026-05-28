@@ -601,3 +601,25 @@ backlink-publisher/
 Adding a new publishing platform (WordPress, Substack, Telegraph, …) is one `register("x", XAdapter)` call away from being reachable through the CLI and schema layers. See [AGENTS.md → Adding a new publisher adapter](AGENTS.md#adding-a-new-publisher-adapter) for the five-step recipe (subclass / implement / register / config / deps / test) that cites `BloggerAPIAdapter` at every step.
 
 For broader project conventions (`docs/solutions/` lesson curation, monolith SLOC budget, worktree auto-cleanup), the rest of [AGENTS.md](AGENTS.md) is the source of truth.
+
+## Developer Tooling (Experimental)
+
+> **Not part of the publishing pipeline.** These tools use [Webwright](https://github.com/microsoft/Webwright) (LLM-driven Playwright) to accelerate local development tasks only.
+
+**Prerequisites:** `pip install -e ".[dev-webwright]"` and an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) in your environment.
+
+**Scaffold a new platform adapter** — explore a platform's login + post flow and get a Playwright script draft:
+
+```bash
+make scaffold PLATFORM=devto LOGIN_URL=https://dev.to/enter
+# Output: docs/spikes/scaffold-devto-<date>/  (gitignored)
+# Review the draft, then promote to src/.../adapters/ following AGENTS.md § adapter recipe
+```
+
+**Diagnose a bind-channel failure** — reproduce and document a login flow failure with screenshots:
+
+```bash
+make diagnose CHANNEL=velog
+# Output: docs/diagnostics/velog-<date>/  (gitignored)
+# Read summary.txt and screenshots to identify the root cause
+```

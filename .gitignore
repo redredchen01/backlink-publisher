@@ -27,3 +27,9 @@ webui.log
 
 # Phase B Medium GraphQL spike scratch notes (B.1) — never push
 docs/spikes/20[0-9][0-9]-*-medium-graphql-spike-notes.md
+
+# Webwright scaffold drafts — review before promoting to adapters/
+docs/spikes/scaffold-*/
+
+# Webwright diagnostic session output — screenshots + scripts, potentially sensitive
+docs/diagnostics/*/
