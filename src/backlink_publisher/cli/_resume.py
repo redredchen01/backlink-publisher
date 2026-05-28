@@ -325,10 +325,10 @@ def _run_resume(args: Any) -> None:
         if result.error:
             # In-band adapter failure (returned, not raised) — record terminal so
             # the row doesn't strand as `done`, mark the checkpoint item failed,
-            # and do NOT record done. Parity with the fresh seam (publish_backlinks
-            # has the same guard); without it a returned-error result would seed a
-            # `done` dedup row and enforce would permanently skip a post that never
-            # landed.
+            # and do NOT record done. Without this a returned-error result would
+            # seed a `done` dedup row and enforce would permanently skip a post
+            # that never landed. Parity with the fresh seam is now established
+            # by R4 (publish_backlinks.py uses _try_update_ckpt_failed).
             record_failure(row, platform, error_class=None, run_id=run_id)
             from .. import checkpoint as _ckpt
             _ckpt.update_item(
