@@ -230,8 +230,9 @@ def reconcile_on_load() -> None:
 # sentinel may already exist in the field, bump _PURGE_SENTINEL_NAME to v2.
 _REMOVED_CREDENTIAL_SLUGS: tuple[str, ...] = (
     "jianshu", "zhihu", "cnblogs", "habr", "pikabu", "segmentfault",
+    "csdn", "juejin", "note",
 )
-_PURGE_SENTINEL_NAME: str = ".removed-channel-purge-v1.done"
+_PURGE_SENTINEL_NAME: str = ".removed-channel-purge-v2.done"
 
 
 def purge_removed_channel_credentials() -> None:
