@@ -24,6 +24,7 @@ from backlink_publisher.publishing.reliability.policy import (
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("BACKLINK_PUBLISHER_CIRCUIT_COOLDOWN_S", "300")
+    monkeypatch.setenv("BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED", "1")
 
     class _Cfg:
         config_dir = tmp_path
@@ -39,6 +40,26 @@ def _result(platform="medium", status="published"):
 _GET_STATUS = "webui_store.channel_status.get_status"
 _ADAPTER_PUB = "backlink_publisher.publishing.reliability.policy.adapter_publish"
 _EMIT = "backlink_publisher.publishing.reliability.policy.emit_attempt"
+
+
+# ---------------------------------------------------------------------------
+# Passthrough when policy disabled
+# ---------------------------------------------------------------------------
+
+
+def test_passthrough_when_policy_disabled(tmp_path, monkeypatch):
+    """When BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED != '1', delegates directly."""
+    monkeypatch.delenv("BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED", raising=False)
+
+    class _Cfg:
+        config_dir = tmp_path
+
+    result = _result()
+    with patch(_ADAPTER_PUB, return_value=result) as mock_pub:
+        out = publish_with_policy("medium", payload={"id": "1"}, config=_Cfg())
+
+    mock_pub.assert_called_once()
+    assert out.status == "published"
 
 
 # ---------------------------------------------------------------------------

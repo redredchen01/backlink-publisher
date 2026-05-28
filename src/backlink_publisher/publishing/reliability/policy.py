@@ -15,6 +15,11 @@
 Non-browser-tier channels bypass all policy and delegate directly to
 ``adapter_publish``.
 
+**Activation flag**: set ``BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED=1`` to
+activate the full policy (health gate + circuit breaker).  When unset the function
+is a transparent passthrough — identical to calling ``adapter_publish`` directly.
+This mirrors the PR #279 observe → enforce rollout pattern.
+
 **Dry-run callers must NOT route through this function** — the dry-run call at
 ``publish_backlinks.py:233`` remains a direct ``adapter_publish(…, dry_run=True)``
 call.  This function ignores ``dry_run=True`` if somehow called with it, but the
@@ -25,6 +30,7 @@ Plan: docs/plans/2026-05-28-001-feat-publish-reliability-policy-plan.md
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -41,6 +47,16 @@ if TYPE_CHECKING:
 
 # Browser-tier channels activated in v1 (Plan 2026-05-28-001 Key Decision 1)
 _BROWSER_TIER: frozenset[str] = frozenset({"medium", "velog", "devto", "mastodon"})
+
+#: Activation env var — mirrors BACKLINK_PUBLISHER_DEDUP_ENFORCE from PR #279.
+#: When unset / not "1": publish_with_policy is a transparent passthrough.
+#: When "1": full policy (health gate + circuit breaker + events) is active.
+POLICY_ENV = "BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED"
+
+
+def policy_enabled() -> bool:
+    """True iff the operator opted into the reliability policy layer."""
+    return os.environ.get(POLICY_ENV) == "1"
 
 
 def _is_browser_tier(platform: str) -> bool:
@@ -64,7 +80,8 @@ def publish_with_policy(
     """
     full_payload = {**payload, "platform": platform}
 
-    if not _is_browser_tier(platform):
+    # Passthrough when policy is disabled (default) or for non-browser-tier.
+    if not policy_enabled() or not _is_browser_tier(platform):
         return adapter_publish(
             payload=full_payload,
             mode=mode,
@@ -72,6 +89,8 @@ def publish_with_policy(
             dry_run=False,
             banner_emit=banner_emit,
         )
+
+    # --- Policy active (BACKLINK_PUBLISHER_RELIABILITY_POLICY_ENABLED=1) ---
 
     # 1. Health gate (already fail-CLOSED: JSONDecodeError → {} → "unbound")
     try:
