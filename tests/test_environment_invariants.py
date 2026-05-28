@@ -79,3 +79,32 @@ def test_conftest_autouse_fixtures_are_sync(request: pytest.FixtureRequest):
         f"Found async autouse fixtures: {async_autouse}. "
         f"Convert them back to sync or add asyncio_mode configuration before proceeding."
     )
+
+
+def test_storage_state_files_are_mode_600() -> None:
+    """storage-state-*.json files (bind credentials) must be 0o600.
+
+    Wave 4 addition (plan 2026-05-28-006 O9): a Playwright bump could
+    accidentally change the mode of storage-state files written during a
+    bind-channel run to a less-restrictive mode. These files contain session
+    cookies and must not be world-readable.
+
+    This test is a best-effort gate: if no storage-state files exist (CI or
+    fresh operator machine), it passes trivially. The test is authoritative
+    only on a machine that has run bind-channel at least once.
+    """
+    import stat
+    from pathlib import Path
+    from backlink_publisher.config.loader import _config_dir
+
+    config_dir = _config_dir()
+    storage_files = list(config_dir.glob("storage-state*.json"))
+
+    for path in storage_files:
+        file_stat = path.stat()
+        mode = stat.S_IMODE(file_stat.st_mode)
+        assert mode == 0o600, (
+            f"storage-state file {path.name!r} has mode {oct(mode)} — "
+            "expected 0o600. Playwright bump may have changed file-write mode. "
+            "Fix: chmod 600 the file and investigate the Playwright write path."
+        )
