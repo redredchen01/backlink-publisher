@@ -139,6 +139,7 @@ def main(argv: list[str] | None = None) -> None:
                 emit_error(str(exc), exit_code=3)
 
     run_id: str | None = None
+    checkpoint_disabled = False
     if not args.dry_run:
         try:
             run_id, _ = checkpoint.create_checkpoint(
@@ -151,6 +152,7 @@ def main(argv: list[str] | None = None) -> None:
             )
             publish_logger.info(f"publish-backlinks: run_id={run_id}")
         except Exception as exc:
+            checkpoint_disabled = True
             publish_logger.warning(
                 f"[WARN] checkpoint not created — this run cannot be resumed: {exc}"
             )
@@ -425,6 +427,7 @@ def main(argv: list[str] | None = None) -> None:
         publish_path_drift_count,
         dedup_skip_count,
         dedup_hold_count,
+        checkpoint_disabled=checkpoint_disabled,
     )
 
 
