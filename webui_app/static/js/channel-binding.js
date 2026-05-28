@@ -155,14 +155,15 @@
 
   document.addEventListener('click', async function (e) {
     const verifyBtn = e.target.closest('.dch-btn-verify');
+    const dryRunBtn = e.target.closest('.dch-btn-dry-run');
     const bindBtn = e.target.closest('.dch-btn-bind');
-    if (!verifyBtn && !bindBtn) return;
+    if (!verifyBtn && !dryRunBtn && !bindBtn) return;
 
     e.preventDefault();
-    const btn = verifyBtn || bindBtn;
+    const btn = verifyBtn || dryRunBtn || bindBtn;
     const card = btn.closest('.dashboard-channel-card');
     const channel = btn.dataset.channel;
-    const action = verifyBtn ? 'verify' : 'bind';
+    const action = verifyBtn ? 'verify' : dryRunBtn ? 'dry-run' : 'bind';
     const debounceKey = channel + ':' + action;
 
     // Per-(channel, action) 1s debounce to absorb double-clicks.
@@ -178,7 +179,7 @@
 
     setBusy(btn, true);
     try {
-      const url = '/api/' + encodeURIComponent(channel) + '/verify';
+      const url = '/api/' + encodeURIComponent(channel) + '/' + action;
       const result = await callJson(url, null, VERIFY_TIMEOUT_MS);
       renderResult(card, result);
     } finally {

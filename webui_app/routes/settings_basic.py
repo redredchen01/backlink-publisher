@@ -71,6 +71,19 @@ def api_channel_verify(channel: str):
     return jsonify(_verify_result_to_json(result))
 
 
+@bp.route('/api/<channel>/dry-run', methods=['POST'])
+def api_channel_dry_run(channel: str):
+    """Dry-run publish — validates adapter + payload without sending.
+
+    Runs the publish pipeline under ``dry_run_intercept()`` which blocks any
+    real HTTP sends. Returns the same VerifyResult JSON shape as /verify so
+    the dashboard JS can reuse ``renderResult()``.
+    """
+    _require_known_channel(channel)
+    config = load_config()
+    result = verify_adapter_setup(channel, config, mode='dry-run')
+    return jsonify(_verify_result_to_json(result))
+
 
 @bp.route('/settings/save-target-keywords', methods=['POST'])
 def settings_save_target_keywords():
