@@ -475,6 +475,12 @@ def _build_parser() -> Any:
         default=False,
         help="Output reconciliation gap report for all runs (JSONL on stdout)",
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable cProfile profiling (saved to ~/.cache/backlink-publisher/profiles/)",
+    )
     return parser
 
 

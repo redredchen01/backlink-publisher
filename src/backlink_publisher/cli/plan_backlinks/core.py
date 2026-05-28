@@ -141,6 +141,12 @@ def main(argv: list[str] | None = None) -> None:
             "Plan ref: docs/plans/2026-05-14-007-feat-url-content-fetch-gate-plan.md"
         ),
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable cProfile profiling (saved to ~/.cache/backlink-publisher/profiles/)",
+    )
     args = parser.parse_args(argv)
 
     # H1: set_log_level stays in the shell — never inside the engine.
@@ -202,11 +208,13 @@ def main(argv: list[str] | None = None) -> None:
     # reset — accepts cumulative stats (documented acceptable, audit surface 2).
     content_fetch.reset_stats()
 
-    outcome = plan_rows(
-        rows, cfg,
-        work_count=args.work_count,
-        fetch_verify_enabled=not args.no_fetch_verify,
-    )
+    from backlink_publisher._util.profiling import profile_if_enabled
+    with profile_if_enabled(args):
+        outcome = plan_rows(
+            rows, cfg,
+            work_count=args.work_count,
+            fetch_verify_enabled=not args.no_fetch_verify,
+        )
 
     if outcome.errors:
         for err in outcome.errors:

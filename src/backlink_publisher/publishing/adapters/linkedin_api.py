@@ -121,7 +121,7 @@ class LinkedInAPIAdapter(Publisher):
 
         api_url = f"{LINKEDIN_API_BASE}/posts"
 
-        def execute():
+        def execute() -> str:
             resp = requests.post(
                 api_url,
                 headers=headers,
@@ -138,7 +138,7 @@ class LinkedInAPIAdapter(Publisher):
                 try:
                     data = resp.json()
                 except ValueError as exc:
-                    log.debug("Failed to decode JSON response for HTTP 403 error: %s", exc)
+                    log.debug(f"Failed to decode JSON response for HTTP 403 error: {exc}")
                     data = {}
                 err = (data.get("message") or resp.text)[:200]
                 raise ExternalServiceError(

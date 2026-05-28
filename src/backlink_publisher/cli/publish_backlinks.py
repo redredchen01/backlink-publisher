@@ -61,6 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     from backlink_publisher._util.logger import set_log_level
+    from backlink_publisher._util.profiling import profile_if_enabled
     set_log_level(args.log_level)
 
     _handle_checkpoint_ops(args)
