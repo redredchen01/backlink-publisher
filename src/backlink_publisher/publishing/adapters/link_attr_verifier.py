@@ -260,7 +260,7 @@ def _unwrap_interstitial(href: str) -> str:
     """Decode a redirect-shim href to its effective destination.
 
     Platforms wrap outbound links through interstitials such as
-    ``https://link.juejin.cn/?target=https%3A%2F%2Fexample.com``. We extract the
+    ``https://link.example.com/?target=https%3A%2F%2Fexample.com``. We extract the
     first query param (``target``/``url``/...) whose decoded value parses as an
     absolute http(s) URL and treat that as the effective href. If nothing looks
     like a wrapped URL, the original href is returned unchanged.

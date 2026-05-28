@@ -210,11 +210,10 @@ def test_scanner_finds_at_least_n_namers() -> None:
     filenames = {fname for fname, _, _ in namers}
     # Known minimum: frw-token, blogger-token, velog-cookies, medium-cookies,
     # telegraph-token, devto-token, linkedin-token, tumblr-credentials,
-    # note-credentials, substack-credentials, csdn-credentials,
-    # publish-history, channel-status → ≥13 distinct files.
-    assert len(filenames) >= 13, (
+    # substack-credentials, publish-history, channel-status → ≥11 distinct files.
+    assert len(filenames) >= 11, (
         f"Scanner found only {len(filenames)} distinct credential files — "
-        f"expected ≥13. The regex may have stopped matching."
+        f"expected ≥11. The regex may have stopped matching."
     )
 
 

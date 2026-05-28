@@ -39,6 +39,14 @@ _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def _is_loopback_uri(uri: str) -> bool:
+    """Check if a URI points to a loopback host (localhost, 127.0.0.1, ::1).
+
+    Args:
+        uri: The URI to check.
+
+    Returns:
+        True if the hostname is a loopback address, False otherwise.
+    """
     try:
         host = urlparse(uri).hostname
     except Exception:
@@ -47,11 +55,20 @@ def _is_loopback_uri(uri: str) -> bool:
 
 
 @contextmanager
-def _oauthlib_insecure_transport(callback_uri: str):
+def _oauthlib_insecure_transport(callback_uri: str) -> None:
     """Scope OAUTHLIB_INSECURE_TRANSPORT to a single OAuth handler.
 
     Refuses to enable the bypass when callback_uri is not a loopback host —
     that situation requires real TLS and the bypass would be a downgrade.
+
+    Args:
+        callback_uri: The OAuth callback URI to validate.
+
+    Raises:
+        RuntimeError: If the callback URI is not a loopback host.
+
+    Yields:
+        None
     """
     if not _is_loopback_uri(callback_uri):
         raise RuntimeError(
