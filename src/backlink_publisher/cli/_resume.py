@@ -157,6 +157,7 @@ def _run_resume(args: Any) -> None:
         and item.get("error_class") not in (
             checkpoint.RETRO_LANGUAGE_FAILED,
             checkpoint.RETRO_ANCHOR_FAILED,
+            checkpoint.POLICY_SKIP,
         )
     ]
 
@@ -327,13 +328,17 @@ def _run_resume(args: Any) -> None:
             # the row doesn't strand as `done`, mark the checkpoint item failed,
             # and do NOT record done. Without this a returned-error result would
             # seed a `done` dedup row and enforce would permanently skip a post
-            # that never landed. Parity with the fresh seam is now established
-            # by R4 (publish_backlinks.py uses _try_update_ckpt_failed).
+            # that never landed.
             record_failure(row, platform, error_class=None, run_id=run_id)
+            _ckpt_error_class = (
+                checkpoint.POLICY_SKIP
+                if result.status in ("skipped_policy", "skipped_circuit_open")
+                else "unexpected"
+            )
             from .. import checkpoint as _ckpt
             _ckpt.update_item(
                 run_id, item["id"], "failed",
-                error=str(result.error), error_class="unexpected",
+                error=str(result.error), error_class=_ckpt_error_class,
             )
             publish_logger.error(
                 f"publish failed (in-band): {result.error}",

@@ -382,6 +382,74 @@ def test_resume_inband_error_records_failed_not_done(mock_pub, mock_cache, _ms, 
 
 
 # --------------------------------------------------------------------------- #
+# Fresh seam in-band error parity (R4) — Plan 2026-05-28-003
+# --------------------------------------------------------------------------- #
+@patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
+@patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
+def test_fresh_inband_error_records_failed_not_done(mock_pub, _mv):
+    """In-band adapter error on the fresh path (returned, not raised) records
+    'failed', not 'done' — parity with the resume seam so enforce won't later
+    skip a post that never landed."""
+    mock_pub.return_value = AdapterResult(
+        status="failed", adapter="medium-api", platform="medium",
+        draft_url="", published_url="", error="rejected in-band",
+    )
+    _run(json.dumps(_payload()), ["--platform", "medium", "--mode", "draft"])
+    rec = _record()
+    assert rec is not None
+    assert rec.state == "failed"
+
+
+@patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
+@patch("backlink_publisher.cli.publish_backlinks.policy_enabled", return_value=True)
+@patch("backlink_publisher.cli.publish_backlinks.publish_with_policy")
+def test_fresh_policy_skip_sets_policy_skip_error_class(mock_policy_pub, _mock_pe, _mv, mocker):
+    """policy_skip in-band result writes error_class='policy_skip' to checkpoint
+    so operators can distinguish deliberate gate decisions from adapter failures
+    and --resume knows to exclude these items."""
+    from backlink_publisher import checkpoint as ckpt_mod
+
+    mock_policy_pub.return_value = AdapterResult(
+        status="skipped_policy", adapter="medium-api", platform="medium",
+        draft_url="", published_url="", error="channel not bound",
+    )
+    spy = mocker.spy(ckpt_mod, "update_item")
+    _run(json.dumps(_payload()), ["--platform", "medium", "--mode", "draft"])
+
+    # Dedup: adapter was never called → key is 'failed' (re-publishable once gate clears)
+    rec = _record()
+    assert rec is not None
+    assert rec.state == "failed"
+
+    # Checkpoint: error_class must be 'policy_skip' not 'unexpected'
+    calls = [c for c in spy.call_args_list if "error_class" in (c.kwargs or {})]
+    assert any(
+        c.kwargs.get("error_class") == ckpt_mod.POLICY_SKIP for c in calls
+    ), f"Expected policy_skip error_class in checkpoint.update_item calls, got: {calls}"
+
+
+@patch("backlink_publisher.checkpoint._cache_dir")
+@patch("backlink_publisher.cli._publish_helpers._do_sleep")
+@patch("backlink_publisher.cli._resume.verify_adapter_setup")
+@patch("backlink_publisher.cli._resume.adapter_publish")
+def test_resume_skips_policy_skip_items(mock_pub, _mv, _ms, mock_cache, tmp_path):
+    """policy_skip items are excluded from the resume to_process list — a deliberate
+    policy-gate decision must not be retried blindly on --resume."""
+    from backlink_publisher.checkpoint import create_checkpoint, update_item, POLICY_SKIP
+
+    mock_cache.return_value = tmp_path / "cache"
+    rows = [_checkpoint_payload(platform="blogger", item_id="r0")]
+    run_id, _ = create_checkpoint(rows, platform="blogger", mode="draft")
+    # Seed the checkpoint item as failed/policy_skip (simulates a prior policy-gated run)
+    update_item(run_id, "r0", "failed", error="channel not bound", error_class=POLICY_SKIP)
+
+    _run("", ["--resume", run_id])
+
+    # adapter_publish must NOT have been called — policy_skip items are excluded
+    mock_pub.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
 # Dedup ratchet: failed→done invariant (Plan 2026-05-28-003)
 # --------------------------------------------------------------------------- #
 def test_failed_key_advances_to_done_on_record_done():

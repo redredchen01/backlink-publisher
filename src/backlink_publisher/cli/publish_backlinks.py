@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> None:
             # operators can distinguish deliberate gate decisions from adapter
             # failures. run_id capture matches the success-path pattern (line ~396).
             _ckpt_error_class = (
-                "policy_skip"
+                checkpoint.POLICY_SKIP
                 if result.status in ("skipped_policy", "skipped_circuit_open")
                 else "unexpected"
             )
