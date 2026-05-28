@@ -277,7 +277,7 @@ def test_contract_g3_dry_run_does_not_set_checkpoint_disabled(mock_pub, mock_ver
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if obj.get("event") == "publish_reconciliation":
+        if obj.get("msg") == "publish_reconciliation":
             assert obj.get("checkpoint_disabled") is not True, (
                 f"dry-run must not set checkpoint_disabled. recon: {obj}"
             )
