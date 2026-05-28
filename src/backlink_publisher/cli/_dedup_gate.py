@@ -248,12 +248,12 @@ def _record_terminal(
         # allow_from_terminal=True is required because store._TERMINAL includes
         # "failed"; without it, transition raises ValueError (swallowed silently
         # by the except arm below), leaving the key permanently at "failed".
-        # Note: "failed" → "failed" also falls through here and raises ValueError
-        # (swallowed). This matches pre-existing behavior.
-        allow = rec.state == "failed" and state == "done"
+        if rec.state == "failed" and state != "done":
+            return  # failed→anything-except-done: already terminal, no-op
+        allow_failed_to_done = rec.state == "failed"
         store.transition(
             key, state, live_url=live_url, verify_ok=verify_ok, run_id=run_id,
-            allow_from_terminal=allow,
+            allow_from_terminal=allow_failed_to_done,
         )
     except Exception as exc:  # observe-only: never break the run
         _log.debug(f"dedup terminal write skipped ({state}): {exc}")
