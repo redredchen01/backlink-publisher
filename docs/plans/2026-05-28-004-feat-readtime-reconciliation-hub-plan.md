@@ -1,3 +1,11 @@
+---
+title: "feat: Read-Time Reconciliation Hub"
+type: feat
+status: shipped
+date: 2026-05-28
+claims: {}
+---
+
 # Plan: Read-Time Reconciliation Hub
 
 - **Status:** Shipped (U1-U4 PR #290 `482de679`; U5+Makefile PR #294)
