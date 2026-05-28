@@ -60,7 +60,7 @@ def client(monkeypatch, tmp_path):
 # ── Mock factory (inlined; codebase has zero cross-test import precedent) ─────
 
 def _make_mock_pw(page_url: str = "https://medium.com/@testuser"):
-    """Return (mock_spw, page, ctx, pw_instance) for mocking Playwright."""
+    """Return mocks for Playwright (launch_persistent_context path, used by launch)."""
     page = MagicMock()
     page.url = page_url
     page.goto = MagicMock()
@@ -76,6 +76,28 @@ def _make_mock_pw(page_url: str = "https://medium.com/@testuser"):
 
     mock_spw = MagicMock(return_value=pw_instance)
     return mock_spw, page, ctx, pw_instance
+
+
+def _make_mock_pw_probe(page_url: str = "https://medium.com/@testuser"):
+    """Return mocks for probe (launch + new_context path, used by probe)."""
+    page = MagicMock()
+    page.url = page_url
+    page.goto = MagicMock()
+
+    ctx = MagicMock()
+    ctx.new_page.return_value = page
+
+    browser = MagicMock()
+    browser.new_context.return_value = ctx
+    browser.close = MagicMock()
+
+    pw_instance = MagicMock()
+    pw_instance.chromium.launch.return_value = browser
+    pw_instance.__enter__ = MagicMock(return_value=pw_instance)
+    pw_instance.__exit__ = MagicMock(return_value=False)
+
+    mock_spw = MagicMock(return_value=pw_instance)
+    return mock_spw, page, ctx, browser, pw_instance
 
 
 # ── Origin headers (medium POSTs carry bind-style origin guard) ──────────────
@@ -164,16 +186,16 @@ class TestOriginGuard:
 
 class TestProbeLoginStatusFn:
     def test_logged_in_when_not_signin_url(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status
-        mock_spw, *_ = _make_mock_pw("https://medium.com/@alice")
+        from webui_app.medium_login import probe_login_status, _make_mock_pw_probe
+        mock_spw, page, ctx, br, _ = _make_mock_pw_probe("https://medium.com/@alice")
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             result = probe_login_status(isolated_cfg, timeout=5)
         assert result["logged_in"] is True
         assert result["username"] == "alice"
 
     def test_not_logged_in_when_signin_url(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status
-        mock_spw, *_ = _make_mock_pw("https://medium.com/m/signin?redirect=x")
+        from webui_app.medium_login import probe_login_status, _make_mock_pw_probe
+        mock_spw, page, ctx, br, _ = _make_mock_pw_probe("https://medium.com/m/signin?redirect=x")
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             result = probe_login_status(isolated_cfg, timeout=5)
         assert result["logged_in"] is False
@@ -185,27 +207,21 @@ class TestProbeLoginStatusFn:
             with pytest.raises(DependencyError):
                 probe_login_status(isolated_cfg)
 
-    def test_cooldown_blocks_immediate_retry(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _cooldown_path
-        path = _cooldown_path(isolated_cfg)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"last_probe_ts": time.time()}))
-        with pytest.raises(ExternalServiceError, match="冷却"):
-            probe_login_status(isolated_cfg)
-
-    def test_cooldown_allows_after_expiry(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _cooldown_path
-        path = _cooldown_path(isolated_cfg)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"last_probe_ts": time.time() - 61}))
-        mock_spw, *_ = _make_mock_pw("https://medium.com/@bob")
+    def test_probe_uses_non_persistent_launch(self, isolated_cfg):
+        """Probe must use launch + new_context, NOT launch_persistent_context."""
+        from webui_app.medium_login import probe_login_status, _make_mock_pw_probe
+        mock_spw, page, ctx, br, pw_instance = _make_mock_pw_probe("https://medium.com/@alice")
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
-            result = probe_login_status(isolated_cfg, timeout=5)
-        assert result["logged_in"] is True
+            probe_login_status(isolated_cfg, timeout=5)
+        # launch was called (not launch_persistent_context)
+        pw_instance.chromium.launch.assert_called_once()
+        pw_instance.chromium.launch_persistent_context.assert_not_called()
+        # new_context was called
+        br.new_context.assert_called_once()
 
     def test_timeout_raises_external_service_error(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _PWTimeout
-        mock_spw, page, *_ = _make_mock_pw()
+        from webui_app.medium_login import probe_login_status, _PWTimeout, _make_mock_pw_probe
+        mock_spw, page, ctx, br, _ = _make_mock_pw_probe()
         page.goto.side_effect = _PWTimeout("timeout")
         with patch("webui_app.medium_login.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="超时"):

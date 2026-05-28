@@ -37,7 +37,7 @@ def test_pipeline_api_parses_typed_envelope():
         "AuthExpiredError", 3, "channel 'medium' credentials expired"
     )
     with mock.patch(
-        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+        "webui_app.api.pipeline_api.run_pipe_capture", side_effect=Exception(stderr)
     ):
         result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.success is False
@@ -54,7 +54,7 @@ def test_pipeline_api_quarantine_when_no_envelope():
     # Phase 2 Unit 6, so it no longer routes through run_pipe.)
     stderr = _BANNER + "error: unrecognized arguments: --bogus\n"
     with mock.patch(
-        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+        "webui_app.api.pipeline_api.run_pipe_capture", side_effect=Exception(stderr)
     ):
         result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.success is False
@@ -87,7 +87,7 @@ def test_pipeline_api_long_error_not_truncated():
     long_msg = "validation failed: " + "x" * 600
     stderr = _stderr_with_envelope("InputValidationError", 2, long_msg)
     with mock.patch(
-        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+        "webui_app.api.pipeline_api.run_pipe_capture", side_effect=Exception(stderr)
     ):
         result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.error == long_msg
@@ -119,7 +119,7 @@ def test_pipeline_api_caps_oversized_envelope_message():
     huge = "x" * 50_000
     stderr = _stderr_with_envelope("InputValidationError", 2, huge)
     with mock.patch(
-        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+        "webui_app.api.pipeline_api.run_pipe_capture", side_effect=Exception(stderr)
     ):
         result = PipelineAPI().publish("{}", "medium", "draft")
     assert len(result.error) < len(huge)
@@ -132,7 +132,7 @@ def test_quarantine_does_not_leak_raw_sentinel():
     # __BLP_ERR__ sentinel JSON to the operator — strip it on the human path.
     stderr = _BANNER + "__BLP_ERR__ {not valid json\nKeyError: 'x'\n"
     with mock.patch(
-        "webui_app.api.pipeline_api.run_pipe", side_effect=Exception(stderr)
+        "webui_app.api.pipeline_api.run_pipe_capture", side_effect=Exception(stderr)
     ):
         result = PipelineAPI().publish("{}", "medium", "draft")
     assert result.error_class == "unrecognized"

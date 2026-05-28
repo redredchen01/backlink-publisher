@@ -12,9 +12,6 @@ from backlink_publisher.publishing.registry import (
     Publisher,
     register,
     _REGISTRY,
-    _DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
     _UI_META_BY_PLATFORM,
     _BIND_BY_PLATFORM,
     _POLICY_BY_PLATFORM,
@@ -44,9 +41,6 @@ _TEMP_PLATFORMS = [
 
 _ALL_MAPS = (
     _REGISTRY,
-    _DOFOLLOW_BY_PLATFORM,
-    _RATIONALE_BY_PLATFORM,
-    _REFERRAL_VALUE_BY_PLATFORM,
     _UI_META_BY_PLATFORM,
     _BIND_BY_PLATFORM,
     _POLICY_BY_PLATFORM,

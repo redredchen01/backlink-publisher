@@ -136,7 +136,7 @@ class TestMastodonChain:
             BrowserPublishDispatcher,
         )
 
-        chain = _REGISTRY["mastodon"]
+        chain = _REGISTRY["mastodon"].publishers
         assert len(chain) == 1
         assert isinstance(chain[0], BrowserPublishDispatcher)
         assert chain[0].channel == "mastodon"

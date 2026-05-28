@@ -45,7 +45,10 @@ def test_new_registration_auto_expands_guard_authority(monkeypatch):
     assert _FAKE not in platforms_by_auth_type("token")
 
     # Register + classify the fake (auto-restored on teardown).
-    monkeypatch.setitem(registry._REGISTRY, _FAKE, (_FakeExtAdapter,))
+    monkeypatch.setitem(
+        registry._REGISTRY, _FAKE,
+        registry.RegistryEntry(publishers=[_FakeExtAdapter], dofollow=True),
+    )
     monkeypatch.setitem(registry._AUTH_TYPE_BY_PLATFORM, _FAKE, "token")
 
     # U1 helper auto-includes it — no edit to the helper.

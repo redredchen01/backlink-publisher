@@ -106,7 +106,15 @@ def check_urls(urls: list[str]) -> dict[str, tuple[bool, str | None]]:
     results: dict[str, tuple[bool, str | None]] = {}
     deduplicated = list(dict.fromkeys(urls))  # preserve order, deduplicate
 
-    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT, len(deduplicated) or 1)) as pool:
+    if not deduplicated:
+        return results
+
+    if len(deduplicated) == 1:
+        url, reachable, error = _check_url_with_retry(deduplicated[0])
+        results[url] = (reachable, error)
+        return results
+
+    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT, len(deduplicated))) as pool:
         futures = {pool.submit(_check_url_with_retry, url): url for url in deduplicated}
         for future in as_completed(futures):
             url, reachable, error = future.result()

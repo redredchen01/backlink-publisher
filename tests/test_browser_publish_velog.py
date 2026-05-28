@@ -156,7 +156,7 @@ class TestVelogChainFallthrough:
             BrowserPublishDispatcher,
         )
 
-        chain = _REGISTRY["velog"]
+        chain = _REGISTRY["velog"].publishers
         assert len(chain) == 2
         assert chain[0] is VelogGraphQLAdapter  # class entry (legacy)
         assert isinstance(chain[1], BrowserPublishDispatcher)  # instance entry

@@ -238,7 +238,10 @@ class PipelineAPI:
         silent-failure guard as ``run_pipe``: a 0-exit with empty stdout *and*
         stderr on non-empty stdin is almost always a broken entry-point.
         """
-        captured = run_pipe_capture(cmd, stdin)
+        try:
+            captured = run_pipe_capture(cmd, stdin)
+        except Exception as exc:
+            return _typed_error_result(str(exc), label)
         rc = captured["returncode"]
         stdout = captured["stdout"]
         stderr = captured.get("stderr", "")

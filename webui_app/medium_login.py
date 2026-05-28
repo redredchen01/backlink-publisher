@@ -1,12 +1,13 @@
 """Medium browser-login helpers: probe, launch, and clear.
 
 Cross-process lock: fcntl.flock sidecar (following anchor/profile.py doctrine
-and Plan 012 velog precedent).  Both the CLI (MediumBrowserAdapter.publish)
-and the webui (probe / launch) share the same lock file so only one Chromium
-persistent-context is open against user_data_dir at a time.
+and Plan 012 velog precedent).  The lock coordinates interactive login only,
+since probe now uses non-persistent context isolation.
 
-Probe cooldown: mirrors MEDIUM_THROTTLE_MIN (60 s) so repeated probe clicks
-don't accumulate Medium session-trust cost alongside a running publish batch.
+Probe isolation (post-Plan 005): ``probe_login_status`` uses headless
+non-persistent context + cookies from ``medium-cookies.json`` — never shares
+the persistent user_data_dir with ``launch_login_window``. This eliminates
+contention and removes the need for 60s cooldown.
 """
 
 from __future__ import annotations
@@ -35,8 +36,6 @@ except ImportError:
     _PWError = Exception            # type: ignore[misc]
 
 _LOCK_FILENAME = "medium-browser.lock"
-_COOLDOWN_FILENAME = "medium-probe-cooldown.json"
-_COOLDOWN_SECS = 60
 _UI_LOCK_TIMEOUT = 10      # seconds the UI waits before fail-fast
 _MEDIUM_SIGNIN = "medium.com/m/signin"
 
@@ -47,40 +46,13 @@ def _lock_path(config: Config) -> Path:
     return config.config_dir / _LOCK_FILENAME
 
 
-def _cooldown_path(config: Config) -> Path:
-    # Use config.cache_dir for test isolation (BACKLINK_PUBLISHER_CACHE_DIR env)
-    return config.cache_dir / _COOLDOWN_FILENAME
-
-
 def _user_data_dir(config: Config) -> Path:
+    """Persistent Chromium profile for interactive login only.
+
+    The probe uses non-persistent context, so this profile is NEVER shared
+    between bind/publish/probe operations. Eliminates race conditions.
+    """
     return config.medium_user_data_dir or (config.config_dir / "chrome-profile-default")
-
-
-def _check_cooldown(config: Config) -> None:
-    """Raise ExternalServiceError if the probe was run < COOLDOWN_SECS ago."""
-    path = _cooldown_path(config)
-    if not path.exists():
-        return
-    try:
-        data = json.loads(path.read_text())
-        last = float(data.get("last_probe_ts", 0))
-        elapsed = time.time() - last
-        if elapsed < _COOLDOWN_SECS:
-            remaining = int(_COOLDOWN_SECS - elapsed)
-            raise ExternalServiceError(
-                f"Medium probe 冷却中（{remaining}s 后可再次探测）；"
-                "避免触发 Medium 反检测，请稍候再试。"
-            )
-    except ExternalServiceError:
-        raise
-    except Exception:
-        pass
-
-
-def _write_cooldown(config: Config) -> None:
-    path = _cooldown_path(config)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"last_probe_ts": time.time()}))
 
 
 class _FileLock:
@@ -136,9 +108,29 @@ class _FileLock:
             _thread_lock.release()
 
 
+def _probe_playwright_context(config: Config):
+    """Return a Playwright context for liveness probing.
+
+    Non-persistent launch + browser.new_context() for probe-copy isolation.
+    The live cookies.json is read into memory and injected via add_cookies,
+    so even if Cloudflare flags this headless session, the persistent profile
+    used by launch_login_window remains untouched.
+    """
+    if sync_playwright is None:
+        raise DependencyError(
+            "Playwright 未安装，请运行 playwright install chromium"
+        )
+    pw_cm = sync_playwright()
+    pw = pw_cm.__enter__()
+    browser = pw.chromium.launch(headless=True)
+    context = browser.new_context()
+    return pw_cm, browser, context
+
+
 def _playwright_context(config: Config):
     """Return a Playwright persistent context (headed, anti-detect args).
 
+    Used only by launch_login_window for interactive operator login.
     Returns ``(pw_cm, ctx)``: ``pw_cm`` is the ``PlaywrightContextManager``
     (the object that owns ``__exit__``); ``pw_cm.__enter__()`` returns the
     ``Playwright`` *instance*, which itself has no ``__exit__``. Callers
@@ -158,6 +150,15 @@ def _playwright_context(config: Config):
         args=["--disable-blink-features=AutomationControlled"],
     )
     return pw_cm, ctx
+
+
+def _load_cookies_for_probe(path: Path) -> list[dict]:
+    """Load cookies from medium-cookies.json for probe context."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("cookies", [])
+    except Exception:
+        return []
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -207,12 +208,20 @@ def launch_login_window(config: Config) -> dict:
 def probe_login_status(config: Config, timeout: int = 15) -> dict:
     """Navigate to medium.com/me and detect whether the profile is logged in.
 
-    Respects a 60-second cooldown to avoid Medium anti-detection.
-    Acquires the shared lock.
+    Uses non-persistent headless context for probe-copy isolation (live
+    credentials untouched). No shared user_data_dir contention with bind/publish.
+    Cooldown removed — probe is now safe to run without rate-limiting.
     """
-    _check_cooldown(config)
     with _FileLock(_lock_path(config), timeout=_UI_LOCK_TIMEOUT):
-        pw_cm, ctx = _playwright_context(config)
+        pw_cm, browser, ctx = _probe_playwright_context(config)
+        # Load cookies from canonical credential (post-Plan 005)
+        cookies_path = config.config_dir / "medium-cookies.json"
+        cookies = _load_cookies_for_probe(cookies_path) if cookies_path.exists() else []
+        if cookies:
+            try:
+                ctx.add_cookies(cookies)
+            except Exception:
+                pass  # Cookie format incompatibility; proceed without
         page = ctx.new_page()
         try:
             page.goto("https://medium.com/me", timeout=timeout * 1_000)
@@ -222,7 +231,6 @@ def probe_login_status(config: Config, timeout: int = 15) -> dict:
             if logged_in:
                 m = re.search(r"medium\.com/@([^/?]+)", final_url)
                 username = m.group(1) if m else None
-            _write_cooldown(config)
             return {"logged_in": logged_in, "final_url": final_url, "username": username}
         except _PWTimeout:
             raise ExternalServiceError(
@@ -236,13 +244,19 @@ def probe_login_status(config: Config, timeout: int = 15) -> dict:
         finally:
             try:
                 ctx.close()
+                browser.close()
             except _PWError:
                 pass
             pw_cm.__exit__(None, None, None)
 
 
 def clear_browser_profile(config: Config) -> None:
-    """Delete the persistent Chromium profile directory."""
+    """Delete the persistent Chromium profile directory.
+
+    Post-Plan 005: probe uses non-persistent context, so this only affects
+    launch_login_window (interactive bind). Safe to call without affecting
+    publish or probe operations.
+    """
     import shutil
     udd = _user_data_dir(config)
     if udd.exists():

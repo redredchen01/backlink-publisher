@@ -35,13 +35,14 @@
         const preview = document.getElementById('preview-' + idx);
         if (preview) preview.innerHTML = '<em style="color:#6b7280;font-size:12px;">内容已修改</em>';
     }
-    function cancelEdit(idx, original) {
-        const ta = document.getElementById('editorArea-' + idx);
-        ta.value = original;
-        if (_plansData[idx]) { _plansData[idx].content_markdown = original; _syncPlansFields(); }
-        const s = document.getElementById('editStatus-' + idx);
-        if (s) { s.textContent = '已还原'; s.style.color = ''; }
-    }
+function cancelEdit(idx, original) {
+    const ta = document.getElementById('editorArea-' + idx);
+    const content = JSON.parse(original);  // Parse the JSON string to get the plain text
+    ta.value = content;
+    if (_plansData[idx]) { _plansData[idx].content_markdown = content; _syncPlansFields(); }
+    const s = document.getElementById('editStatus-' + idx);
+    if (s) { s.textContent = '已还原'; s.style.color = ''; }
+}
 
     // ── Campaign Profiles ────────────────────────────────────────
     const _PROFILES = (window.__indexBootstrap && window.__indexBootstrap.profiles) || [];

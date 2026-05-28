@@ -320,7 +320,7 @@ class EventStore:
     def query(
         self, sql: str, params: tuple[Any, ...] = ()
     ) -> list[sqlite3.Row]:
-        """Thin SELECT wrapper for CLI consumers. Returns all rows eagerly.
+        """Thin SELECT wrapper for CLI consumers. Returns rows as a list.
 
         Enforces a SELECT-only contract at runtime — refuses any
         statement that doesn't start with ``SELECT`` so a downstream CLI

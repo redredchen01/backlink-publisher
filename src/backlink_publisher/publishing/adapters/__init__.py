@@ -329,7 +329,8 @@ def verify_adapter_setup(
             "Bind via browser login (set [mastodon] instance_url first)."
         )
 
-    chain = _REGISTRY.get(platform) or []
+    _entry = _REGISTRY.get(platform)
+    chain = _entry.publishers if _entry else []
     for entry in chain:
         publisher_cls = entry if isinstance(entry, type) else type(entry)
         if publisher_cls.available(config):

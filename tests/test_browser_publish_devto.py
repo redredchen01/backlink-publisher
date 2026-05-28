@@ -113,7 +113,7 @@ class TestDevtoChain:
             BrowserPublishDispatcher,
         )
 
-        chain = _REGISTRY["devto"]
+        chain = _REGISTRY["devto"].publishers
         assert len(chain) == 2
         assert chain[0] is DevtoAPIAdapter
         assert isinstance(chain[1], BrowserPublishDispatcher)

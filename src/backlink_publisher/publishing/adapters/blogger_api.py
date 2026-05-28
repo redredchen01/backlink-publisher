@@ -24,10 +24,12 @@ from backlink_publisher._util.errors import (
 from backlink_publisher._util.logger import opencli_logger as log
 from backlink_publisher.publishing.content_negotiation import extract_publish_html
 from backlink_publisher.publishing.registry import Publisher
-from .base import AdapterResult
+from .base import AdapterResult, BaseAdapter
 from .retry import RETRYABLE_HTTP_STATUSES, retry_transient_call
 
+
 _SCOPES = ["https://www.googleapis.com/auth/blogger"]
+
 
 _LOCK_TIMEOUT_S = BLOGGER_LOCK_TIMEOUT_S
 
@@ -104,7 +106,7 @@ def _build_credentials(config: Config):
         # simultaneous publish processes both call creds.refresh() and
         # the second rotation invalidates the first's access token.
         with _refresh_lock(Path(config.blogger_token_path)):
-            # Re-read inside the lock — a peer may have already refreshed.
+            # Re-read inside the lock — a peer may have already refresced.
             fresh = load_blogger_token(config.blogger_token_path)
             if fresh:
                 try:
@@ -157,7 +159,7 @@ def json_from_creds(creds) -> dict[str, Any]:
     }
 
 
-class BloggerAPIAdapter(Publisher):
+class BloggerAPIAdapter(BaseAdapter, Publisher):
     """Publishes to Blogger via the official API v3."""
 
     def embed_banner(self, artifact_path: Path, alt: str) -> str | None:
@@ -214,9 +216,7 @@ class BloggerAPIAdapter(Publisher):
         t0 = time.monotonic()
         platform = "blogger"
         article_id = payload.get("id", "")
-        log.info(
-            json_log(adapter="blogger-api", phase="start", id=article_id)
-        )
+        log.info(self._json_log(adapter="blogger-api", phase="start", id=article_id))
 
         blog_id = resolve_blog_id(config, payload.get("main_domain", ""))
 
@@ -229,7 +229,7 @@ class BloggerAPIAdapter(Publisher):
                 f"Blogger authentication failed: {exc}"
             ) from exc
 
-        log.info(json_log(adapter="blogger-api", phase="auth", id=article_id))
+        log.info(self._json_log(adapter="blogger-api", phase="auth", id=article_id))
 
         try:
             from googleapiclient.discovery import build
@@ -310,7 +310,7 @@ class BloggerAPIAdapter(Publisher):
         url = result.get("url", "")
         elapsed = int((time.monotonic() - t0) * 1000)
         log.info(
-            json_log(adapter="blogger-api", phase="done", id=article_id, elapsed_ms=elapsed)
+            self._json_log(adapter="blogger-api", phase="done", id=article_id, elapsed_ms=elapsed)
         )
 
         if mode == "draft":

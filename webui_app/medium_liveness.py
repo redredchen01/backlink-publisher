@@ -81,8 +81,12 @@ class LivenessResult(enum.Enum):
 
 def _storage_state_path() -> Path:
     """Single source of truth for the bound credential. Matches the
-    constant in ``MediumBrowserAdapter`` (Plan 003 Unit 6)."""
-    return _config_dir() / "medium-storage-state.json"
+    constant in ``MediumBrowserAdapter`` (Plan 005 Unit 1).
+
+    Post-Plan 005: reads ``medium-cookies.json`` (cookies-only), NOT
+    ``medium-storage-state.json`` which was unlinked after bind.
+    """
+    return _config_dir() / "medium-cookies.json"
 
 
 def _last_verified_age_seconds(last_verified_at: str | None) -> float:

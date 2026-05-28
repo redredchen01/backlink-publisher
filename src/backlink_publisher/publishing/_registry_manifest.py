@@ -22,13 +22,7 @@ from backlink_publisher.publishing._manifest_types import (
     Visibility,
 )
 
-from .registry import (
-    _BIND_BY_PLATFORM,
-    _POLICY_BY_PLATFORM,
-    _REGISTRY,
-    _UI_META_BY_PLATFORM,
-    _VISIBILITY_BY_PLATFORM,
-)
+from .registry import _REGISTRY
 
 
 def ui_meta(name: str) -> UiMeta | None:
@@ -38,7 +32,8 @@ def ui_meta(name: str) -> UiMeta | None:
     pre-manifest). Callers wanting a fallback should use
     ``ui_meta(name) or UiMeta(display_name=name, domain="", category="")``.
     """
-    return _UI_META_BY_PLATFORM.get(name)
+    entry = _REGISTRY.get(name)
+    return entry.ui if entry else None
 
 
 def bind_descriptors(name: str) -> tuple[BindDescriptor, ...]:
@@ -50,7 +45,8 @@ def bind_descriptors(name: str) -> tuple[BindDescriptor, ...]:
     auto-build UI cards (Plan Unit 4) treat ``()`` as "fall back to
     legacy per-channel wiring".
     """
-    return _BIND_BY_PLATFORM.get(name, ())
+    entry = _REGISTRY.get(name)
+    return entry.bind if entry else ()
 
 
 def policy(name: str) -> Policy | None:
@@ -61,7 +57,8 @@ def policy(name: str) -> Policy | None:
     ``None`` — the manifest is additive metadata, not a behaviour
     rewrite (Plan Scope Boundaries: "不改 publish 業務邏輯").
     """
-    return _POLICY_BY_PLATFORM.get(name)
+    entry = _REGISTRY.get(name)
+    return entry.policy if entry else None
 
 
 def visibility(name: str) -> Visibility:
@@ -73,7 +70,8 @@ def visibility(name: str) -> Visibility:
     frozenset to ``visibility(name) in {"hidden","retired"}`` without
     needing a per-platform opt-in.
     """
-    return _VISIBILITY_BY_PLATFORM.get(name, "active")
+    entry = _REGISTRY.get(name)
+    return entry.visibility if entry else "active"
 
 
 def active_platforms() -> list[str]:
@@ -129,7 +127,7 @@ def legacy_platforms() -> list[str]:
     """
     return sorted(
         name for name in _REGISTRY
-        if name not in _UI_META_BY_PLATFORM
-        and name not in _BIND_BY_PLATFORM
-        and name not in _POLICY_BY_PLATFORM
+        if ui_meta(name) is None
+        and bind_descriptors(name) == ()
+        and policy(name) is None
     )

@@ -361,7 +361,8 @@ def test_checkpoint_created_on_success(mock_pub, mock_verify, mock_cache, tmp_pa
     )
 
     stdout, stderr, code = _run_publish(
-        "\n".join(json.dumps(p) for p in payloads), ["--mode", "draft"]
+        "\n".join(json.dumps(p) for p in payloads),
+        ["--mode", "draft", "--log-level", "INFO"],
     )
 
     assert code == 0

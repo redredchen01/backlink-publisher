@@ -60,6 +60,10 @@ def atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
                 os.close(lock_fd)
             except OSError:
                 pass
+            try:
+                os.unlink(lock_path)
+            except OSError:
+                pass
 
 
 def rotate_snapshots(

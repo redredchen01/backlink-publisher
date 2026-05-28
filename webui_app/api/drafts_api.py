@@ -223,15 +223,9 @@ class DraftAPI:
         if not item_id:
             return {"ok": False, "flash_msg": "参数缺失"}
 
-        job_clean = _remove_scheduled_job(item_id)
-        if not job_clean:
-            return {
-                "ok": False,
-                "error_code": "SCHEDULER_SYNC_FAILED",
-                "flash_type": "danger",
-                "flash_msg": "取消排程失败：無法同步刪除後台調度任務，該任務可能仍在運行！"
-            }
-
+        # Honour operator intent first: mutate store regardless of scheduler
+        # removal outcome. If the job can't be removed the operator still sees
+        # the draft as cancelled (pending) with a warning that it may still fire.
         try:
             _drafts_store.update_item(item_id, status="pending", scheduled_at=None)
         except Exception as exc:
@@ -239,8 +233,16 @@ class DraftAPI:
             return {
                 "ok": False,
                 "error_code": "PERSISTENCE_FAILURE",
+                "flash_type": "danger",
+                "flash_msg": f"取消排程失敗：本地儲存更新失敗 ({type(exc).__name__})"
+            }
+
+        if not _remove_scheduled_job(item_id):
+            return {
+                "ok": False,
+                "error_code": "SCHEDULER_SYNC_FAILED",
                 "flash_type": "warning",
-                "flash_msg": f"排程已取消，但未能更新草稿箱状态 ({type(exc).__name__})"
+                "flash_msg": "取消排程失敗：無法同步刪除後台調度任務，該任務可能仍在運行！"
             }
 
         return {"ok": True, "flash_msg": "已取消排程"}
@@ -252,15 +254,8 @@ class DraftAPI:
         if not item_id:
             return {"ok": False, "flash_msg": "参数缺失"}
 
-        job_clean = _remove_scheduled_job(item_id)
-        if not job_clean:
-            return {
-                "ok": False,
-                "error_code": "SCHEDULER_SYNC_FAILED",
-                "flash_type": "danger",
-                "flash_msg": "刪除失敗：無法同步刪除後台調度任務，該任務可能仍在運行！"
-            }
-
+        # Honour operator intent first: delete from store regardless of
+        # scheduler removal outcome. See cancel() for rationale.
         try:
             _drafts_store.delete_item(item_id)
         except Exception as exc:
@@ -272,6 +267,14 @@ class DraftAPI:
                 "flash_msg": f"刪除失敗：本地儲存刪除失敗 ({type(exc).__name__})"
             }
 
+        if not _remove_scheduled_job(item_id):
+            return {
+                "ok": False,
+                "error_code": "SCHEDULER_SYNC_FAILED",
+                "flash_type": "warning",
+                "flash_msg": "刪除失敗：無法同步刪除後台調度任務，該任務可能仍在運行！"
+            }
+
         return {"ok": True, "flash_msg": "已删除"}
 
     # ── bulk operations ──────────────────────────────────────────────────
@@ -281,27 +284,13 @@ class DraftAPI:
         if not ids:
             return {"ok": False, "flash_msg": "未选择任何项"}
 
-        # Collect scheduled item ids to verify job removal first
-        staged_items = []
-        for item_id in ids:
-            item = _drafts_store.get_item(item_id)
-            if not item:
-                continue
-            staged_items.append((item_id, item.get("status")))
-
-        failed_jobs = []
-        for item_id, status in staged_items:
-            if status == "scheduled":
-                if not _remove_scheduled_job(item_id):
-                    failed_jobs.append(item_id)
-
-        if failed_jobs:
-            return {
-                "ok": False,
-                "error_code": "SCHEDULER_SYNC_FAILED",
-                "flash_type": "danger",
-                "flash_msg": f"批量刪除失敗：無法同步清除後台調度任務，請重試 ({len(failed_jobs)} 項失敗)"
-            }
+        # Collect scheduled IDs before store mutation so we can try job
+        # removal afterwards regardless of outcome.
+        scheduled_ids = [
+            item_id for item_id in ids
+            if (item := _drafts_store.get_item(item_id))
+            and item.get("status") == "scheduled"
+        ]
 
         try:
             removed = _drafts_store.bulk_delete(ids)
@@ -312,6 +301,19 @@ class DraftAPI:
                 "error_code": "PERSISTENCE_FAILURE",
                 "flash_type": "danger",
                 "flash_msg": f"批量刪除失敗：本地儲存刪除失敗 ({type(exc).__name__})"
+            }
+
+        failed_jobs = []
+        for item_id in scheduled_ids:
+            if _remove_scheduled_job(item_id) is False:
+                failed_jobs.append(item_id)
+
+        if failed_jobs:
+            return {
+                "ok": False,
+                "error_code": "SCHEDULER_SYNC_FAILED",
+                "flash_type": "warning",
+                "flash_msg": f"批量刪除失敗：無法同步清除後台調度任務，請重試 ({len(failed_jobs)} 項失敗)"
             }
 
         return {"ok": True, "flash_msg": f"已删除 {removed} 项"}
@@ -354,7 +356,7 @@ class DraftAPI:
                 completed_jobs.append(item_id)
 
         except Exception as exc:
-            plan_logger.critical("bulk_publish_scheduling_failed", error=str(exc))
+            plan_logger.error("bulk_publish_scheduling_failed", error=str(exc))
             # Rollback successfully scheduled scheduler jobs
             for job_id in completed_jobs:
                 try:
@@ -399,11 +401,11 @@ class DraftAPI:
                 _drafts_store.update_item(item_id, status="pending", scheduled_at=None)
 
         except Exception as exc:
-            plan_logger.critical("bulk_cancel_failed", error=str(exc))
+            plan_logger.error("bulk_cancel_failed", error=str(exc))
             return {
                 "ok": False,
                 "error_code": "BULK_CANCEL_FAILURE",
-                "flash_type": "danger",
+                "flash_type": "warning",
                 "flash_msg": f"批量取消失敗：後台任務同步異常，已中止操作 ({type(exc).__name__})",
             }
 

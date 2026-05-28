@@ -297,16 +297,10 @@ class TestRegistryAcceptsInstances:
     @pytest.fixture
     def isolated_registry(self):
         # Snapshot and restore _REGISTRY around each test.
-        snap = {k: list(v) for k, v in reg_mod._REGISTRY.items()}
-        dofollow_snap = dict(reg_mod._DOFOLLOW_BY_PLATFORM)
-        rationale_snap = dict(reg_mod._RATIONALE_BY_PLATFORM)
+        snap = dict(reg_mod._REGISTRY)
         yield
         reg_mod._REGISTRY.clear()
         reg_mod._REGISTRY.update(snap)
-        reg_mod._DOFOLLOW_BY_PLATFORM.clear()
-        reg_mod._DOFOLLOW_BY_PLATFORM.update(dofollow_snap)
-        reg_mod._RATIONALE_BY_PLATFORM.clear()
-        reg_mod._RATIONALE_BY_PLATFORM.update(rationale_snap)
 
     def test_register_accepts_instance(self, isolated_registry):
         recipe = _make_recipe("instplat")
@@ -314,7 +308,7 @@ class TestRegistryAcceptsInstances:
         instance = BrowserPublishDispatcher.for_channel("instplat")
         # dofollow=True so no rationale needed
         reg_mod.register("instplat", instance, dofollow=True)
-        assert reg_mod._REGISTRY["instplat"] == [instance]
+        assert reg_mod._REGISTRY["instplat"].publishers == [instance]
 
     def test_dispatch_skips_instantiation_for_instance_entry(
         self, isolated_registry, fake_config, stubbed_session, stubbed_verify
