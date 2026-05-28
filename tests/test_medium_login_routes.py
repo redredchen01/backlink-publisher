@@ -1,7 +1,7 @@
 """Tests for Plan 013 Phase B — Medium browser-login routes and functions.
 
-Patch target for Playwright: webui_app.medium_login.sync_playwright
-(consumer-reference rule: the module imports it at the top).
+Patch target for Playwright: backlink_publisher.publishing.adapters.medium_auth.sync_playwright
+(Wave 1 thin-WebUI refactor: logic moved from webui_app/medium_login to adapter).
 
 Config isolation provided by the session-scoped autouse _isolate_user_dirs
 fixture in conftest.py.  Per-test isolation done via monkeypatch.setenv.
@@ -186,32 +186,32 @@ class TestOriginGuard:
 
 class TestProbeLoginStatusFn:
     def test_logged_in_when_not_signin_url(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status
+        from backlink_publisher.publishing.adapters.medium_auth import probe_login_status
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe("https://medium.com/@alice")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             result = probe_login_status(isolated_cfg, timeout=5)
         assert result["logged_in"] is True
         assert result["username"] == "alice"
 
     def test_not_logged_in_when_signin_url(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status
+        from backlink_publisher.publishing.adapters.medium_auth import probe_login_status
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe("https://medium.com/m/signin?redirect=x")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             result = probe_login_status(isolated_cfg, timeout=5)
         assert result["logged_in"] is False
         assert result["username"] is None
 
     def test_dependency_error_when_playwright_none(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status
-        with patch("webui_app.medium_login.sync_playwright", None):
+        from backlink_publisher.publishing.adapters.medium_auth import probe_login_status
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", None):
             with pytest.raises(DependencyError):
                 probe_login_status(isolated_cfg)
 
     def test_probe_uses_non_persistent_launch(self, isolated_cfg):
         """Probe must use launch + new_context, NOT launch_persistent_context."""
-        from webui_app.medium_login import probe_login_status
+        from backlink_publisher.publishing.adapters.medium_auth import probe_login_status
         mock_spw, page, ctx, br, pw_instance = _make_mock_pw_probe("https://medium.com/@alice")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             probe_login_status(isolated_cfg, timeout=5)
         # launch was called (not launch_persistent_context)
         pw_instance.chromium.launch.assert_called_once()
@@ -220,10 +220,10 @@ class TestProbeLoginStatusFn:
         br.new_context.assert_called_once()
 
     def test_timeout_raises_external_service_error(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _PWTimeout
+        from backlink_publisher.publishing.adapters.medium_auth import probe_login_status, _PWTimeout
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe()
         page.goto.side_effect = _PWTimeout("timeout")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="超时"):
                 probe_login_status(isolated_cfg, timeout=5)
 
@@ -236,7 +236,7 @@ class TestLaunchLoginWindowFn:
     def test_happy_path_navigates_and_waits(self, isolated_cfg):
         from webui_app.medium_login import launch_login_window
         mock_spw, page, ctx, _ = _make_mock_pw()
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             result = launch_login_window(isolated_cfg)
         assert result["logged_in"] is True
         page.goto.assert_called_once()
@@ -246,15 +246,16 @@ class TestLaunchLoginWindowFn:
 
     def test_dependency_error_when_playwright_none(self, isolated_cfg):
         from webui_app.medium_login import launch_login_window
-        with patch("webui_app.medium_login.sync_playwright", None):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", None):
             with pytest.raises(DependencyError):
                 launch_login_window(isolated_cfg)
 
     def test_lock_released_after_exception(self, isolated_cfg):
-        from webui_app.medium_login import launch_login_window, _lock_path, _PWTimeout
+        from backlink_publisher.publishing.adapters.medium_auth import _lock_path, _PWTimeout
+        from webui_app.medium_login import launch_login_window
         mock_spw, page, *_ = _make_mock_pw()
         page.goto.side_effect = _PWTimeout("timeout")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError):
                 launch_login_window(isolated_cfg)
         assert not _lock_path(isolated_cfg).exists()
@@ -286,7 +287,7 @@ class TestMediumLoginRoutes:
     def test_probe_logged_in_flashes_info(self, csrf_client):
         client, token = csrf_client
         mock_spw, *_ = _make_mock_pw_probe("https://medium.com/@alice")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
                 data={"csrf_token": token},
@@ -305,7 +306,7 @@ class TestMediumLoginRoutes:
         with client.session_transaction() as sess:
             sess["medium_probe_logged_in"] = True
         mock_spw, *_ = _make_mock_pw_probe("https://medium.com/m/signin?x=1")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
                 data={"csrf_token": token},
@@ -319,7 +320,7 @@ class TestMediumLoginRoutes:
 
     def test_probe_no_playwright_flashes_warning(self, csrf_client):
         client, token = csrf_client
-        with patch("webui_app.medium_login.sync_playwright", None):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", None):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
                 data={"csrf_token": token},
@@ -330,7 +331,7 @@ class TestMediumLoginRoutes:
 
     def test_launch_no_playwright_flashes_warning(self, csrf_client):
         client, token = csrf_client
-        with patch("webui_app.medium_login.sync_playwright", None):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", None):
             resp = client.post(
                 "/settings/medium/launch-browser-login",
                 data={"csrf_token": token},
@@ -399,14 +400,14 @@ class TestPlaywrightLifecycle:
     def test_launch_calls_exit_on_context_manager(self, isolated_cfg):
         from webui_app.medium_login import launch_login_window
         mock_spw, _page, _ctx, pw_instance = _make_mock_pw()
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             launch_login_window(isolated_cfg)
         pw_instance.__exit__.assert_called_once_with(None, None, None)
 
     def test_probe_calls_exit_on_context_manager(self, isolated_cfg):
         from webui_app.medium_login import probe_login_status
         mock_spw, _page, _ctx, _br, pw_instance = _make_mock_pw_probe()
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             probe_login_status(isolated_cfg, timeout=5)
         pw_instance.__exit__.assert_called_once_with(None, None, None)
 
@@ -420,30 +421,31 @@ class TestPWErrorCatchLaunch:
     """
 
     def test_closed_window_raises_friendly_external_error(self, isolated_cfg):
-        from webui_app.medium_login import launch_login_window, _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
+        from webui_app.medium_login import launch_login_window
         mock_spw, page, *_ = _make_mock_pw()
         page.wait_for_url.side_effect = _PWError(
             "Target page, context or browser has been closed"
         )
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="登录窗口已关闭"):
                 launch_login_window(isolated_cfg)
 
     def test_generic_pw_error_falls_through_to_generic_message(self, isolated_cfg):
-        from webui_app.medium_login import launch_login_window, _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
+        from webui_app.medium_login import launch_login_window
         mock_spw, page, *_ = _make_mock_pw()
         page.wait_for_url.side_effect = _PWError("Browser launch failed: xyz")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="Medium 登录失败"):
                 launch_login_window(isolated_cfg)
 
     def test_lock_released_after_pw_error(self, isolated_cfg):
-        from webui_app.medium_login import (
-            launch_login_window, _lock_path, _PWError,
-        )
+        from backlink_publisher.publishing.adapters.medium_auth import _lock_path, _PWError
+        from webui_app.medium_login import launch_login_window
         mock_spw, page, *_ = _make_mock_pw()
         page.wait_for_url.side_effect = _PWError("Target ... closed")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError):
                 launch_login_window(isolated_cfg)
         # _FileLock context exit must release even when _PWError bubbles.
@@ -454,20 +456,22 @@ class TestPWErrorCatchProbe:
     """U2 — probe_login_status catches playwright.sync_api.Error too."""
 
     def test_closed_window_raises_friendly_external_error(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
+        from webui_app.medium_login import probe_login_status
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe()
         page.goto.side_effect = _PWError(
             "Target page, context or browser has been closed"
         )
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="浏览器窗口被关闭"):
                 probe_login_status(isolated_cfg, timeout=5)
 
     def test_generic_pw_error_falls_through(self, isolated_cfg):
-        from webui_app.medium_login import probe_login_status, _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
+        from webui_app.medium_login import probe_login_status
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe()
         page.goto.side_effect = _PWError("Some other Playwright issue")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="Medium probe 失败"):
                 probe_login_status(isolated_cfg, timeout=5)
 
@@ -482,11 +486,12 @@ class TestCtxCloseTolerant:
     """
 
     def test_ctx_close_pw_error_does_not_mask_original(self, isolated_cfg):
-        from webui_app.medium_login import launch_login_window, _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
+        from webui_app.medium_login import launch_login_window
         mock_spw, page, ctx, _ = _make_mock_pw()
         page.wait_for_url.side_effect = _PWError("...closed")
         ctx.close.side_effect = _PWError("ctx already closed")
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             with pytest.raises(ExternalServiceError, match="登录窗口已关闭"):
                 launch_login_window(isolated_cfg)
         # ctx.close was attempted (and swallowed); __exit__ still ran.
@@ -500,12 +505,12 @@ class TestPWErrorRouteIntegration:
 
     def test_launch_closed_window_flashes_danger(self, csrf_client):
         client, token = csrf_client
-        from webui_app.medium_login import _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
         mock_spw, page, *_ = _make_mock_pw()
         page.wait_for_url.side_effect = _PWError(
             "Target page, context or browser has been closed"
         )
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/launch-browser-login",
                 data={"csrf_token": token},
@@ -519,12 +524,12 @@ class TestPWErrorRouteIntegration:
 
     def test_probe_closed_window_flashes_warning(self, csrf_client):
         client, token = csrf_client
-        from webui_app.medium_login import _PWError
+        from backlink_publisher.publishing.adapters.medium_auth import _PWError
         mock_spw, page, ctx, br, _ = _make_mock_pw_probe()
         page.goto.side_effect = _PWError(
             "Target page, context or browser has been closed"
         )
-        with patch("webui_app.medium_login.sync_playwright", mock_spw):
+        with patch("backlink_publisher.publishing.adapters.medium_auth.sync_playwright", mock_spw):
             resp = client.post(
                 "/settings/medium/probe-browser-login",
                 data={"csrf_token": token},
