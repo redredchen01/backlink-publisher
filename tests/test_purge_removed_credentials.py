@@ -71,7 +71,7 @@ def test_partial_presence_deletes_only_present():
 
 
 def test_unrelated_channel_file_untouched():
-    keep = _cred("csdn")
+    keep = _cred("substack")
     _write(keep)
     purge_removed_channel_credentials()
     assert keep.exists(), "live channel cred must not be swept"

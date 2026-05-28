@@ -85,7 +85,7 @@ def test_target_dofollow_despite_nofollow_nav_footer():
 def test_interstitial_wrapped_href_unwrapped_and_matched():
     body = (
         b'<html><body>'
-        b'<a href="https://link.juejin.cn/?target=https%3A%2F%2Fexample.com">my backlink</a>'
+        b'<a href="https://link.example.com/?target=https%3A%2F%2Fexample.com">my backlink</a>'
         b'</body></html>'
     )
     result = _inspect(body, "https://example.com")
