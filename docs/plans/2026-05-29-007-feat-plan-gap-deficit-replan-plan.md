@@ -5,6 +5,10 @@ status: completed
 date: 2026-05-29
 deepened: 2026-05-29
 origin: docs/brainstorms/2026-05-29-deficit-driven-replan-requirements.md
+# Empty escape hatch (plan-check Phase 6): the touched paths are new on this
+# branch and not yet on origin/main, so a populated claims block can only be
+# resolved post-merge. Opt out explicitly until then.
+claims: {}
 ---
 
 # feat: plan-gap — deficit-driven re-plan verb
