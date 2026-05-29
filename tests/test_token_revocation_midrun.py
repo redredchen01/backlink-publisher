@@ -4,8 +4,63 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import backlink_publisher.config.tokens as tokens_mod
+from backlink_publisher.cli._publish_helpers import _check_token_drift
 from backlink_publisher.cli.publish_backlinks import _run_resume
-from backlink_publisher.config.tokens import save_blogger_token
+from backlink_publisher.config import snapshot_token_revs
+from backlink_publisher.config.tokens import save_blogger_token, save_medium_token
+
+
+def _spy_load_token(monkeypatch):
+    """Record every credential filename ``snapshot_token_revs`` actually reads."""
+    seen: list[str] = []
+    orig = tokens_mod._load_token
+
+    def spy(path, filename):
+        seen.append(filename)
+        return orig(path, filename)
+
+    monkeypatch.setattr(tokens_mod, "_load_token", spy)
+    return seen
+
+
+def test_snapshot_scans_all_known_files_by_default(tmp_path, monkeypatch):
+    """No filter (the run-start baseline snapshot) scans every known file."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    seen = _spy_load_token(monkeypatch)
+    snapshot_token_revs()
+    assert len(seen) == 10 and "blogger-token.json" in seen
+
+
+def test_snapshot_honors_platform_filter(tmp_path, monkeypatch):
+    """A platform filter limits the scan to exactly those files."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    seen = _spy_load_token(monkeypatch)
+    snapshot_token_revs(["blogger", "medium"])
+    assert set(seen) == {"blogger-token.json", "medium-token.json"}
+
+
+def test_snapshot_empty_filter_scans_nothing(tmp_path, monkeypatch):
+    """An empty filter (no platform bound at start) reads zero files —
+    distinct from None (scan all)."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    seen = _spy_load_token(monkeypatch)
+    snapshot_token_revs([])
+    assert seen == []
+
+
+def test_check_token_drift_rescans_only_initial_platforms(tmp_path, monkeypatch):
+    """The per-row drift check re-reads only the platforms present at run-start
+    (initial_revs), NOT all 10 — that 10xN re-read was the publish hot-loop waste.
+    Behavior is unchanged: only an already-bound platform's rotation aborts."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    save_blogger_token({"client_id": "a", "client_secret": "b"})  # rev=1
+    initial = snapshot_token_revs()
+    assert initial == {"blogger": 1}
+
+    seen = _spy_load_token(monkeypatch)
+    _check_token_drift(initial)  # no drift → returns without aborting
+    assert seen == ["blogger-token.json"]  # only the bound platform, not 10 files
 
 
 def test_token_drift_aborts_mid_run(tmp_path, monkeypatch):
