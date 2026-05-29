@@ -444,8 +444,13 @@ class DedupStore:
                     if force:
                         _claim(conn, exists=True)
                         return GateDecision("dispatch", rec)
+                    # Clear the dead run's ownership when promoting: the row is no
+                    # longer owned by any live run, and a leftover dead owner_pid /
+                    # owner_run_id would mislead --list-uncertain and the adjudication
+                    # audit trail. (run_id is kept as provenance of the originating run.)
                     conn.execute(
-                        "UPDATE dedup_keys SET state = 'uncertain', updated_at = ? "
+                        "UPDATE dedup_keys SET state = 'uncertain', owner_pid = NULL, "
+                        "owner_run_id = NULL, updated_at = ? "
                         "WHERE platform = ? AND account = ? AND target_url = ?",
                         (_now(), *key.as_tuple()),
                     )

@@ -217,7 +217,9 @@ def test_gate_holds_on_live_attempting_and_holds_uncertain_on_stale():
     store.intent_write(key2, owner_pid=2_147_483_000)  # almost certainly dead
     decision = store.gate_and_claim(key2, run_id="b")
     assert decision.verdict == "hold"
-    assert store.get(key2).state == "uncertain"
+    promoted = store.get(key2)
+    assert promoted.state == "uncertain"
+    assert promoted.owner_pid is None  # dead owner cleared on promotion (no stale PID)
 
 
 def test_gate_holds_attempting_aged_past_ttl_as_uncertain():
@@ -321,6 +323,30 @@ def test_is_crashed_in_flight_true_only_for_stale_attempting():
     assert is_crashed_in_flight({}, "medium") is False
 
 
+def test_is_crashed_in_flight_store_error_returns_false(mocker):
+    # Observe-safe: a store read error must never break resume — return False.
+    store = DedupStore()
+    store.intent_write(DedupKey(platform="medium", target_url="https://example.com/err"),
+                       owner_pid=2_147_483_000)
+    mocker.patch.object(DedupStore, "get", side_effect=RuntimeError("dedup.db unreadable"))
+    assert is_crashed_in_flight({"target_url": "https://example.com/err"}, "medium") is False
+
+
+@patch("backlink_publisher.cli.publish_backlinks.verify_adapter_setup")
+@patch("backlink_publisher.cli.publish_backlinks.adapter_publish")
+def test_enforce_fresh_stale_attempting_holds(mock_pub, _mv):
+    """Fresh seam (not resume): a stale-attempting key (prior run crashed mid-dispatch)
+    is held + promoted to uncertain, never re-published. All-held -> exit 3."""
+    DedupStore().intent_write(
+        DedupKey(platform="medium", target_url=_TARGET), owner_pid=2_147_483_000
+    )
+    mock_pub.return_value = _drafted()
+    _out, _err, code = _run([_payload()], ["--platform", "medium"], enforce=True)
+    mock_pub.assert_not_called()  # stale attempting held on the fresh seam too
+    assert DedupStore().get(DedupKey(platform="medium", target_url=_TARGET)).state == "uncertain"
+    assert code == 3  # all rows held -> operator-action-required (adjudicate)
+
+
 @patch("backlink_publisher.checkpoint._cache_dir")
 @patch("backlink_publisher.cli._publish_helpers._do_sleep")
 @patch("backlink_publisher.cli._resume.verify_adapter_setup")
@@ -337,10 +363,15 @@ def test_resume_enforce_holds_crashed_in_flight_as_uncertain(mock_pub, _mv, _ms,
     key = DedupKey(platform="blogger", target_url=_TARGET)
     DedupStore().intent_write(key, owner_pid=2_147_483_000)  # dead PID -> stale
 
-    _out, _err, code = _run([], ["--resume", run_id], enforce=True)
+    _out, err, code = _run([], ["--resume", run_id], enforce=True)
     mock_pub.assert_not_called()  # stale attempting -> held, never re-published
     assert DedupStore().get(key).state == "uncertain"  # promoted for --adjudicate
     assert code == 4  # held item leaves the run "unfinished" until adjudicated
+    # The operator must not blind-retry into the same hold: finalize surfaces the
+    # adjudication path, and the held pending row is not mislabeled "unknown error".
+    assert "was interrupted mid-publish" in err  # per-item warning (Phase 3)
+    assert "--adjudicate-uncertain" in err  # finalize guidance (Phase 7)
+    assert "unknown error" not in err
 
 
 @patch("backlink_publisher.checkpoint._cache_dir")
