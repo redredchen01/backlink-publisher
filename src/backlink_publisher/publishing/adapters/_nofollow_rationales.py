@@ -11,6 +11,17 @@ not adapters/__init__.py.
 from __future__ import annotations
 
 NOFOLLOW_RATIONALES: dict[str, str] = {
+    "hatena": (
+        "Hatena Blog post bodies render outbound <a> with no rel by default — a "
+        "2026-05-29 3rd-party live probe (scripts/channel_probe.py) sampled 11/12 "
+        "body links dofollow, 1 nofollow, with no redirect interstitial. One of "
+        "Japan's largest blog hosts (high DA) and the only one of the three GO "
+        "candidates with a documented AtomPub publish API. Registered "
+        'dofollow="uncertain" pending an OUR-pipeline canary confirming our own '
+        "placed link renders dofollow; operator flips to True via "
+        "verify_link_attributes (livejournal/txtfyi workflow). referral_value="
+        "high regardless: JP DA + referral traffic + indexation speed."
+    ),
     "devto": (
         "Dev.to applies rel=\"nofollow ugc\" to outbound links since "
         "~2022 per platform policy; every external <a> is decorated "

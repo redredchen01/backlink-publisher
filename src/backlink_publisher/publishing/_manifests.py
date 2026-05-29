@@ -227,6 +227,44 @@ DEVTO_MANIFEST: dict[str, Any] = dict(
 )
 
 
+# ── hatena ─────────────────────────────────────────────────────────────────
+#
+# Hatena Blog AtomPub + WSSE. Secret JSON shape:
+# ``{"hatena_id": "...", "blog_id": "...", "api_key": "..."}`` at
+# ``<config_dir>/hatena-credentials.json`` (0600). hatena_id/blog_id are not
+# secret (they appear in the post URL); api_key (Settings → Advanced → AtomPub)
+# is password-equivalent. dofollow="uncertain" (rationale at register() site);
+# no documented rate limit, so ``throttle_band=None``.
+
+HATENA_MANIFEST: dict[str, Any] = dict(
+    ui=UiMeta(
+        display_name="Hatena Blog",
+        domain="hatenablog.com",
+        category="blog",
+        icon="bi-journal-text",
+    ),
+    bind=[
+        BindDescriptor(
+            backend="token-paste",
+            storage_state_path="<config_dir>/hatena-credentials.json",
+            extras={
+                "secret_shape": (
+                    '{"hatena_id": "...", "blog_id": "...", "api_key": "..."}'
+                ),
+                "api_key_location": "Hatena Blog → Settings → Advanced → AtomPub",
+            },
+        ),
+    ],
+    policy=Policy(
+        throttle_band=None,
+        env_keys={},
+        retry_id="default",
+        liveness_probe_sec=None,
+        language_whitelist=(),
+    ),
+)
+
+
 # ── notion ─────────────────────────────────────────────────────────────────
 #
 # Notion Integration API — creates a Page in a database via Bearer token.

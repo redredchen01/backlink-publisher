@@ -32,6 +32,7 @@ from .._manifests import (
     DEVTO_MANIFEST,
     GHPAGES_MANIFEST,
     HASHNODE_MANIFEST,
+    HATENA_MANIFEST,
     LINKEDIN_MANIFEST,
     LIVEJOURNAL_MANIFEST,
     MASTODON_MANIFEST,
@@ -62,6 +63,7 @@ from .telegraph_api import TelegraphAPIAdapter, verify_telegraph_setup
 from .velog_graphql import VelogGraphQLAdapter
 from .wordpresscom_api import WordpresscomAPIAdapter
 from .hashnode_graphql import HashnodeGraphQLAdapter
+from .hatena_atompub import HatenaAtomPubAdapter
 from .writeas_api import WriteasAPIAdapter
 from .tumblr_api import TumblrAPIAdapter
 from .linkedin_api import LinkedInAPIAdapter
@@ -214,6 +216,14 @@ register(
     rationale=_R["notion"],
     referral_value="high",  # DA ~75+, entity signal, indexation speed
     **NOTION_MANIFEST,
+)
+register(
+    "hatena",
+    HatenaAtomPubAdapter,
+    dofollow="uncertain",  # 3rd-party probe = dofollow (11/12); OUR canary pending
+    rationale=_R["hatena"],
+    referral_value="high",  # JP high-DA + referral + indexation; AtomPub publish API
+    **HATENA_MANIFEST,
 )
 register(
     "mastodon",
@@ -380,6 +390,15 @@ _SETUP_CHECKS: dict[str, Callable[[Config], str | None]] = {
             "Dev.to API key not configured. "
             f"Write {{\"api_key\": \"<key>\"}} to {c.devto_token_path} "
             "(chmod 600). Generate at https://dev.to/settings/extensions."
+        )
+    ),
+    "hatena": lambda c: (
+        None if HatenaAtomPubAdapter.available(c)
+        else (
+            "Hatena credentials not configured. Write "
+            "{\"hatena_id\": \"...\", \"blog_id\": \"...\", \"api_key\": \"...\"} to "
+            f"{c.config_dir / 'hatena-credentials.json'} (chmod 600). "
+            "API key: Hatena Blog → Settings → Advanced → AtomPub."
         )
     ),
 }
