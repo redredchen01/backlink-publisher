@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 from backlink_publisher.events._project_helpers import write_quarantines
 from backlink_publisher.events.kinds import LINK_RECHECKED
@@ -73,7 +74,7 @@ def derive_decay_counts(store) -> dict[str, int]:
     / ``dofollow_lost``; ``alive`` / ``probe_error`` are returned for context.
     """
     counts = {v: 0 for v in verdicts.VERDICTS}
-    latest: dict[int, tuple[object, str]] = {}  # article_id -> (ts, verdict)
+    latest: dict[int, tuple[datetime | None, str]] = {}  # article_id -> (ts, verdict)
     sql = (
         "SELECT article_id, payload_json, ts_utc FROM events "
         "WHERE kind = ? AND article_id IS NOT NULL"

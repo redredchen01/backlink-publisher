@@ -276,7 +276,7 @@ def read_stdin_candidates(fh) -> list[dict] | None:
         if not isinstance(obj, dict):
             continue
         live_url = obj.get("live_url")
-        if not _is_http(live_url):
+        if not isinstance(live_url, str) or not _is_http(live_url):
             continue
         rows.append(
             {
