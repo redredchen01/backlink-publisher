@@ -27,6 +27,7 @@ from backlink_publisher._util.errors import (
     AuthExpiredError,
     ContentRejectedError,
     DependencyError,
+    ExternalServiceError,
 )
 from backlink_publisher.publishing.adapters.velog_graphql import (
     VelogGraphQLAdapter,
@@ -363,6 +364,29 @@ class TestVelogGraphQLAdapterPublish:
 
         assert result.status == "published"
         assert sess.post.call_count == 2
+
+    @pytest.mark.parametrize("exc_name", ["Timeout", "ConnectionError"])
+    def test_create_network_error_not_retried(self, tmp_path, exc_name):
+        """The WritePost mutation is a NON-IDEMPOTENT create — a Timeout/
+        ConnectionError may mean velog already created the post, so it is sent
+        exactly once and never retried on a network error (would duplicate).
+        429 (a pre-create rejection) remains retryable; network errors do not.
+        The 2nd response below is the duplicate that MUST NOT be sent."""
+        config = _make_config(tmp_path)
+        adapter = VelogGraphQLAdapter()
+
+        with self._patch_lock_and_count(tmp_path):
+            with patch("requests.Session") as MockSession:
+                sess = MagicMock()
+                MockSession.return_value = sess
+                sess.post.side_effect = [
+                    getattr(requests, exc_name)("net"),
+                    _mock_success_response(),
+                ]
+                with pytest.raises(ExternalServiceError, match="unreachable"):
+                    adapter.publish(PAYLOAD, mode="publish", config=config)
+
+        assert sess.post.call_count == 1  # create mutation sent exactly once
 
     def test_null_after_retry_probe_dead_raises_auth_expired(self, tmp_path):
         """Both writePost calls return null; probe says cookie dead → AuthExpiredError."""

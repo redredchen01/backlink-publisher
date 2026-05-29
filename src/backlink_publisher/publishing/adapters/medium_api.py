@@ -152,7 +152,14 @@ class MediumAPIAdapter(Publisher):
         if canonical_url:
             body["canonicalUrl"] = canonical_url
 
-        # Create post (retried on connection errors and 429/5xx)
+        # Create post — NON-IDEMPOTENT. Medium API v1 documents no idempotency
+        # key, so a network error (Timeout/ConnectionError) after the request
+        # left the client is ambiguous: the post may already exist server-side.
+        # Retrying would duplicate it. Only 429 (a pre-create rate-limit
+        # rejection, surfaced as _TransientHTTPError) is safe to retry — the
+        # server rejected the request before creating anything. Mirrors the
+        # http_form_post.py / rentry_api.py "create exactly once" rule and the
+        # retry.py policy that already excludes 5xx for the same reason.
         def _do_post() -> requests.Response:
             resp = http_post(
                 f"{_API_BASE}/users/{user_id}/posts",
@@ -167,9 +174,7 @@ class MediumAPIAdapter(Publisher):
         try:
             post_resp = retry_transient_call(
                 _do_post,
-                is_retryable=lambda exc: isinstance(
-                    exc, (requests.Timeout, requests.ConnectionError, _TransientHTTPError)
-                ),
+                is_retryable=lambda exc: isinstance(exc, _TransientHTTPError),
                 adapter="medium-api",
             )
         except requests.RequestException as exc:

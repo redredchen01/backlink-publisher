@@ -554,12 +554,16 @@ class VelogGraphQLAdapter(Publisher):
                     raise _TransientHTTPError(resp.status_code)
                 return resp
 
+            # The WritePost mutation is a NON-IDEMPOTENT create. A network error
+            # (Timeout/ConnectionError) after the request left the client is
+            # ambiguous — velog may have already created the post — so it is NOT
+            # retried (would duplicate). Only 429 (a pre-create rate-limit
+            # rejection, surfaced as _TransientHTTPError) is safe to retry.
+            # Mirrors medium_api / http_form_post "create exactly once".
             try:
                 resp = retry_transient_call(
                     _do_post,
-                    is_retryable=lambda exc: isinstance(
-                        exc, (requests.Timeout, requests.ConnectionError, _TransientHTTPError)
-                    ),
+                    is_retryable=lambda exc: isinstance(exc, _TransientHTTPError),
                     adapter="velog-graphql",
                 )
             except requests.RequestException:
@@ -591,11 +595,11 @@ class VelogGraphQLAdapter(Publisher):
                     id=article_id,
                 ))
                 try:
+                    # Same non-idempotent-create rule as the first attempt: only
+                    # 429 is retryable; a network error is not (would duplicate).
                     resp2 = retry_transient_call(
                         _do_post,
-                        is_retryable=lambda exc: isinstance(
-                            exc, (requests.Timeout, requests.ConnectionError, _TransientHTTPError)
-                        ),
+                        is_retryable=lambda exc: isinstance(exc, _TransientHTTPError),
                         adapter="velog-graphql",
                     )
                 except requests.RequestException:
