@@ -263,7 +263,7 @@ a CC-30 backstop for everything else.
 **Verification:** `pytest tests/test_no_complexity_regrowth.py` passes on the current tree;
 deliberately bumping a seeded function or adding a CC-31 unlisted function turns it red.
 
-- [ ] **Unit 2: Characterization tests for `_run_resume`**
+- [x] **Unit 2: Characterization tests for `_run_resume`** — shipped 2026-05-29 (4 net-new P0 tests; existing resume suites unaffected)
 
 **Goal:** Lock current `_run_resume` behavior with branch-level tests *before* any extraction,
 so Unit 3 is provably behavior-preserving. This unit is the **safety net** for Unit 3 — it does
@@ -312,7 +312,7 @@ not own the decomposition (R6) or the behavior contract (R8); it makes regressio
 **Verification:** New + existing resume tests pass against unmodified `_resume.py`; every
 invariant in System-Wide Impact has a corresponding failing-if-violated test before Unit 3 starts.
 
-- [ ] **Unit 3: Decompose `_run_resume` and lower its CC budget entry**
+- [x] **Unit 3: Decompose `_run_resume` and lower its CC budget entry** — shipped 2026-05-29. Outcome beat the ~CC-41 prediction: shell **CC 62→9**, heaviest helper `_publish_one_resume_item` **CC 23** (under the 30 backstop) → no new entries, `_run_resume` entry **removed**. 33 resume tests green (behavior preserved).
 
 **Goal:** Reduce `_run_resume`'s CC and tighten its `complexity_budget.toml` entry in the same
 PR, behavior unchanged. **Success is falsifiable, not "removed":** extracting phases 2–5 +
