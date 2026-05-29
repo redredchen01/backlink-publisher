@@ -90,18 +90,35 @@ Navigate to the **content/post URL** (not just the homepage), then:
    a real dofollow link to the source blog / target exists at all:
 
 ```js
+// NOTE: return host+pathname only — never full hrefs. Query strings trip the
+// harness data filter ([BLOCKED: Cookie/query string data]) and you lose the
+// whole result. rel is bucketed by SEO effect, NOT raw value (see below).
 (() => {
+  const root = location.hostname.split('.').slice(-2).join('.');
+  const STRIP = /\b(nofollow|ugc|sponsored)\b/i;          // equity-stripping
+  const isOut = h => { try { const u = new URL(h);
+    return u.protocol.startsWith('http') && !u.hostname.endsWith(root); } catch { return false; } };
   const all = [...document.querySelectorAll('a[href]')];
-  const outbound = all
-    .filter(a => { try { return !new URL(a.href).hostname.includes(location.hostname.replace(/^www\./,'')); } catch { return false; } })
-    .map(a => ({ href: a.href, rel: a.getAttribute('rel') || '(none)', text: (a.textContent||'').trim().slice(0,50) }));
-  const seen = new Set(); const uniq = [];
-  for (const o of outbound) if (!seen.has(o.href)) { seen.add(o.href); uniq.push(o); }
-  const art = document.querySelector('article');
+  const seen = new Set(); const out = []; const relDist = {}; const interstitial = [];
+  for (const a of all) {
+    if (!isOut(a.href)) continue;
+    const u = new URL(a.href); const key = u.hostname + u.pathname;   // no query/hash
+    if (seen.has(key)) continue; seen.add(key);
+    const rel = (a.getAttribute('rel') || '(none)');
+    // noopener / noreferrer alone are security attrs, NOT nofollow → still dofollow
+    const bucket = STRIP.test(rel) ? 'equity-stripped(nofollow)' : 'dofollow';
+    relDist[bucket] = (relDist[bucket] || 0) + 1;
+    if (/\/go\?|\/jump\?|link\.[^/]+\/|\/redirect/i.test(a.href)) interstitial.push(key);
+    out.push({ link: key, rel, text: (a.textContent || '').trim().slice(0, 40) });
+  }
+  const art = document.querySelector('article') || document.querySelector('main');
   return JSON.stringify({
-    totalAnchors: all.length, outboundCount: uniq.length, outbound: uniq.slice(0,30),
+    finalUrl: location.origin + location.pathname,
+    totalAnchors: all.length, outboundUnique: seen.size,
+    relDistribution: relDist, interstitialHits: interstitial.slice(0, 5),
     articleTextLen: art ? art.innerText.trim().length : null,
-    bodyTextLen: document.body.innerText.trim().length
+    bodyTextLen: document.body.innerText.trim().length,
+    outboundSample: out.slice(0, 20)
   }, null, 2);
 })()
 ```
@@ -109,12 +126,17 @@ Navigate to the **content/post URL** (not just the homepage), then:
 Interpret:
 - **No outbound links except the site's own socials** → no backlink surface →
   NO-GO regardless of HTTP status. (This was bloglovin's killer.)
-- Outbound link to source/target present → record its `rel`:
-  - no `rel` / `rel` without `nofollow` → dofollow candidate.
-  - `rel="nofollow"` (or `ugc`/`sponsored`) → nofollow; judge `referral_value`.
-  - href routed through a redirect interstitial (e.g. `…/go?to=`, `link.<domain>`)
+- Outbound link to source/target present → judge its `rel` by SEO *effect*:
+  - no `rel`, or only `noopener` / `noreferrer` → **dofollow** (those two are
+    security/perf attrs and do NOT strip equity — a Tistory post showing 22×
+    `noopener` is 22 dofollow links, not nofollow).
+  - `rel` contains `nofollow` / `ugc` / `sponsored` → nofollow; judge `referral_value`.
+  - href routed through a redirect interstitial (`…/go?to=`, `link.<domain>`)
     → equity likely stripped → treat as nofollow dead-weight (see the `jianshu`/
     `csdn`/`juejin` rationales in `registry.py::_REJECTED_PLATFORMS`).
+- A small minority of nofollow among mostly-dofollow body links (e.g. Hatena's
+  11 dofollow + 1 nofollow) is normal — what matters is whether YOUR placed link
+  renders dofollow, which the live canary settles.
 - `articleTextLen`/`bodyTextLen` near-zero on a content URL → gated/empty shell,
   not a usable page.
 
