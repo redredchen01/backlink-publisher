@@ -184,8 +184,7 @@ def _reconcile_checkpoints(
                 )
                 # R8: clear any stale quarantine entry for this URL.
                 _clear_quarantine_by_dedup_key(store, canon)
-                if canons := record.target_url or canon:
-                    summary.cleared += 1
+                summary.cleared += 1
             except Exception as exc:
                 _log.warning(
                     "reconciler: auto-fix failed for item %s/%s: %s",
