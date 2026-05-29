@@ -14,6 +14,7 @@ Plan ref: docs/ideation/2026-05-14-round3-fresh-pass-ideation.md (#7)
 from __future__ import annotations
 
 import io
+import logging
 import re
 
 
@@ -205,7 +206,6 @@ class TestActivePlatforms:
         # installed. Explicitly set sync_playwright to None so this test covers
         # the true "no-credentials + no-library" baseline.
         from backlink_publisher.publishing.adapters import medium_browser
-        from backlink_publisher.config.tokens import load_medium_integration_token
         monkeypatch.setattr(medium_browser, "sync_playwright", None)
         monkeypatch.setattr(
             "backlink_publisher.config.tokens.load_medium_integration_token",
@@ -310,3 +310,72 @@ class TestEmitBanner:
         sha = emit_banner(cfg, "test-cli")
         assert sha == compute_config_sha(cfg)
         assert "[test-cli] effective config:" in buf.getvalue()
+
+
+# ── SEC-6: _warn_if_loose_config_permissions ──────────────────────────────
+
+
+class TestWarnIfLooseConfigPermissions:
+    """SEC-6: permission warning must fire for ALL credential sections,
+    not just ``[llm].api_key``."""
+
+    def test_no_warning_when_no_credentials(self, tmp_path, caplog):
+        """S2: no credential sections → no warning regardless of mode."""
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[blogger]\n# no credentials\n")
+        cfg_path.chmod(0o644)
+        from backlink_publisher.config.loader import _warn_if_loose_config_permissions
+        caplog.set_level(logging.WARNING)
+        _warn_if_loose_config_permissions(cfg_path, {"blogger": {}})
+        assert not caplog.records
+
+    def test_blogger_oauth_triggers_warning(self, tmp_path, caplog):
+        """S1: config.toml with blogger.oauth + 0644 → warning mentions [blogger.oauth]."""
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text('[blogger.oauth]\nclient_id = "***"\nclient_secret = "***"\n')
+        cfg_path.chmod(0o644)
+        from backlink_publisher.config.loader import _warn_if_loose_config_permissions
+        caplog.set_level(logging.WARNING)
+        _warn_if_loose_config_permissions(cfg_path, {
+            "blogger": {"oauth": {"client_id": "x", "client_secret": "y"}},
+        })
+        assert len(caplog.records) == 1
+        assert "[blogger.oauth]" in caplog.records[0].message
+
+    def test_no_warning_when_file_mode_0600(self, tmp_path, caplog):
+        """S3: mode 0600 → no warning even with credentials."""
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text('[llm.anchor_provider]\napi_key = "***"\n')
+        cfg_path.chmod(0o600)
+        from backlink_publisher.config.loader import _warn_if_loose_config_permissions
+        caplog.set_level(logging.WARNING)
+        _warn_if_loose_config_permissions(cfg_path, {
+            "llm": {"anchor_provider": {"api_key": "sk-test"}},
+        })
+        assert not caplog.records
+
+    def test_llm_api_key_triggers_legacy_warning(self, tmp_path, caplog):
+        """S4: legacy LLM api_key + 0644 → warning preserved (SEC-6 backward compat)."""
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text('[llm.anchor_provider]\napi_key = "***"\n')
+        cfg_path.chmod(0o644)
+        from backlink_publisher.config.loader import _warn_if_loose_config_permissions
+        caplog.set_level(logging.WARNING)
+        _warn_if_loose_config_permissions(cfg_path, {
+            "llm": {"anchor_provider": {"api_key": "sk-legacy"}},
+        })
+        assert len(caplog.records) == 1
+        assert "[llm].api_key" in caplog.records[0].message
+
+    def test_medium_oauth_triggers_warning(self, tmp_path, caplog):
+        """medium.oauth + 0644 → warning mentions [medium.oauth]."""
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text('[medium.oauth]\nclient_id = "***"\nclient_secret = "***"\n')
+        cfg_path.chmod(0o644)
+        from backlink_publisher.config.loader import _warn_if_loose_config_permissions
+        caplog.set_level(logging.WARNING)
+        _warn_if_loose_config_permissions(cfg_path, {
+            "medium": {"oauth": {"client_id": "x", "client_secret": "y"}},
+        })
+        assert len(caplog.records) == 1
+        assert "[medium.oauth]" in caplog.records[0].message

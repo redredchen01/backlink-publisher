@@ -35,8 +35,8 @@ def _parse_llm_anchor_provider(
     LLM is optional; absence simply means the anchor resolver will only use
     config-pinned typed pools.
 
-    Enforces ``https://`` on ``base_url`` and warns if config.toml contains
-    ``api_key`` but its file permissions are not 0600.
+    Enforces ``https://`` on ``base_url``. Permission warning for config.toml
+    credential sections is now handled centrally in ``load_config()`` (SEC-6).
     """
     if not isinstance(section, dict):
         # Even if section is missing, we check env vars for a full override
@@ -54,10 +54,6 @@ def _parse_llm_anchor_provider(
 
     toml_api_key_raw = section.get("api_key")
     toml_has_api_key = isinstance(toml_api_key_raw, str) and bool(toml_api_key_raw)
-
-    if toml_has_api_key and config_path is not None and config_path.exists():
-        from ..loader import _warn_if_loose_config_permissions
-        _warn_if_loose_config_permissions(config_path)
 
     base_url = env_base_url or section.get("base_url")
     model = env_model or section.get("model")

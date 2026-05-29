@@ -139,6 +139,8 @@ def load_config(path: Path | None = None) -> Config:
             f"Failed to parse config file {config_path}: {exc}"
         ) from exc
 
+    _warn_if_loose_config_permissions(config_path, data)
+
     blogger_section = data.get("blogger", {})
     oauth_section = blogger_section.pop("oauth", {})
     medium_section = data.get("medium", {})
@@ -267,22 +269,41 @@ def _resolve_medium_integration_token(toml_value: str | None) -> str | None:
     return toml_value
 
 
-def _warn_if_loose_config_permissions(config_path: Path) -> None:
-    """Emit a warning if config.toml contains api_key but isn't 0600.
+def _warn_if_loose_config_permissions(config_path: Path, raw_data: dict | None = None) -> None:
+    """Emit a warning if config.toml contains credentials but isn't 0600.
 
+    Checks all credential-bearing sections: ``[llm].anchor_provider.api_key``,
+    ``[blogger.oauth]``, ``[medium.oauth]``, and ``[medium].integration_token``.
     No-op on Windows where POSIX permission bits aren't meaningful.
     """
     if os.name == "nt":
         return
+
+    # Detect credential-bearing sections in the raw TOML data.
+    sections: list[str] = []
+    if raw_data:
+        _llm = raw_data.get("llm", {})
+        if _llm.get("anchor_provider", {}).get("api_key"):
+            sections.append("[llm].api_key")
+        if raw_data.get("blogger", {}).get("oauth", {}).get("client_id"):
+            sections.append("[blogger.oauth]")
+        if raw_data.get("medium", {}).get("oauth", {}).get("client_id"):
+            sections.append("[medium.oauth]")
+        if raw_data.get("medium", {}).get("integration_token"):
+            sections.append("[medium].integration_token")
+
+    if not sections:
+        return  # no credential sections → nothing to warn about
+
     try:
         mode = stat.S_IMODE(config_path.stat().st_mode)
     except OSError:
         return
     if mode != 0o600:
         _log.warning(
-            "config file %s contains an LLM api_key but has mode %s; "
+            "config file %s has mode %s and contains credential sections %s; "
             "set permissions to 0600 (chmod 600) to prevent credential leakage",
-            config_path, oct(mode),
+            config_path, oct(mode), sections,
         )
 
 
