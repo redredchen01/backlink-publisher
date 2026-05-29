@@ -214,7 +214,7 @@ graph TB
     U2 --> U3
 ```
 
-- [ ] **Unit 1: CC budget gate (budget file + enforcement test + canary)**
+- [x] **Unit 1: CC budget gate (budget file + enforcement test + canary)** — shipped 2026-05-29 (7-block seed, 33 tests green)
 
 **Goal:** Land a blocking CC gate, green on day one, seeded with the 6 E/F-rank functions and
 a CC-30 backstop for everything else.
