@@ -11,7 +11,7 @@ failures are logged but never surface as publish failures.
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Optional, Sequence
 from urllib.parse import parse_qsl, unquote, urlparse
 from urllib.request import Request
 
@@ -392,6 +392,41 @@ def _canonicalize_for_match(href: str) -> Optional[str]:
         return canonicalize_url(href)
     except Exception:  # noqa: BLE001
         return None
+
+
+def body_has_required_link(body: str, required_urls: Sequence[str]) -> bool:
+    """True iff at least one required URL is present in ``body`` as a backlink.
+
+    The publish-gate sibling of a naive ``url in body`` substring scan. Platforms
+    such as LiveJournal rewrite every outbound ``<a href>`` through a redirect
+    shim (``https://www.livejournal.com/away?to=<url-encoded-target>``), so the
+    verbatim target string never appears in the body and a substring scan
+    false-negatives a backlink that is genuinely live. This reuses the SAME
+    unwrap-interstitial + canonicalize logic as the dofollow canary
+    (:func:`_target_verdicts`) so the publish gate and the canary can never
+    diverge on what counts as "the backlink is present".
+
+    Matching is OR-across-required (mirrors the gate contract: at least one
+    required link present). An empty ``required_urls`` is vacuously satisfied.
+    """
+    if not required_urls:
+        return True
+    # Fast path: verbatim substring. Purely additive — anything that passed the
+    # old naive substring check still passes here, so no adapter regresses.
+    if any(u in body for u in required_urls):
+        return True
+    wanted = {c for c in (_canonicalize_for_match(u) for u in required_urls) if c}
+    if not wanted:
+        return False
+    for tag in _A_TAG_RE.findall(body):
+        href = _tag_href(tag)
+        if not href:
+            continue
+        if _canonicalize_for_match(href) in wanted:
+            return True
+        if _canonicalize_for_match(_unwrap_interstitial(href)) in wanted:
+            return True
+    return False
 
 
 def _fetch_body_via_preflight(url, _pf, timeout) -> tuple[bytes, Optional[str]]:
