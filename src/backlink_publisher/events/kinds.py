@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from typing import Final
 
-# --- Seam A: the event-kind vocabulary (14 kinds; do NOT rename) ---------
+# --- Seam A: the event-kind vocabulary (15 kinds; do NOT rename) ---------
 
 PUBLISH_INTENT: Final = "publish.intent"
 PUBLISH_CONFIRMED: Final = "publish.confirmed"
@@ -49,6 +49,7 @@ BANNER_SKIPPED_NO_ARTIFACT: Final = "banner.skipped_no_artifact"
 IMAGE_GEN_INVOKED: Final = "image_gen_invoked"
 IMAGE_GEN_CAPPED: Final = "image_gen_capped"
 IMAGE_GEN_DISABLED_AUTO: Final = "image_gen_disabled_auto"
+CITATION_OBSERVED: Final = "citation.observed"
 
 #: Every kind ever written to events.db. The R8a CI gate asserts no writer
 #: emits a kind outside this set.
@@ -68,6 +69,7 @@ KINDS: Final[frozenset[str]] = frozenset(
         IMAGE_GEN_INVOKED,
         IMAGE_GEN_CAPPED,
         IMAGE_GEN_DISABLED_AUTO,
+        CITATION_OBSERVED,
     }
 )
 
@@ -113,6 +115,11 @@ REQUIRED_FIELDS: Final[dict[str, frozenset[str]]] = {
     IMAGE_GEN_INVOKED: frozenset({"prompt_sha"}),
     IMAGE_GEN_CAPPED: frozenset({"reason"}),
     IMAGE_GEN_DISABLED_AUTO: frozenset({"threshold"}),
+    # citation.observed carries only parsed, bounded fields (D8): the raw
+    # LLM/HTTP trace is never persisted. The floor is the load-bearing triple a
+    # share/dashboard reader needs to make sense of the row — the citation
+    # verdict tier, the engine that produced it, and the query that was probed.
+    CITATION_OBSERVED: frozenset({"verdict", "engine", "query"}),
 }
 
 
