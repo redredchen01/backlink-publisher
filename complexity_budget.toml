@@ -50,6 +50,7 @@ rationale = "Anchor/link construction for a plan row: branches over anchor sourc
 ceiling = 36
 rationale = "Config TOML writer: emits [blogger]/[medium]/[targets.*] sections with conditional credential subsections while preserving unmanaged operator-added tables verbatim. Already SLOC-budget-monitored; grandfathered at current CC here, decomposed lazily if a feature next touches it (not active scope)."
 
-[functions."src/backlink_publisher/config/parsers/llm.py::_parse_llm_anchor_provider"]
-ceiling = 31
-rationale = "LLM anchor-provider config parser: branches across endpoint/key/model resolution, provider variants, and SSRF/allowlist guard fields when reading the [llm.*] tables. Grandfathered at current CC; lazy decomposition only when next touched. Note: a concurrent SEC-6 branch lowers this below 31, which will tighten the ceiling in that PR."
+# config/parsers/llm.py::_parse_llm_anchor_provider was seeded at CC 31, but SEC-6 (PR #308,
+# merged to main) centralized the loose-permission warning out of the parser, dropping it to
+# CC 28 — now under the CC-30 backstop, so no entry is needed (the backstop covers it). Entry
+# removed on rebase onto post-SEC-6 main (the same-PR-bump discipline applied across the merge).
