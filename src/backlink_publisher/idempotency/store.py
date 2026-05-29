@@ -375,7 +375,10 @@ class DedupStore:
         * ``done``                  -> ``skip``   (already published).
         * ``uncertain``             -> ``hold``   (held; surface, do not publish).
         * live ``attempting``       -> ``hold``   (another run owns the dispatch).
-        * stale ``attempting``      -> reclaim to ``attempting`` (new owner) -> ``dispatch``.
+        * stale ``attempting``      -> promote to ``uncertain`` -> ``hold`` (a run
+          died mid-dispatch; the post may already be live, so re-dispatch would
+          risk a duplicate — adjudicate, do not auto-republish). ``force``
+          overrides: reclaim to ``attempting`` -> ``dispatch``.
         * ``failed`` (re-publishable)-> reclaim to ``attempting`` -> ``dispatch``.
         * absent                    -> INSERT ``attempting`` -> ``dispatch``.
 
@@ -428,11 +431,25 @@ class DedupStore:
                 if rec.state == "failed":
                     _claim(conn, exists=True)
                     return GateDecision("dispatch", rec)
-                # attempting: reclaim only if the owning run is gone (R3 crash /
-                # lease-takeover topology); a live owner holds.
+                # attempting: a LIVE owner holds (another run owns the dispatch).
+                # A STALE attempting (owning run died mid-dispatch, or aged past
+                # the TTL backstop) is AMBIGUOUS: record_intent writes `attempting`
+                # BEFORE the post is created, so a crash leaves `attempting` whether
+                # or not the post landed. Re-dispatching could DUPLICATE an
+                # already-live post, so promote the stale row to `uncertain` and
+                # HOLD it for --adjudicate-uncertain (same may-have-committed
+                # treatment as the http_5xx hold). A manifest `force` still
+                # overrides, reclaiming + dispatching like a forced `uncertain`.
                 if self.is_stale_attempting(rec, now=now, ttl_s=ttl_s):
-                    _claim(conn, exists=True)
-                    return GateDecision("dispatch", rec)
+                    if force:
+                        _claim(conn, exists=True)
+                        return GateDecision("dispatch", rec)
+                    conn.execute(
+                        "UPDATE dedup_keys SET state = 'uncertain', updated_at = ? "
+                        "WHERE platform = ? AND account = ? AND target_url = ?",
+                        (_now(), *key.as_tuple()),
+                    )
+                    return GateDecision("hold", rec)
                 return GateDecision("hold", rec)
 
         return _retry_sqlite(_op)

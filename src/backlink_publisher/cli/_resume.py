@@ -39,7 +39,7 @@ from ._publish_helpers import (
     _record_publish_path,
     _sleep_with_throttle,
 )
-from ._dedup_gate import gate, record_done, record_failure
+from ._dedup_gate import gate, is_crashed_in_flight, record_done, record_failure
 
 
 def item_to_publish_output(item: dict[str, Any]) -> dict[str, Any]:
@@ -166,11 +166,28 @@ def _select_resume_items(ckpt: dict[str, Any]) -> list[dict[str, Any]]:
         )
     ]
 
+    ckpt_platform = ckpt.get("platform")
     for item in to_process:
         if item.get("error_class") == "http_5xx":
             print(
                 f"WARNING: item {item['id']} failed with HTTP 5xx — "
                 f"post may already be live on {item['platform']}. Verify before resuming.",
+                file=sys.stderr,
+            )
+            continue
+        # A hard crash (SIGKILL/OOM/power loss) mid-dispatch never set an
+        # error_class, so the item stays `pending` and is silent above — but its
+        # dedup row is a stale `attempting`, meaning the post may already be live.
+        # Warn with the same guidance (both observe and enforce). In enforce the
+        # gate additionally HOLDS it as uncertain; observe still dispatches by
+        # contract, so this warning is the operator's signal there.
+        row = item.get("payload") or {}
+        platform = ckpt_platform or item.get("platform") or row.get("platform", "")
+        if is_crashed_in_flight(row, platform):
+            print(
+                f"WARNING: item {item['id']} was interrupted mid-publish — "
+                f"post may already be live on {item.get('platform') or platform}. "
+                "Verify before resuming.",
                 file=sys.stderr,
             )
 
