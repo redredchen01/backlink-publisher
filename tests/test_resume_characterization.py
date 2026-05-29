@@ -21,6 +21,11 @@ from unittest.mock import MagicMock, patch
 
 from backlink_publisher.cli.publish_backlinks import _run_resume
 from backlink_publisher.publishing.adapters import AdapterResult
+from backlink_publisher._util.errors import (
+    AuthExpiredError,
+    BannerUploadError,
+    DependencyError,
+)
 
 
 class _Args:
@@ -215,3 +220,109 @@ def test_resume_all_done_noop_projects_and_exits_0(tmp_path, monkeypatch):
 
     assert code == 0
     spies["project_run_safe"].assert_called_once()  # no-op resume still projects before exit 0
+
+
+def _two_pending_ckpt() -> dict:
+    return {
+        "platform": "blogger", "mode": "draft",
+        "items": [
+            {"id": "r0", "status": "pending", "platform": "blogger",
+             "payload": {"target_url": "https://x.com/a", "platform": "blogger"}},
+            {"id": "r1", "status": "pending", "platform": "blogger",
+             "payload": {"target_url": "https://x.com/b", "platform": "blogger"}},
+        ],
+    }
+
+
+# --- Exception-cluster arms (the heart of what _publish_one_resume_item extracted) ---
+# AuthExpired + Dependency ABORT the whole run (exit 3, later items untouched);
+# BannerUpload + generic Exception are RECOVERABLE (record failure, continue to next item).
+
+
+def test_resume_auth_expired_aborts_run_flips_channel_exit_3(tmp_path, monkeypatch):
+    """[P0] AuthExpiredError on item 0 aborts the WHOLE run (exit 3, item 1 never processed),
+    flips the channel to expired, and records a failure terminal (never done)."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    ckpt = _two_pending_ckpt()
+    calls = {"n": 0}
+
+    def fake_publish(*a, **k):
+        calls["n"] += 1
+        raise AuthExpiredError(channel="blogger")
+
+    with patch("webui_store.channel_status.mark_expired") as mark_expired:
+        with _harness(ckpt, fake_publish=fake_publish) as spies:
+            code = _run_catching_exit(_Args())
+
+    assert code == 3
+    assert calls["n"] == 1, "abort arm: item 1 must NOT be processed"
+    mark_expired.assert_called_once_with("blogger")
+    spies["record_failure"].assert_called_once()
+    assert not spies["record_done"].called
+
+
+def test_resume_dependency_error_aborts_run_exit_3(tmp_path, monkeypatch):
+    """[P0] In-loop DependencyError aborts the whole run with exit 3 (distinct from the
+    pre-loop verify_adapter_setup DependencyError)."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    ckpt = _two_pending_ckpt()
+    calls = {"n": 0}
+
+    def fake_publish(*a, **k):
+        calls["n"] += 1
+        raise DependencyError("dependency boom")
+
+    with _harness(ckpt, fake_publish=fake_publish) as spies:
+        code = _run_catching_exit(_Args())
+
+    assert code == 3
+    assert calls["n"] == 1, "abort arm: item 1 must NOT be processed"
+    spies["record_failure"].assert_called_once()
+    assert not spies["record_done"].called
+
+
+def test_resume_banner_upload_error_is_recoverable_continues(tmp_path, monkeypatch):
+    """BannerUploadError (a DependencyError SUBCLASS caught by its own earlier arm) is
+    recoverable: the loop continues to the next item. Item 0 fails, item 1 succeeds -> exit 4."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    ckpt = _two_pending_ckpt()
+    calls = {"n": 0}
+
+    def fake_publish(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise BannerUploadError("banner boom")
+        return AdapterResult(status="drafted", adapter="blogger-api", platform="blogger",
+                             published_url="https://blog/b")
+
+    with _harness(ckpt, fake_publish=fake_publish) as spies:
+        code = _run_catching_exit(_Args())
+
+    assert calls["n"] == 2, "recoverable arm: loop must continue to item 1"
+    assert code == 4, "item 0 stayed failed -> exit 4"
+    assert ckpt["items"][0]["status"] == "failed"
+    assert ckpt["items"][1]["status"] == "done"
+    spies["record_done"].assert_called_once()  # only item 1
+
+
+def test_resume_generic_exception_is_recoverable_records_unexpected(tmp_path, monkeypatch):
+    """A non-typed exception is caught by the generic arm: recorded 'unexpected', loop
+    continues, no record_done for the failed item."""
+    monkeypatch.setenv("BACKLINK_PUBLISHER_CONFIG_DIR", str(tmp_path))
+    ckpt = _two_pending_ckpt()
+    calls = {"n": 0}
+
+    def fake_publish(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("kaboom")
+        return AdapterResult(status="drafted", adapter="blogger-api", platform="blogger",
+                             published_url="https://blog/b")
+
+    with _harness(ckpt, fake_publish=fake_publish) as spies:
+        code = _run_catching_exit(_Args())
+
+    assert calls["n"] == 2, "recoverable arm: loop must continue past the unexpected error"
+    assert code == 4
+    assert ckpt["items"][0]["status"] == "failed"
+    spies["record_done"].assert_called_once()  # only item 1

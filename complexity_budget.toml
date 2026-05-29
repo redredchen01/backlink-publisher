@@ -26,9 +26,9 @@
 # record with rationale. A radon version bump re-baselines every ceiling here and
 # the CC canary (tests/fixtures/cc_canary.py) in the same PR.
 
-[functions."src/backlink_publisher/cli/_resume.py::_run_resume"]
-ceiling = 62
-rationale = "Resume publish loop: load checkpoint, retro re-validation reclassification pass, build to_process, no-op early return, medium-throttle precompute, per-item publish loop (token-drift, dedup gate skip/hold/dispatch, policy-vs-adapter publish, 5-arm exception cluster, in-band error, verify, record_done, checkpoint update), and finalize epilogue (recon, project, union emit, exit 0/4/5). Decomposition is planned in Plan 2026-05-29-005 Unit 3 behind this gate; ceiling drops in that PR."
+# _resume.py::_run_resume was decomposed (Plan 2026-05-29-005 Unit 3, 2026-05-29) from CC 62
+# into a thin shell (CC 9) plus phase helpers, the heaviest being _publish_one_resume_item at
+# CC 23 — all under the CC-30 backstop, so no entry is needed for any of them. Entry removed.
 
 [functions."src/backlink_publisher/cli/plan_backlinks/_payload.py::_generate_payload"]
 ceiling = 50
