@@ -326,6 +326,12 @@ class TestTierGroupingDom:
         assert devto_pos < divider_pos, "ready channel must precede the divider"
         assert notion_pos > divider_pos, "unconfigured channel must follow the divider"
 
+    def test_all_ready_tier_has_no_divider(self, client):
+        """R5: tier-1 (all anon = all ready) renders no divider."""
+        ov = self._overview(client)
+        tier1 = ov[ov.index('id="tier-1"'):ov.index('id="tier-2"')]
+        assert 'tier-divider' not in tier1, "all-ready tier must not render a divider"
+
     def test_homogeneous_tier_has_no_divider(self, client, monkeypatch):
         """R5/R12: a tier whose members are all unready renders no divider.
         Force every tier-2 channel unbound so tier-2 is homogeneous.
@@ -362,6 +368,15 @@ class TestTierPersistenceContract:
                 rf'data-bs-toggle="collapse"\s+data-bs-target="#{key}"', body
             ), f"missing collapse toggle for {key}"
             assert re.search(rf'id="{key}"\s+class="collapse', body)
+
+    def test_tier_panels_nested_inside_overview_panel(self, client):
+        """The persistence JS scopes to '#overview-panel .collapse[id^="tier-"]',
+        so the tier panels must live inside #overview-panel (not just exist).
+        """
+        body = client.get("/settings").get_data(as_text=True)
+        overview = body[body.index('id="overview-panel"'):body.index('id="section-channels"')]
+        for key in ("tier-1", "tier-2", "tier-3"):
+            assert f'id="{key}"' in overview, f"{key} not nested in #overview-panel"
 
     def test_settings_js_generalizes_persistence_to_tiers(self):
         from pathlib import Path

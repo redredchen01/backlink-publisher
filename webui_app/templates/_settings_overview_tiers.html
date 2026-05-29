@@ -27,14 +27,16 @@
         <i class="bi bi-chevron-right chevron" aria-hidden="true"></i>
     </button>
     <div id="{{ g.key }}" class="collapse{% if g.open %} show{% endif %}">
-        {% for name, status, ready in g.channels if ready %}
-            {{ dashboard_channel_card(name, status, bindable=(name in binding_channels),
-               has_card=(name in _carded_channels or status.auth_type not in ('live_browser', 'oauth', None))) }}
-        {% endfor %}
-        {% if g.ready > 0 and g.ready < g.total %}
-        <div class="tier-divider"><span>未配置</span></div>
-        {% endif %}
-        {% for name, status, ready in g.channels if not ready %}
+        {#- Single pass over g.channels (helper already sorts ready-first). The
+            divider is emitted once, before the first unconfigured card, and only
+            when the tier is mixed (g.ready > 0 and some unready remain). One
+            macro call site → ready/unready cards can never drift apart. #}
+        {% set ns = namespace(divider_done=false) %}
+        {% for name, status, ready in g.channels %}
+            {% if not ready and not ns.divider_done and g.ready > 0 %}
+            <div class="tier-divider"><span>未配置</span></div>
+            {% set ns.divider_done = true %}
+            {% endif %}
             {{ dashboard_channel_card(name, status, bindable=(name in binding_channels),
                has_card=(name in _carded_channels or status.auth_type not in ('live_browser', 'oauth', None))) }}
         {% endfor %}

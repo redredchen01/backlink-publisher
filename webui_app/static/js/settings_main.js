@@ -409,22 +409,29 @@
     // default is decided only on first visit; afterwards the operator's
     // choice sticks across verify/dry-run re-renders (R10).
     document.addEventListener('DOMContentLoaded', function() {
-        var panels = document.querySelectorAll('#overview-panel .collapse[id^="tier-"]');
+        var overview = document.getElementById('overview-panel');
+        if (!overview) return;
+        var panels = overview.querySelectorAll('.collapse[id^="tier-"]');
         panels.forEach(function(panel) {
             var key = 'settings:collapse:' + panel.id;
-            var saved = null;
-            try { saved = localStorage.getItem(key); } catch (e) {}
-            if (saved === '1' && !panel.classList.contains('show')) {
-                try { bootstrap.Collapse.getOrCreateInstance(panel).show(); } catch (e) {}
-            } else if (saved === '0' && panel.classList.contains('show')) {
-                try { bootstrap.Collapse.getOrCreateInstance(panel).hide(); } catch (e) {}
-            }
+            // Attach listeners BEFORE the programmatic restore so the restore's
+            // own show/hide is observed (writes back the same value, idempotent)
+            // and later user toggles are always captured.
             panel.addEventListener('show.bs.collapse', function() {
                 try { localStorage.setItem(key, '1'); } catch (e) {}
             });
             panel.addEventListener('hide.bs.collapse', function() {
                 try { localStorage.setItem(key, '0'); } catch (e) {}
             });
+            var saved = null;
+            try { saved = localStorage.getItem(key); } catch (e) {}
+            // No record → leave the server-rendered default untouched (default
+            // is decided only on first visit).
+            if (saved === '1' && !panel.classList.contains('show')) {
+                try { bootstrap.Collapse.getOrCreateInstance(panel).show(); } catch (e) {}
+            } else if (saved === '0' && panel.classList.contains('show')) {
+                try { bootstrap.Collapse.getOrCreateInstance(panel).hide(); } catch (e) {}
+            }
         });
     });
 

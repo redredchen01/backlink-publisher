@@ -1,9 +1,10 @@
 ---
 title: "feat: 渠道綁定總覽按自动化分层分组"
 type: feat
-status: active
+status: completed
 date: 2026-05-29
 origin: docs/brainstorms/2026-05-29-channel-grouping-by-automation-requirements.md
+claims: {}
 ---
 
 # feat: 渠道綁定總覽按自动化分层分组
