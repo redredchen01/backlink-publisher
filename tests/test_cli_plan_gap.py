@@ -152,3 +152,61 @@ def test_unknown_liveness_failsafe_no_crash():
     assert code == 0
     assert _seeds(out) == []
     assert "unknown_liveness=1" in err
+
+
+def test_row_missing_target_url_is_failsafe_not_crash():
+    line = json.dumps({"liveness": "live", "live_dofollow": 0,
+                       "live_dofollow_platforms": [], "liveness_verified_at": "2026-05-29T00:00:00"}) + "\n"
+    out, err, code = _run(["--desired", "2", "--language", "zh-CN"], stdin=line)
+    assert code == 0  # not a traceback/exit-1
+    assert _seeds(out) == []
+    assert "malformed=1" in err
+
+
+def test_desired_map_override_emits_more(tmp_path):
+    mapfile = tmp_path / "map.json"
+    mapfile.write_text(json.dumps({"https://t.com/p": len(AD) + 3}))
+    out, _, code = _run(
+        ["--desired", "1", "--language", "zh-CN", "--desired-map", str(mapfile)],
+        stdin=_ledger_line(live_dofollow=0),
+    )
+    assert code == 0
+    # override D >> roster → emit all available candidates (capped at the roster).
+    assert len(_seeds(out)) == len(AD)
+
+
+def test_desired_map_negative_value_rejected(tmp_path):
+    mapfile = tmp_path / "map.json"
+    mapfile.write_text(json.dumps({"https://t.com/p": -1}))
+    _, err, code = _run(["--desired", "2", "--language", "zh-CN", "--desired-map", str(mapfile)],
+                        stdin=_ledger_line())
+    assert code == 1
+    assert "non-negative" in err
+
+
+def test_desired_map_malformed_file_rejected(tmp_path):
+    mapfile = tmp_path / "map.json"
+    mapfile.write_text("{not json")
+    _, _, code = _run(["--desired", "2", "--language", "zh-CN", "--desired-map", str(mapfile)],
+                      stdin=_ledger_line())
+    assert code == 1
+
+
+def test_stale_after_floor_suppresses_old_verification():
+    line = _ledger_line(live_dofollow=0, liveness="live", verified_at="2020-01-01T00:00:00")
+    out, err, code = _run(["--desired", "2", "--language", "zh-CN", "--stale-after", "7"], stdin=line)
+    assert code == 0
+    assert _seeds(out) == []
+    assert "stale_floor=1" in err
+
+
+def test_row_with_embedded_u2028_not_split():
+    # json.dumps(ensure_ascii=False) leaves U+2028 raw; the shell must not split
+    # the row on it (str.splitlines would) — it stays one valid JSONL row.
+    obj = {"target_url": "https://t.com/p", "live_dofollow": 0, "liveness": "live",
+           "live_dofollow_platforms": [], "liveness_verified_at": "2026-05-29T00:00:00",
+           "note": "a b"}
+    out, _, code = _run(["--desired", "1", "--language", "zh-CN"],
+                        stdin=json.dumps(obj, ensure_ascii=False) + "\n")
+    assert code == 0
+    assert len(_seeds(out)) == 1

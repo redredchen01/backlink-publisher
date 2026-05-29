@@ -20,10 +20,7 @@ from backlink_publisher._util.jsonl import read_jsonl, write_jsonl
 from backlink_publisher.config import load_config
 from backlink_publisher.gap.engine import GapOptions, plan_gap
 from backlink_publisher.linkcheck.language import SUPPORTED_LANGUAGES
-
-# Mirror schema.py INPUT_SCHEMA enums; downstream validate-backlinks re-checks.
-_URL_MODES = {"A", "B", "C"}
-_PUBLISH_MODES = {"draft", "publish"}
+from backlink_publisher.schema import PUBLISH_MODES, URL_MODES
 
 
 def _load_desired_map(path: str) -> dict[str, int]:
@@ -34,11 +31,12 @@ def _load_desired_map(path: str) -> dict[str, int]:
     except (OSError, json.JSONDecodeError) as exc:
         emit_error(f"plan-gap: --desired-map could not be read: {exc}", exit_code=1)
     if not isinstance(data, dict) or not all(
-        isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)
+        isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool) and v >= 0
         for k, v in data.items()
     ):
         emit_error(
-            "plan-gap: --desired-map must be a JSON object of target_url -> integer",
+            "plan-gap: --desired-map must be a JSON object of target_url -> "
+            "non-negative integer",
             exit_code=1,
         )
     return data
@@ -86,9 +84,9 @@ def main(argv: list[str] | None = None) -> None:
         emit_error("plan-gap: --language is required (no silent default)", exit_code=1)
     if args.language not in SUPPORTED_LANGUAGES:
         emit_error(f"plan-gap: --language must be one of: {langs}", exit_code=1)
-    if args.url_mode not in _URL_MODES:
+    if args.url_mode not in URL_MODES:
         emit_error("plan-gap: --url-mode must be one of A, B, C", exit_code=1)
-    if args.publish_mode not in _PUBLISH_MODES:
+    if args.publish_mode not in PUBLISH_MODES:
         emit_error("plan-gap: --publish-mode must be one of draft, publish", exit_code=1)
     if args.stale_after is not None and args.stale_after < 0:
         emit_error("plan-gap: --stale-after must be a non-negative integer", exit_code=1)
@@ -103,8 +101,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # Buffer stdin so an empty ledger is a success (advisory + exit 0), not the
-    # strict read_jsonl exit-2. Malformed JSON still exits 2 (strict).
-    lines = sys.stdin.read().splitlines()
+    # strict read_jsonl exit-2. Malformed JSON still exits 2 (strict). Split on
+    # "\n" only (not str.splitlines) to match read_jsonl's line semantics and
+    # avoid splitting a row on embedded U+2028/U+2029 (json.dumps leaves them raw).
+    lines = sys.stdin.read().split("\n")
     if not any(line.strip() for line in lines):
         print("plan-gap: 0 targets to re-plan — empty ledger input.", file=sys.stderr)
         return
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> None:
         f"suppressed satisfied={counts.satisfied} stale={counts.suppressed_stale} "
         f"unverified={counts.suppressed_unverified} stale_floor={counts.suppressed_stale_floor} "
         f"failed={counts.failed} unknown_liveness={counts.unknown_liveness} "
-        f"channel_exhausted={counts.channel_exhausted}",
+        f"malformed={counts.malformed} channel_exhausted={counts.channel_exhausted}",
         file=sys.stderr,
     )
     if counts.channel_exhausted_targets:

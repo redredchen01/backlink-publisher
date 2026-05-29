@@ -138,3 +138,19 @@ def test_weakest_first_order_preserved():
 def test_deterministic_repeat():
     rows = [_row(live_dofollow=1, live_dofollow_platforms=["medium"])]
     assert _run(rows, desired=4)[0] == _run(list(rows), desired=4)[0]
+
+
+def test_missing_target_url_is_failsafe_not_raise():
+    # Valid-JSON row lacking target_url must be skipped + counted, never KeyError.
+    seeds, counts, _ = _run(
+        [{"liveness": "live", "live_dofollow": 0, "live_dofollow_platforms": [], "liveness_verified_at": FRESH}],
+        desired=2,
+    )
+    assert seeds == []
+    assert counts.malformed == 1
+
+
+def test_empty_or_nonstring_target_url_is_malformed():
+    seeds, counts, _ = _run([_row(target=""), {"target_url": 123, "liveness": "live"}], desired=2)
+    assert seeds == []
+    assert counts.malformed == 2

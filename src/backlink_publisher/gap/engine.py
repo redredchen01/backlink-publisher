@@ -25,10 +25,6 @@ from backlink_publisher.publishing.registry import dofollow_status
 #: Anything else is the fail-safe ``unknown_liveness`` outcome (R9) — never a raise.
 _KNOWN_LIVENESS = frozenset({"live", "stale", "failed", "unverified"})
 
-#: The exact field set a ``plan-backlinks`` seed row must carry (schema.py
-#: INPUT_SCHEMA_FIELDS). No extra keys are emitted.
-_SEED_FIELDS = ("target_url", "platform", "main_domain", "language", "url_mode", "publish_mode")
-
 
 @dataclass
 class GapOptions:
@@ -56,6 +52,9 @@ class SuppressionCounts:
     suppressed_stale_floor: int = 0
     failed: int = 0
     unknown_liveness: int = 0
+    #: Rows that are valid JSON objects but lack a usable ``target_url`` — the
+    #: engine skips them fail-safe (never raises) rather than crashing the pipe.
+    malformed: int = 0
     channel_exhausted: int = 0
     #: Named targets that have a real deficit but no remaining candidate platform.
     channel_exhausted_targets: list[str] = field(default_factory=list)
@@ -112,7 +111,16 @@ def plan_gap(
     as_of: str | None = None
 
     for row in rows:
+        # Fail-safe: a valid-JSON row missing target_url is skipped + counted,
+        # never a KeyError that would crash the pipe (R9 spirit / pure-engine).
+        target = row.get("target_url")
+        if not isinstance(target, str) or not target:
+            counts.malformed += 1
+            continue
+
         verified_at = row.get("liveness_verified_at")
+        # as_of: latest verification stamp seen (advisory). Relies on ISO-8601
+        # lexical order == chronological order (the build_ledger contract).
         if isinstance(verified_at, str) and (as_of is None or verified_at > as_of):
             as_of = verified_at
 
@@ -146,7 +154,6 @@ def plan_gap(
             continue
 
         # --- Deficit (R3).
-        target = row["target_url"]
         desired = opts.desired_map.get(target, opts.desired)
         deficit = max(0, desired - live_dofollow)
         if deficit == 0:
