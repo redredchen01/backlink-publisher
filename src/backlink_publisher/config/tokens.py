@@ -9,8 +9,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-#: All known credential files, in scan order. Single source of truth for both
-#: the run-start baseline snapshot and the per-row drift re-check.
+#: All token-FILE-backed credential platforms, in scan order. Single source of
+#: truth for both the run-start baseline snapshot and the per-row drift re-check.
+#: Deliberately a SUBSET of the adapter registry — platforms that authenticate by
+#: browser session or paste-blob (e.g. livejournal, mastodon, rentry, substack,
+#: telegraph, txtfyi, velog) keep no token_rev file, so there is nothing to
+#: drift-check. Add an entry here whenever a NEW platform gains a save_*_token.
 _TOKEN_FILES: list[tuple[str, str]] = [
     ("blogger", "blogger-token.json"),
     ("medium", "medium-token.json"),
