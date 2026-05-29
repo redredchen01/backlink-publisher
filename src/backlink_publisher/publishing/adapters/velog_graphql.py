@@ -570,6 +570,13 @@ class VelogGraphQLAdapter(Publisher):
                 raise ExternalServiceError(
                     "velog GraphQL endpoint unreachable"
                 ) from None
+            except _TransientHTTPError as exc:
+                # 429 retried to exhaustion. retry_transient_call re-raises the
+                # _TransientHTTPError (not a RequestException), so it would
+                # otherwise escape uncaught — mirror medium_api and convert it.
+                raise ExternalServiceError(
+                    f"velog writePost returned HTTP {exc.status_code} after retries"
+                ) from None
 
             if not resp.ok:
                 raise ExternalServiceError(
@@ -605,6 +612,11 @@ class VelogGraphQLAdapter(Publisher):
                 except requests.RequestException:
                     raise ExternalServiceError(
                         "velog GraphQL endpoint unreachable on retry"
+                    ) from None
+                except _TransientHTTPError as exc:
+                    raise ExternalServiceError(
+                        f"velog writePost returned HTTP {exc.status_code} "
+                        "after retries (on retry)"
                     ) from None
 
                 if not resp2.ok:

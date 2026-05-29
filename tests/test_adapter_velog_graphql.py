@@ -298,6 +298,16 @@ def _mock_null_response():
     return resp
 
 
+def _mock_429_response():
+    """HTTP 429 — a pre-create rate-limit rejection. _do_post raises
+    _TransientHTTPError(429) for this, which IS retryable (the server rejected
+    the request before creating anything)."""
+    resp = MagicMock()
+    resp.ok = False
+    resp.status_code = 429
+    return resp
+
+
 class TestVelogGraphQLAdapterPublish:
     def _patch_lock_and_count(self, tmp_path):
         """Context manager patches that bypass fcntl locking for tests."""
@@ -387,6 +397,69 @@ class TestVelogGraphQLAdapterPublish:
                     adapter.publish(PAYLOAD, mode="publish", config=config)
 
         assert sess.post.call_count == 1  # create mutation sent exactly once
+
+    @pytest.mark.parametrize("exc_name", ["Timeout", "ConnectionError"])
+    def test_silent_drop_retry_network_error_not_retried(self, tmp_path, exc_name):
+        """The silent-drop RE-POST is also a non-idempotent create. If it hits a
+        network error, it too is sent exactly once (no retry → no duplicate).
+        First call returns null (silent-drop), the re-post raises the network
+        error: total 2 posts (1 null + 1 failed-once), then ExternalServiceError."""
+        config = _make_config(tmp_path)
+        adapter = VelogGraphQLAdapter()
+
+        with self._patch_lock_and_count(tmp_path):
+            with patch("requests.Session") as MockSession:
+                sess = MagicMock()
+                MockSession.return_value = sess
+                sess.post.side_effect = [
+                    _mock_null_response(),           # first: silent-drop
+                    getattr(requests, exc_name)("net"),  # re-post: network error
+                    _mock_success_response(),        # duplicate that MUST NOT send
+                ]
+                with pytest.raises(ExternalServiceError, match="unreachable"):
+                    adapter.publish(PAYLOAD, mode="publish", config=config)
+
+        assert sess.post.call_count == 2  # null + one failed re-post, no retry
+
+    def test_write_post_429_retried_and_recovers(self, tmp_path):
+        """Parity with medium: a 429 on writePost IS retried (pre-create
+        rejection), and the second attempt succeeds."""
+        config = _make_config(tmp_path)
+        adapter = VelogGraphQLAdapter()
+
+        with self._patch_lock_and_count(tmp_path):
+            with patch("requests.Session") as MockSession:
+                sess = MagicMock()
+                MockSession.return_value = sess
+                sess.post.side_effect = [
+                    _mock_429_response(),
+                    _mock_success_response(),
+                ]
+                with patch(
+                    "backlink_publisher.publishing.adapters.velog_graphql.verify_link_attributes",
+                    return_value={"verification": "ok"},
+                ):
+                    result = adapter.publish(PAYLOAD, mode="publish", config=config)
+
+        assert result.status == "published"
+        assert sess.post.call_count == 2  # 429 retried, recovered
+
+    def test_write_post_429_exhausted_raises_external_service_error(self, tmp_path):
+        """429 on every attempt → retry exhausts → retry_transient_call re-raises
+        _TransientHTTPError. It must surface as ExternalServiceError (the explicit
+        except arm), not escape uncaught."""
+        config = _make_config(tmp_path)
+        adapter = VelogGraphQLAdapter()
+
+        with self._patch_lock_and_count(tmp_path):
+            with patch("requests.Session") as MockSession:
+                sess = MagicMock()
+                MockSession.return_value = sess
+                sess.post.return_value = _mock_429_response()
+                with pytest.raises(ExternalServiceError, match="after retries"):
+                    adapter.publish(PAYLOAD, mode="publish", config=config)
+
+        assert sess.post.call_count == 3  # MAX_ATTEMPTS, then ExternalServiceError
 
     def test_null_after_retry_probe_dead_raises_auth_expired(self, tmp_path):
         """Both writePost calls return null; probe says cookie dead → AuthExpiredError."""
