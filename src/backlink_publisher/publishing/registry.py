@@ -233,6 +233,8 @@ _AUTH_TYPE_BY_PLATFORM: dict[str, str] = {
     "ghpages": "token_fields", "notion": "token_fields",
     "wordpresscom": "token_fields", "hashnode": "token_fields",
     "tumblr": "token_fields",
+    # hatena: api_key + hatena_id + blog_id (secret + 2 config fields)
+    "hatena": "token_fields",
     # PASTE-BLOB — pasted {"cookies":[...]} JSON (cookie-export)
     "substack": "paste_blob",
     # USERPASS — username + password (stored server-side)

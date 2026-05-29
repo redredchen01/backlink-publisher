@@ -24,7 +24,7 @@ from backlink_publisher.publishing.registry import (
 _EXPECTED_BUCKETS = {
     "anon": {"rentry", "telegraph", "txtfyi"},
     "token": {"devto", "writeas"},
-    "token_fields": {"ghpages", "hashnode", "notion", "tumblr", "wordpresscom"},
+    "token_fields": {"ghpages", "hashnode", "hatena", "notion", "tumblr", "wordpresscom"},
     "paste_blob": {"substack"},
     "userpass": {"livejournal"},
     "oauth": {"blogger"},
